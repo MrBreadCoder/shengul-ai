@@ -11,15 +11,18 @@ Phases are ordered so each one produces something demonstrable and de-risks the 
 
 **Goal:** an authenticated Next.js app on Vercel + Supabase, with the full schema and mailbox connectivity, but no pipeline yet.
 
-**Implementation plan:** `docs/superpowers/plans/2026-07-18-p0-foundations.md` (11 tasks, TDD, bite-sized steps). Not yet executed.
+**Implementation plan:** `docs/superpowers/plans/2026-07-18-p0-foundations.md` (11 tasks, TDD, bite-sized steps).
+**Progress:** Tasks 1–6 of 11 done (inline execution, this environment has no Docker/container runtime, so nothing has been verified against a live Supabase project yet — see caveat below). Tasks 7–11 (QStash hello cron, mailbox providers + OAuth routes, `/settings` demo, Vercel deploy) not started.
 
-- [ ] Next.js app scaffolded, deployed to Vercel.
-- [ ] Supabase project: Postgres schema for all tables in `architecture.md §5`.
-- [ ] Supabase Auth + **Row-Level Security** policies (per-`client_id` isolation; operator role spans clients).
-- [ ] Mailbox OAuth: connect a Gmail account (Gmail API) and an Outlook account (MS Graph); store tokens in `mailboxes`; send a test email from each.
-- [ ] `events` audit-log helper used everywhere.
-- [ ] QStash configured; a "hello" cron + signed-request verification proven end-to-end.
-- [ ] Secrets management (Brightdata, Gemini, Emailable, QStash, OAuth) in place.
+- [x] Next.js app scaffolded (strict TS, Vitest, ESLint). **Not yet deployed to Vercel** (Task 11).
+- [x] Postgres schema written for all tables in `architecture.md §5` **+ `app_users`** (user→client/operator mapping, not in §5 — added because RLS needs it). Migration files complete; **not applied to any live database**.
+- [x] RLS policies + helper functions (`is_operator()`, `current_client_id()`) written for per-`client_id` isolation with operator bypass. Isolation integration test written; **not run against a live database** — confirmed correctly wired (fails on a live network/data error, not a code defect) but not confirmed passing.
+- [ ] Mailbox OAuth (Gmail + Outlook), token storage, test send — not started (Tasks 9–10).
+- [x] `events` audit-log helper (`logEvent`/`insertEvent`) built and unit-tested. Not yet wired into any route (nothing exists yet to call it from — Task 7 is the first caller).
+- [ ] QStash hello cron + signed-request verification — not started (Task 7).
+- [x] Secrets management: every secret (Brightdata, Gemini, Emailable, QStash, OAuth, Supabase) declared in a Zod-validated `env` module + `.env.example`.
+
+**Known caveat:** this execution environment has no Docker/Colima/Podman and no local Postgres, so `supabase start`/`db push`/`gen types` cannot run here. The schema and RLS migrations (`supabase/migrations/0001…`, `0002…`) are hand-verified by inspection (SQL dependency order, FK targets) and `src/types/database.ts` is hand-authored to match rather than generated. **Before Task 7+, or before trusting P0 as done:** run `pnpm exec supabase gen types typescript --local` (or against a hosted project) and diff it against the current `src/types/database.ts`; then run `pnpm test:integration` against that live project and confirm the RLS test passes.
 
 **Demo:** log in as an operator, connect a Gmail + Outlook mailbox, send a test email from each, see the event logged.
 
