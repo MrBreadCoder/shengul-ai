@@ -12,12 +12,12 @@ Phases are ordered so each one produces something demonstrable and de-risks the 
 **Goal:** an authenticated Next.js app on Vercel + Supabase, with the full schema and mailbox connectivity, but no pipeline yet.
 
 **Implementation plan:** `docs/superpowers/plans/2026-07-18-p0-foundations.md` (11 tasks, TDD, bite-sized steps).
-**Progress:** Tasks 1–9 of 11 done (inline execution, this environment has no Docker/container runtime, so nothing has been verified against a live Supabase project yet — see caveat below). Tasks 10–11 (Outlook provider + OAuth routes + `/settings` demo, Vercel deploy) not started.
+**Progress:** Tasks 1–10 of 11 done (inline execution, this environment has no Docker/container runtime, so nothing has been verified against a live Supabase project yet — see caveat below). Task 11 (Vercel deploy + real signed QStash proof) not started — it's the only remaining P0 task.
 
 - [x] Next.js app scaffolded (strict TS, Vitest, ESLint). **Not yet deployed to Vercel** (Task 11).
 - [x] Postgres schema written for all tables in `architecture.md §5` **+ `app_users`** (user→client/operator mapping, not in §5 — added because RLS needs it). Migration files complete; **not applied to any live database**.
 - [x] RLS policies + helper functions (`is_operator()`, `current_client_id()`) written for per-`client_id` isolation with operator bypass. Isolation integration test written; **not run against a live database** — confirmed correctly wired (fails on a live network/data error, not a code defect) but not confirmed passing.
-- [ ] Mailbox OAuth (Gmail + Outlook), token storage, test send — `MailboxProvider` interface + `fetchJson` + DB layer (Task 8) and Gmail provider (OAuth exchange, token refresh, send; Task 9) done. Outlook provider + OAuth routes + `/settings` demo not started (Task 10). Nothing exercised against real Google credentials — unit-tested with mocked HTTP only.
+- [x] Mailbox OAuth (Gmail + Outlook), token storage, test send: `MailboxProvider` interface, Gmail + Outlook implementations, registry, OAuth connect/callback routes, send-test-email route, and `/settings` demo page all built (Tasks 8–10). Unit-tested with mocked HTTP only — **the actual manual demo (real login, real OAuth consent, real send) has not been run**; needs a live Supabase project and real Google/Microsoft OAuth app registrations, neither available here.
 - [x] `events` audit-log helper (`logEvent`/`insertEvent`) built and unit-tested; wired into `/api/cron/hello` (Task 7).
 - [x] QStash hello cron + signed-request verification: `verifyQstashSignature`, `publishJson`, `scheduleCron` built; unsigned-request rejection (401) verified locally against a running dev server. Real signed end-to-end proof needs a public deployed URL — completed in Task 11 after deploy.
 - [x] Secrets management: every secret (Brightdata, Gemini, Emailable, QStash, OAuth, Supabase) declared in a Zod-validated `env` module + `.env.example`.
