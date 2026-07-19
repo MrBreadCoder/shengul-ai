@@ -4,7 +4,10 @@ import { resolve } from 'node:path'
 export default defineConfig({
   test: {
     environment: 'node',
+    // *.integration.test.ts requires a live Supabase project (local `supabase start`
+    // or hosted) and is run separately via `pnpm test:integration`.
     include: ['src/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/*.integration.test.ts'],
     coverage: { provider: 'v8', reporter: ['text', 'html'] },
     // Stub values so importing `@/lib/env` (module-scope `loadEnv(process.env)`)
     // never crashes a unit test. Never real secrets — just satisfies the schema shape.

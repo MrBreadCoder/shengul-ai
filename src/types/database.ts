@@ -1,4 +1,5 @@
-// Hand-authored to match supabase/migrations/0001_initial_schema.sql exactly.
+// Hand-authored to match supabase/migrations/0001_initial_schema.sql and
+// 0002_rls_policies.sql exactly.
 // No live Postgres connection was available to run `supabase gen types` — this
 // file must be regenerated (`pnpm exec supabase gen types typescript --local`)
 // and diffed against this version the first time a local/hosted DB exists.
@@ -26,6 +27,7 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['clients']['Insert']>
+        Relationships: []
       }
       app_users: {
         Row: {
@@ -41,6 +43,15 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['app_users']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'app_users_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
       }
       campaigns: {
         Row: {
@@ -74,6 +85,15 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['campaigns']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'campaigns_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
       }
       cases: {
         Row: {
@@ -99,6 +119,22 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['cases']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'cases_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'cases_campaign_id_fkey'
+            columns: ['campaign_id']
+            isOneToOne: false
+            referencedRelation: 'campaigns'
+            referencedColumns: ['id']
+          },
+        ]
       }
       leads: {
         Row: {
@@ -140,6 +176,29 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['leads']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'leads_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'leads_campaign_id_fkey'
+            columns: ['campaign_id']
+            isOneToOne: false
+            referencedRelation: 'campaigns'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'leads_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+        ]
       }
       case_knowledge: {
         Row: {
@@ -165,6 +224,22 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['case_knowledge']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'case_knowledge_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'case_knowledge_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+        ]
       }
       emails: {
         Row: {
@@ -200,6 +275,29 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['emails']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'emails_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'emails_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'emails_lead_id_fkey'
+            columns: ['lead_id']
+            isOneToOne: false
+            referencedRelation: 'leads'
+            referencedColumns: ['id']
+          },
+        ]
       }
       sequences: {
         Row: {
@@ -227,6 +325,29 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['sequences']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'sequences_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'sequences_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'sequences_lead_id_fkey'
+            columns: ['lead_id']
+            isOneToOne: false
+            referencedRelation: 'leads'
+            referencedColumns: ['id']
+          },
+        ]
       }
       knowledge_requests: {
         Row: {
@@ -256,6 +377,36 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['knowledge_requests']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'knowledge_requests_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'knowledge_requests_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'knowledge_requests_lead_id_fkey'
+            columns: ['lead_id']
+            isOneToOne: false
+            referencedRelation: 'leads'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'knowledge_requests_email_id_fkey'
+            columns: ['email_id']
+            isOneToOne: false
+            referencedRelation: 'emails'
+            referencedColumns: ['id']
+          },
+        ]
       }
       mailboxes: {
         Row: {
@@ -287,6 +438,15 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['mailboxes']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'mailboxes_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
       }
       suppressions: {
         Row: {
@@ -304,6 +464,15 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['suppressions']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'suppressions_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
       }
       events: {
         Row: {
@@ -325,10 +494,35 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['events']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'events_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'events_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+        ]
       }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      is_operator: {
+        Args: Record<string, never>
+        Returns: boolean
+      }
+      current_client_id: {
+        Args: Record<string, never>
+        Returns: string
+      }
+    }
     Enums: {
       user_role: 'operator' | 'client'
       client_status: 'active' | 'paused' | 'archived'
