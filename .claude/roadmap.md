@@ -743,3 +743,75 @@ Closes every failing item from the AEO audit of `/` (Findable 13/25, Quotable
   `next start`: `/robots.txt`, `/sitemap.xml`, `/llms.txt`, `/opengraph-image`
   all 200 (the last a real 1200×630 PNG), one `<h1>`, and og:image + canonical
   present on `/`. Not verified: live crawler re-score (needs a deploy).
+
+---
+
+## Legal documents — rewritten and published (2026-07-25) DONE
+
+**Problem found:** `docs/legal/` held three Termly-generated `.txt` files describing a
+different product entirely — "Founderside AI, an AI-powered startup co-founder", with
+Stripe billing, a 14-day free trial, Google Analytics, social login, a public forum and
+Flash cookies. None of that exists in this system. The files were also never wired into
+the app, so nothing linked to them and no route served them.
+
+**What replaced them.** Copy now lives as typed data in `src/lib/legal/documents/` and is
+served at `/legal/<slug>`; `docs/legal/README.md` records the move and the factual claims
+each document makes about the system. Seven documents, three of which did not exist before:
+
+- [x] **Privacy Notice** (`privacy-policy`) — rewritten around the fact that most personal
+  data here belongs to prospects, not account holders. Real subprocessor list, a per-table
+  retention schedule, a corrected CCPA category table (the old one marked Identifiers,
+  Customer Records, Internet Activity and Professional Information all "NO"), GDPR legal
+  bases with the legitimate-interests balancing recorded, and the **Google API Limited Use
+  disclosure** that `gmail.readonly` requires for OAuth verification.
+- [x] **If you received an email from us** (`outreach-privacy-notice`) — NEW. The Article 14
+  notice for people whose data came from Apollo rather than from themselves. Leads with how
+  to make it stop, because that is what the reader came for.
+- [x] **Cookie Notice** (`cookie-policy`) — cut to the four cookies actually set (Supabase
+  session, PKCE verifier, two OAuth state nonces). The old one documented a Google Analytics
+  install and an advertising stack that do not exist, and claimed email tracking pixels the
+  product deliberately does not send.
+- [x] **Terms of Service** (`terms-of-service`) — consumer template converted to a B2B
+  managed-services agreement. Removed: PayPal/card payment terms, subscriptions and free
+  trial, the perpetual irrevocable licence over user "contributions" (which would have
+  covered clients' confidential knowledge-base uploads), the "personal, non-commercial use"
+  restriction, and the unfilled blank in the arbitration clause (`___ days` → 30, AAA
+  Commercial rather than Consumer rules). Added: deliverability disclaimer, AI-output terms,
+  IP infringement indemnity, confidentiality, data export on termination, and a fee cap of
+  12 months' fees rather than $100.
+- [x] **Acceptable Use Policy** (`acceptable-use-policy`) — NEW, incorporated into the terms.
+  Anti-spam obligations, lawful-basis representation, opt-out handling, sending-conduct rules
+  and enforcement. Without it every recipient-facing obligation defaulted to us.
+- [x] **Data Processing Addendum** (`data-processing-addendum`) — NEW. Article 28 terms,
+  SCC Module Two elections, Annex I/II content inline, CCPA service-provider certification.
+- [x] **Subprocessors** (`subprocessors`) — NEW. Supabase, Vercel, Apollo, Emailable,
+  Bright Data, Google, Microsoft, Upstash — the old policy named only Stripe and Google
+  Analytics, neither of which is used.
+
+**Wiring.**
+- [x] `/legal` index + `/legal/[slug]` under `(marketing)`, prerendered via
+  `generateStaticParams` with `dynamicParams = false`, plus `loading.tsx` / `error.tsx`.
+- [x] **Middleware fix:** `/legal` and `/legal/*` added to the public paths. Without it an
+  anonymous visitor — the entire audience for the outreach notice — was redirected to
+  `/login`. The predicate moved to `src/lib/auth/public-paths.ts` so the app's public
+  surface is unit-tested rather than read carefully.
+- [x] Footer carries all seven documents; its `#how` / `#privacy` anchors became `/#how` /
+  `/#privacy` so they still work from a legal page.
+- [x] Sitemap lists `/legal` and all seven documents, each with its own `lastModified`.
+- [x] Contact details (entity, address, phone, support address) carried over **verbatim** in
+  `src/lib/legal/contact.ts` — deliberately untouched.
+
+**Tests:** `registry.test.ts` fails the build on a duplicate slug, a ragged table row, an
+out-of-window meta description, a duplicate section anchor, or a cross-reference to a
+document that does not exist. Plus `linkify`, `format-date` and `public-paths` suites.
+
+**Verified:** `tsc --noEmit` clean, `eslint` clean, 120 test files / 1063 tests green,
+`next build` succeeds with all 8 legal pages prerendered, and against `next start`:
+`/legal` and every document 200 **anonymously**, an unknown slug 404, `/crm` still 307 to
+`/login`, sitemap lists all 8 URLs, cross-document links and the contact block render.
+
+**Not done — needs a human:** the legal positions (legitimate-interests basis, arbitration
+clause, liability cap, SCC elections) need counsel review before they are relied on. Open
+question flagged to the operator: the documents still identify the site as
+`foundersideai.com`, because the contact addresses are on that domain and contact details
+were out of scope — confirm whether that is still the operating domain for Shengul AI.

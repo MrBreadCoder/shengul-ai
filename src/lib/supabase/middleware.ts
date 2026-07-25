@@ -2,6 +2,7 @@ import { createServerClient as createSsrClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { Database } from '@/types/database'
 import { env } from '@/lib/env'
+import { isPublicPath } from '@/lib/auth/public-paths'
 
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request })
@@ -22,14 +23,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const { data } = await supabase.auth.getUser()
   const isAuthed = data.user !== null
   const { pathname } = request.nextUrl
-  // `/` is the public marketing page, matched exactly — `startsWith('/')` would
-  // make the entire app public.
-  const isPublic =
-    pathname === '/' ||
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/api/cron') ||
-    pathname.startsWith('/auth/callback')
-  if (!isAuthed && !isPublic) {
+  if (!isAuthed && !isPublicPath(pathname)) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
