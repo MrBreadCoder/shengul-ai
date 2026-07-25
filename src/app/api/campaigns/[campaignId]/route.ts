@@ -1,0 +1,58 @@
+import { NextResponse } from 'next/server'
+import { z } from 'zod'
+import { requireUser } from '@/lib/auth/require-user'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getCampaignById, deleteCampaign } from '@/lib/db/campaigns'
+import { logEvent } from '@/lib/events/log-event'
+import { isAppError } from '@/lib/errors/app-error'
+
+export const runtime = 'nodejs'
+
+const deleteSchema = z.object({
+  confirmName: z.string().min(1),
+})
+
+// Deletes the campaign row, cascading (via FK) to every case, lead, email,
+// and sequence under it. Irreversible.
+export async function DELETE(request: Request, context: { params: Promise<{ campaignId: string }> }) {
+  const { appUser } = await requireUser()
+  if (appUser.role !== 'operator') {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  const { campaignId } = await context.params
+  const admin = createAdminClient()
+  const campaign = await getCampaignById(admin, campaignId)
+  if (!campaign) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
+
+  try {
+    const body = deleteSchema.parse(await request.json())
+    if (body.confirmName !== campaign.name) {
+      return NextResponse.json({ error: 'name_mismatch' }, { status: 400 })
+    }
+
+    await deleteCampaign(admin, campaignId)
+
+    try {
+      await logEvent({
+        clientId: campaign.client_id,
+        actor: `human:${appUser.id}`,
+        type: 'campaign.deleted',
+        payload: { campaignId, name: campaign.name },
+      })
+    } catch {
+      // Audit logging is best-effort — the delete already succeeded, and
+      // campaignId no longer references a real row, but events.client_id
+      // still references a real client, so this insert is still valid.
+    }
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
+    }
+    const code = isAppError(error) ? error.code : 'unknown'
+    return NextResponse.json({ error: code }, { status: 500 })
+  }
+}

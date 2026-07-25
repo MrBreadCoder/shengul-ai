@@ -1,0 +1,14 @@
+-- SMTP/IMAP mailbox provider
+-- (docs/superpowers/specs/2026-07-24-smtp-mailbox-design.md).
+--
+-- Credentials for an 'smtp' mailbox live in the same encrypted `mailboxes.oauth`
+-- jsonb as OAuth tokens, tagged with kind: 'smtp'. No column is added: the
+-- column name is a historical one that now means "mailbox credentials", and
+-- renaming it would touch both OAuth callbacks and the whole db layer for no
+-- behavioral gain.
+--
+-- ALTER TYPE ... ADD VALUE is permitted inside a transaction on PG12+ so long
+-- as the new value is not *used* in the same transaction — nothing here
+-- references it, so this is safe under `supabase db push`. This is the only
+-- statement in the file for exactly that reason.
+alter type mailbox_provider add value if not exists 'smtp';

@@ -13,8 +13,13 @@ export async function createServerClient(): Promise<SupabaseClient<Database>> {
       cookies: {
         getAll: () => cookieStore.getAll(),
         setAll: (toSet) => {
-          for (const { name, value, options } of toSet) {
-            cookieStore.set(name, value, options)
+          try {
+            for (const { name, value, options } of toSet) {
+              cookieStore.set(name, value, options)
+            }
+          } catch {
+            // Called from a Server Component — cookies are read-only there.
+            // Safe to ignore: middleware.ts refreshes and persists the session on every request.
           }
         },
       },

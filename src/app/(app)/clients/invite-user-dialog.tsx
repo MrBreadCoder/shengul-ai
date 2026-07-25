@@ -1,0 +1,126 @@
+'use client'
+
+import { useState } from 'react'
+import { toast } from 'sonner'
+import { Copy, EnvelopeSimple, LinkSimple } from '@phosphor-icons/react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+
+type InviteState =
+  | { status: 'idle' }
+  | { status: 'submitting' }
+  | { status: 'error'; message: string }
+  | { status: 'success'; link: string }
+
+export function InviteUserDialog({ clientId }: { clientId: string }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const [email, setEmail] = useState('')
+  const [state, setState] = useState<InviteState>({ status: 'idle' })
+
+  async function onSubmit(event: React.FormEvent): Promise<void> {
+    event.preventDefault()
+    setState({ status: 'submitting' })
+    try {
+      const res = await fetch(`/api/clients/${clientId}/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const json: unknown = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const message =
+          typeof json === 'object' && json !== null && 'error' in json
+            ? String((json as { error: unknown }).error)
+            : 'Could not create the invite.'
+        setState({ status: 'error', message })
+        return
+      }
+      const link =
+        typeof json === 'object' && json !== null && 'link' in json ? String((json as { link: unknown }).link) : ''
+      setState({ status: 'success', link })
+    } catch {
+      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+    }
+  }
+
+  async function copyLink(link: string): Promise<void> {
+    await navigator.clipboard.writeText(link)
+    toast.success('Link copied')
+  }
+
+  function onOpenChange(next: boolean): void {
+    setOpen(next)
+    if (!next) {
+      setEmail('')
+      setState({ status: 'idle' })
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          <EnvelopeSimple size={13} weight="light" />
+          Invite user
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create an account-creation link</DialogTitle>
+        </DialogHeader>
+
+        {state.status === 'success' ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-muted-foreground text-sm">
+              Send this link to the client. It lets them set their own password and sign in — it is not reusable
+              once they do.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input readOnly value={state.link} className="text-xs" />
+              <Button type="button" variant="outline" size="sm" onClick={() => copyLink(state.link)}>
+                <Copy size={13} weight="light" />
+                Copy
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`invite-email-${clientId}`} className="text-xs">
+                Client&apos;s email
+              </Label>
+              <Input
+                id={`invite-email-${clientId}`}
+                type="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="person@client.com"
+              />
+            </div>
+            {state.status === 'error' ? (
+              <p role="alert" className="text-destructive text-xs">
+                {state.message}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button type="submit" size="sm" disabled={state.status === 'submitting'}>
+                <LinkSimple size={13} weight="light" />
+                {state.status === 'submitting' ? 'Generating…' : 'Generate link'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}

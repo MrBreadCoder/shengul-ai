@@ -3,12 +3,22 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { outlookProvider } from '@/lib/mailbox/outlook-provider'
 import { insertMailbox } from '@/lib/db/mailboxes'
-import { getOrCreateOperatorClient } from '@/lib/db/clients'
+import { getOrCreateOperatorClient, getClientById } from '@/lib/db/clients'
 import { logEvent } from '@/lib/events/log-event'
 import { env } from '@/lib/env'
 import { isAppError } from '@/lib/errors/app-error'
+import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
+import { warmupInsertFields } from '@/lib/mailbox/warmup'
+import { timingSafeEqualString } from '@/lib/auth/timing-safe-equal'
+import { OUTLOOK_OAUTH_STATE_COOKIE } from '../state-cookie'
 
 export const runtime = 'nodejs'
+
+function redirectAndClearState(path: string): NextResponse {
+  const response = NextResponse.redirect(new URL(path, env.APP_URL))
+  response.cookies.delete(OUTLOOK_OAUTH_STATE_COOKIE)
+  return response
+}
 
 export async function GET(request: Request) {
   const { appUser } = await requireUser()
@@ -17,27 +27,43 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
-  if (!code || state !== appUser.id) {
-    return NextResponse.redirect(new URL('/settings?error=oauth', env.APP_URL))
+  // NextRequest's typed cookie jar isn't available on the plain Request this
+  // handler receives; read the state cookie directly off the header instead.
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const expectedState = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${OUTLOOK_OAUTH_STATE_COOKIE}=`))
+    ?.slice(OUTLOOK_OAUTH_STATE_COOKIE.length + 1)
+
+  // state is a single-use random nonce minted by /connect and stored in an
+  // httpOnly cookie — this is the actual CSRF check. Without a match, this
+  // callback either wasn't initiated by this browser or is a replay.
+  if (!code || !state || !expectedState || !timingSafeEqualString(state, expectedState)) {
+    return redirectAndClearState('/settings?error=oauth')
   }
   try {
     const exchange = await outlookProvider.exchangeCode(code)
     const admin = createAdminClient()
     const clientId = await getOrCreateOperatorClient(admin)
+    // A newly connected mailbox starts at the client's configured ramp. Clients
+    // whose addresses are already warm are set to 'none' and skip the ramp.
+    const client = await getClientById(admin, clientId)
     const mailbox = await insertMailbox(admin, {
       client_id: clientId,
       provider: 'outlook',
       email_address: exchange.emailAddress,
       display_name: exchange.displayName,
-      oauth: { ...exchange.tokens },
+      oauth: encryptMailboxTokens(exchange.tokens),
+      ...warmupInsertFields(client?.warmup_profile ?? 'standard', new Date()),
     })
     await logEvent({
       clientId, actor: `human:${appUser.id}`, type: 'mailbox.connected',
       payload: { mailboxId: mailbox.id, provider: 'outlook', emailAddress: exchange.emailAddress },
     })
-    return NextResponse.redirect(new URL('/settings?connected=outlook', env.APP_URL))
+    return redirectAndClearState('/settings?connected=outlook')
   } catch (error) {
     const reason = isAppError(error) ? error.code : 'unknown'
-    return NextResponse.redirect(new URL(`/settings?error=${reason}`, env.APP_URL))
+    return redirectAndClearState(`/settings?error=${reason}`)
   }
 }

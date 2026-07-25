@@ -1,0 +1,3 @@
+email,password,email_confirm
+dev@aib2b.test,devpassword123,true
+client@aib2b.test,devpassword123,true

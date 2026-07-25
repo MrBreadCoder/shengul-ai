@@ -1,50 +1,67 @@
+import type { Metadata } from 'next'
+import { Envelope } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServerClient } from '@/lib/supabase/server'
+import { listMailboxesForViewer } from '@/lib/db/mailboxes'
+import { PageHeader, Section } from '@/components/page-header'
+import { EmptyState } from '@/components/empty-state'
 import { ConnectButtons } from './connect-buttons'
 import { MailboxRow } from './mailbox-row'
 
 export const dynamic = 'force-dynamic'
 
-export default async function SettingsPage() {
+export const metadata: Metadata = { title: 'Settings' }
+
+export default async function SettingsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
-  const admin = createAdminClient()
-  const { data: mailboxes } = await admin
-    .from('mailboxes')
-    .select('id, provider, email_address, display_name, health, created_at')
-    .order('created_at', { ascending: false })
+  // RLS-scoped on purpose. The admin client would bypass `mailboxes_select` and
+  // show a client-role user every other client's connected addresses.
+  const supabase = await createServerClient()
+  const connected = await listMailboxesForViewer(supabase)
 
   return (
-    <main style={{ maxWidth: 640, margin: '48px auto', fontFamily: 'system-ui' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Settings</h1>
-        <form action="/api/auth/signout" method="post">
-          <button type="submit">Sign out</button>
-        </form>
-      </header>
-      <p>Signed in as {appUser.role}.</p>
+    <div className="flex max-w-3xl flex-col gap-10">
+      <PageHeader
+        title="Settings"
+        description={`Signed in as ${appUser.role}. Mailboxes connected here are what the agent sends from.`}
+      />
 
-      <section>
-        <h2>Connect a mailbox</h2>
+      <Section title="Connect a mailbox">
         <ConnectButtons />
-      </section>
+      </Section>
 
-      <section>
-        <h2>Connected mailboxes</h2>
-        {(!mailboxes || mailboxes.length === 0) && <p>No mailboxes connected yet.</p>}
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {mailboxes?.map((m) => (
-            <li key={m.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 8 }}>
-              <MailboxRow
-                id={m.id}
-                provider={m.provider}
-                emailAddress={m.email_address}
-                displayName={m.display_name}
-                health={m.health}
-              />
-            </li>
-          ))}
-        </ul>
-      </section>
-    </main>
+      <Section
+        title="Connected mailboxes"
+        aside={connected.length > 0 ? `${connected.length} connected` : undefined}
+      >
+        {connected.length === 0 ? (
+          <EmptyState
+            icon={Envelope}
+            title="No mailboxes connected"
+            description="The agent cannot send until at least one mailbox is connected and assigned to a campaign."
+          />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {connected.map((mailbox) => (
+              <li key={mailbox.id}>
+                <MailboxRow
+                  id={mailbox.id}
+                  provider={mailbox.provider}
+                  emailAddress={mailbox.email_address}
+                  displayName={mailbox.display_name}
+                  health={mailbox.health}
+                  healthReason={mailbox.health_reason}
+                  warmupProfile={mailbox.warmup_profile}
+                  warmupStartedAt={mailbox.warmup_started_at}
+                  dailyCap={mailbox.daily_cap}
+                  sentToday={mailbox.sent_today}
+                  viewerRole={appUser.role}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </div>
   )
 }

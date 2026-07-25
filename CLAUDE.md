@@ -4,13 +4,13 @@ CURRENT YEAR İS 2026
 
 
 
-@.claude/rules/QUALITY.md
-@.claude/rules/BEHAVIORS.md
-@.claude/rules/SELF_REVIEW.md
-@.claude/rules/ANTI_LAZY.md
+@.claude/QUALITY.md
+@.claude/BEHAVIORS.md
+@.claude/SELF_REVIEW.md
+@.claude/ANTI_LAZY.md
 
 
-UPDATE THE roadmap.md ERYTIME YOU MAKE A PROGRESS
+UPDATE THE `.claude/roadmap.md` EVERY TIME YOU MAKE PROGRESS
 
 ## REMINDER (recency anchor)
 - Write COMPLETE code. No placeholders. No truncation. No half-implementations.

@@ -2,10 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { getMailboxProvider } from './registry'
 
 describe('getMailboxProvider', () => {
-  it('should return the gmail provider when asked for gmail', () => {
-    expect(getMailboxProvider('gmail').provider).toBe('gmail')
-  })
-  it('should return the outlook provider when asked for outlook', () => {
-    expect(getMailboxProvider('outlook').provider).toBe('outlook')
+  it.each(['gmail', 'outlook', 'smtp'] as const)(
+    'should resolve a provider whose name matches when given %s',
+    (name) => {
+      expect(getMailboxProvider(name).provider).toBe(name)
+    },
+  )
+
+  it('should throw for an unknown provider rather than returning undefined', () => {
+    // Cast is the point of the test: it simulates a DB row whose provider
+    // column outran the registry.
+    expect(() => getMailboxProvider('carrier-pigeon' as never)).toThrow()
   })
 })

@@ -1,13 +1,28 @@
 'use client'
 
 import { useState } from 'react'
+import { EnvelopeSimple, GoogleLogo, MicrosoftOutlookLogo, PaperPlaneTilt } from '@phosphor-icons/react'
+import { Button } from '@/components/ui/button'
+import { StatusPill } from '@/components/status-dot'
+import { MAILBOX_HEALTH } from '@/lib/ui/status'
+import { effectiveDailyCap, type WarmupProfile } from '@/lib/mailbox/warmup'
+import type { Database } from '@/types/database'
+import { MailboxControls } from './mailbox-controls'
+
+type UserRole = Database['public']['Enums']['user_role']
 
 interface MailboxRowProps {
   id: string
-  provider: 'gmail' | 'outlook'
+  provider: 'gmail' | 'outlook' | 'smtp'
   emailAddress: string
   displayName: string | null
   health: 'ok' | 'warning' | 'blocked'
+  healthReason: string | null
+  warmupProfile: WarmupProfile
+  warmupStartedAt: string | null
+  dailyCap: number
+  sentToday: number
+  viewerRole: UserRole
 }
 
 type SendState =
@@ -16,21 +31,40 @@ type SendState =
   | { status: 'sent'; providerMessageId: string }
   | { status: 'error'; message: string }
 
-export function MailboxRow(props: MailboxRowProps) {
-  const [state, setState] = useState<SendState>({ status: 'idle' })
+const PROVIDER_ICON = {
+  gmail: GoogleLogo,
+  outlook: MicrosoftOutlookLogo,
+  smtp: EnvelopeSimple,
+} as const
 
-  async function sendTest() {
+export function MailboxRow(props: MailboxRowProps): React.ReactElement {
+  const [state, setState] = useState<SendState>({ status: 'idle' })
+  const Icon = PROVIDER_ICON[props.provider]
+  const capToday = effectiveDailyCap({
+    profile: props.warmupProfile,
+    warmupStartedAt: props.warmupStartedAt,
+    dailyCap: props.dailyCap,
+    now: new Date(),
+  })
+  const isRamping = capToday < props.dailyCap
+
+  async function sendTest(): Promise<void> {
     setState({ status: 'sending' })
     try {
       const res = await fetch(`/api/mailboxes/${props.id}/test-email`, { method: 'POST' })
       const json: unknown = await res.json()
       if (!res.ok) {
-        const message = typeof json === 'object' && json !== null && 'error' in json ? String((json as { error: unknown }).error) : 'failed'
+        const message =
+          typeof json === 'object' && json !== null && 'error' in json
+            ? String((json as { error: unknown }).error)
+            : 'failed'
         setState({ status: 'error', message })
         return
       }
-      const providerMessageId = typeof json === 'object' && json !== null && 'providerMessageId' in json
-        ? String((json as { providerMessageId: unknown }).providerMessageId) : ''
+      const providerMessageId =
+        typeof json === 'object' && json !== null && 'providerMessageId' in json
+          ? String((json as { providerMessageId: unknown }).providerMessageId)
+          : ''
       setState({ status: 'sent', providerMessageId })
     } catch {
       setState({ status: 'error', message: 'network' })
@@ -38,17 +72,50 @@ export function MailboxRow(props: MailboxRowProps) {
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <div>
-        <strong>{props.provider}</strong> — {props.emailAddress}
-        {props.displayName ? ` (${props.displayName})` : ''} · health: {props.health}
+    <div className="border-hairline bg-surface flex flex-wrap items-center gap-x-4 gap-y-3 rounded-lg border p-4">
+      <span className="bg-accent text-muted-foreground grid size-9 shrink-0 place-items-center rounded-md">
+        <Icon size={18} weight="light" />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium">{props.emailAddress}</p>
+        <p className="text-faint truncate text-[11px]">
+          {props.displayName ?? 'No display name'} · {props.provider} ·{' '}
+          <span className="tnum">
+            {props.sentToday}/{capToday} today
+          </span>
+          {isRamping ? ` · warming up (cap ${props.dailyCap})` : null}
+          {props.healthReason ? ` · ${props.healthReason.replaceAll('_', ' ')}` : null}
+        </p>
       </div>
-      <div>
-        <button type="button" onClick={sendTest} disabled={state.status === 'sending'}>
-          {state.status === 'sending' ? 'Sending…' : 'Send test email'}
-        </button>
-        {state.status === 'sent' && <span role="status" style={{ color: 'green', marginLeft: 8 }}>Sent ✓</span>}
-        {state.status === 'error' && <span role="alert" style={{ color: 'crimson', marginLeft: 8 }}>Error: {state.message}</span>}
+
+      <StatusPill meta={MAILBOX_HEALTH[props.health]} />
+
+      {props.viewerRole === 'operator' ? (
+        <MailboxControls id={props.id} isBlocked={props.health === 'blocked'} warmupProfile={props.warmupProfile} />
+      ) : null}
+
+      <div className="flex items-center gap-2.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={sendTest}
+          disabled={state.status === 'sending'}
+        >
+          <PaperPlaneTilt size={13} weight="light" />
+          {state.status === 'sending' ? 'Sending…' : 'Send test'}
+        </Button>
+        {state.status === 'sent' ? (
+          <span role="status" className="text-[11px] font-medium" style={{ color: 'var(--status-won)' }}>
+            Test delivered
+          </span>
+        ) : null}
+        {state.status === 'error' ? (
+          <span role="alert" className="text-destructive text-[11px] font-medium">
+            Failed: {state.message}
+          </span>
+        ) : null}
       </div>
     </div>
   )

@@ -15,6 +15,9 @@ export interface Database {
           name: string
           status: Database['public']['Enums']['client_status']
           settings: Json
+          warmup_profile: Database['public']['Enums']['warmup_profile']
+          domain: string | null
+          logo_url: string | null
           created_at: string
           updated_at: string
         }
@@ -23,6 +26,9 @@ export interface Database {
           name: string
           status?: Database['public']['Enums']['client_status']
           settings?: Json
+          warmup_profile?: Database['public']['Enums']['warmup_profile']
+          domain?: string | null
+          logo_url?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -102,10 +108,12 @@ export interface Database {
           campaign_id: string
           company_name: string
           company_domain: string | null
+          company_key: string
           status: Database['public']['Enums']['case_status']
           summary: string | null
           created_at: string
           updated_at: string
+          collision_notified_at: string | null
         }
         Insert: {
           id?: string
@@ -113,10 +121,12 @@ export interface Database {
           campaign_id: string
           company_name: string
           company_domain?: string | null
+          company_key: string
           status?: Database['public']['Enums']['case_status']
           summary?: string | null
           created_at?: string
           updated_at?: string
+          collision_notified_at?: string | null
         }
         Update: Partial<Database['public']['Tables']['cases']['Insert']>
         Relationships: [
@@ -148,10 +158,12 @@ export interface Database {
           company_domain: string | null
           linkedin_url: string | null
           source: string | null
+          source_id: string | null
           raw: Json
           email: string | null
           email_status: Database['public']['Enums']['lead_email_status']
           email_verified_at: string | null
+          email_verification: Json | null
           status: Database['public']['Enums']['lead_status']
           created_at: string
           updated_at: string
@@ -167,10 +179,12 @@ export interface Database {
           company_domain?: string | null
           linkedin_url?: string | null
           source?: string | null
+          source_id?: string | null
           raw?: Json
           email?: string | null
           email_status?: Database['public']['Enums']['lead_email_status']
           email_verified_at?: string | null
+          email_verification?: Json | null
           status?: Database['public']['Enums']['lead_status']
           created_at?: string
           updated_at?: string
@@ -241,6 +255,78 @@ export interface Database {
           },
         ]
       }
+      client_knowledge_sources: {
+        Row: {
+          id: string
+          client_id: string
+          source_type: Database['public']['Enums']['knowledge_source_type']
+          url: string | null
+          storage_path: string | null
+          title: string
+          content: string | null
+          char_count: number | null
+          status: Database['public']['Enums']['knowledge_source_status']
+          error_message: string | null
+          created_by: string
+          created_at: string
+          scraped_at: string | null
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          source_type: Database['public']['Enums']['knowledge_source_type']
+          url?: string | null
+          storage_path?: string | null
+          title: string
+          content?: string | null
+          char_count?: number | null
+          status?: Database['public']['Enums']['knowledge_source_status']
+          error_message?: string | null
+          created_by: string
+          created_at?: string
+          scraped_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['client_knowledge_sources']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'client_knowledge_sources_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      client_knowledge_chunks: {
+        Row: {
+          id: string
+          client_id: string
+          source_id: string
+          chunk_index: number
+          content: string
+          embedding: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          source_id: string
+          chunk_index: number
+          content: string
+          embedding: number[]
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['client_knowledge_chunks']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'client_knowledge_chunks_source_id_fkey'
+            columns: ['source_id']
+            isOneToOne: false
+            referencedRelation: 'client_knowledge_sources'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       emails: {
         Row: {
           id: string
@@ -256,6 +342,7 @@ export interface Database {
           sequence_step: number | null
           mailbox_id: string | null
           sent_at: string | null
+          in_reply_to_email_id: string | null
           created_at: string
         }
         Insert: {
@@ -272,6 +359,7 @@ export interface Database {
           sequence_step?: number | null
           mailbox_id?: string | null
           sent_at?: string | null
+          in_reply_to_email_id?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['emails']['Insert']>
@@ -418,8 +506,12 @@ export interface Database {
           oauth: Json
           daily_cap: number
           sent_today: number
-          warmup_state: Json
+          warmup_profile: Database['public']['Enums']['warmup_profile']
+          warmup_started_at: string | null
           health: Database['public']['Enums']['mailbox_health']
+          health_reason: string | null
+          health_changed_at: string | null
+          inbound_cursor: string | null
           created_at: string
           updated_at: string
         }
@@ -432,8 +524,12 @@ export interface Database {
           oauth?: Json
           daily_cap?: number
           sent_today?: number
-          warmup_state?: Json
+          warmup_profile?: Database['public']['Enums']['warmup_profile']
+          warmup_started_at?: string | null
           health?: Database['public']['Enums']['mailbox_health']
+          health_reason?: string | null
+          health_changed_at?: string | null
+          inbound_cursor?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -481,6 +577,8 @@ export interface Database {
           case_id: string | null
           actor: string
           type: string
+          severity: Database['public']['Enums']['log_severity']
+          source: Database['public']['Enums']['log_source']
           payload: Json
           created_at: string
         }
@@ -490,6 +588,8 @@ export interface Database {
           case_id?: string | null
           actor: string
           type: string
+          severity?: Database['public']['Enums']['log_severity']
+          source?: Database['public']['Enums']['log_source']
           payload?: Json
           created_at?: string
         }
@@ -518,13 +618,123 @@ export interface Database {
         Args: Record<string, never>
         Returns: boolean
       }
+      events_error_counts: {
+        Args: { p_since: string }
+        Returns: {
+          client_id: string
+          error_count: number
+          warn_count: number
+        }[]
+      }
       current_client_id: {
         Args: Record<string, never>
         Returns: string
       }
+      claim_mailbox_send: {
+        Args: { p_mailbox_id: string; p_effective_cap: number }
+        Returns: Database['public']['Tables']['mailboxes']['Row'][]
+      }
+      mailbox_send_stats: {
+        Args: { p_since: string }
+        Returns: {
+          mailbox_id: string
+          sent_count: number
+          bounced_count: number
+        }[]
+      }
+      reset_mailbox_daily_counters: {
+        Args: Record<string, never>
+        Returns: undefined
+      }
+      find_stuck_cases: {
+        Args: { p_cutoff: string; p_limit: number }
+        Returns: Database['public']['Tables']['cases']['Row'][]
+      }
+      match_client_knowledge_chunks: {
+        Args: { p_client_id: string; p_query_embedding: number[]; p_limit: number }
+        Returns: {
+          source_id: string
+          source_title: string
+          content: string
+          similarity: number
+        }[]
+      }
+      analytics_overview: {
+        Args: { p_from: string; p_to: string; p_campaign_id?: string | null; p_client_id?: string | null }
+        Returns: {
+          leads_discovered: number
+          leads_verified: number
+          cases_created: number
+          emails_sent: number
+          first_touch_sent: number
+          followups_sent: number
+          emails_bounced: number
+          emails_failed: number
+          replies_received: number
+          leads_contacted: number
+          leads_replied: number
+          suppressions_added: number
+          active_sequences: number
+        }[]
+      }
+      analytics_daily: {
+        Args: { p_from: string; p_to: string; p_campaign_id?: string | null; p_client_id?: string | null }
+        Returns: {
+          day: string
+          leads_discovered: number
+          emails_sent: number
+          replies_received: number
+        }[]
+      }
+      analytics_by_campaign: {
+        Args: { p_from: string; p_to: string }
+        Returns: {
+          campaign_id: string
+          campaign_name: string
+          client_id: string
+          campaign_status: Database['public']['Enums']['campaign_status']
+          leads_discovered: number
+          leads_verified: number
+          cases_created: number
+          emails_sent: number
+          leads_contacted: number
+          leads_replied: number
+          cases_new: number
+          cases_researching: number
+          cases_ready: number
+          cases_contacted: number
+          cases_in_conversation: number
+          cases_hot_handoff: number
+          cases_won: number
+          cases_lost: number
+          cases_dead: number
+        }[]
+      }
+      analytics_mailboxes: {
+        Args: Record<string, never>
+        Returns: {
+          mailbox_id: string
+          client_id: string
+          email_address: string
+          provider: Database['public']['Enums']['mailbox_provider']
+          health: Database['public']['Enums']['mailbox_health']
+          daily_cap: number
+          sent_today: number
+          sent_total: number
+          bounced_total: number
+          failed_total: number
+          last_sent_at: string | null
+        }[]
+      }
+      analytics_event_counts: {
+        Args: { p_from: string; p_to: string; p_limit: number }
+        Returns: { event_type: string; event_count: number }[]
+      }
     }
     Enums: {
       user_role: 'operator' | 'client'
+      log_severity: 'info' | 'warn' | 'error'
+      log_source: 'app' | 'pipeline' | 'gemini' | 'apollo' | 'brightdata' | 'mailbox' | 'qstash' | 'db' | 'emailable'
       client_status: 'active' | 'paused' | 'archived'
       campaign_status: 'active' | 'paused' | 'archived'
       reply_mode: 'auto_send' | 'human_approve' | 'hybrid'
@@ -546,10 +756,13 @@ export interface Database {
       email_status: 'draft' | 'queued' | 'sent' | 'delivered' | 'bounced' | 'failed'
       sequence_state: 'active' | 'paused' | 'stopped' | 'completed'
       knowledge_req_status: 'open' | 'answered' | 'dismissed'
-      mailbox_provider: 'gmail' | 'outlook'
+      mailbox_provider: 'gmail' | 'outlook' | 'smtp'
       mailbox_health: 'ok' | 'warning' | 'blocked'
+      warmup_profile: 'standard' | 'slow' | 'none'
       suppression_reason: 'replied' | 'bounced' | 'manual' | 'price_handoff'
       author_kind: 'agent' | 'human'
+      knowledge_source_type: 'website_page' | 'pdf'
+      knowledge_source_status: 'pending' | 'ready' | 'failed'
     }
     CompositeTypes: Record<string, never>
   }

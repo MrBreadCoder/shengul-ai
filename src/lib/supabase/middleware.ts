@@ -22,7 +22,13 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const { data } = await supabase.auth.getUser()
   const isAuthed = data.user !== null
   const { pathname } = request.nextUrl
-  const isPublic = pathname.startsWith('/login') || pathname.startsWith('/api/cron')
+  // `/` is the public marketing page, matched exactly — `startsWith('/')` would
+  // make the entire app public.
+  const isPublic =
+    pathname === '/' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api/cron') ||
+    pathname.startsWith('/auth/callback')
   if (!isAuthed && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

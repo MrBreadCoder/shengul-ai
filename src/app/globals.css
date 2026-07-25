@@ -1,49 +1,343 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Radius scale (one system, applied everywhere):
+    rounded-full → status badges and chips only
+    --radius     → cards, panels, popovers
+    --radius-sm  → buttons, inputs, row hover targets
+  Never mix: a pill button inside a square card is a bug, not a style choice.
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.625rem;
+
+  /* Light — cool neutral paper, used when the operator opts out of dark. */
+  --background: oklch(0.985 0.002 264);
+  --foreground: oklch(0.21 0.006 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 264);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 264);
+  /* Brand accent — monochrome by design. Buttons are near-black on near-white,
+     with zero chroma, so they never compete with the case-status palette
+     below. Colour is reserved entirely for status: green for positive/
+     verified states (see --status-won), never for a generic CTA. */
+  --primary: oklch(0.21 0.006 264);
+  --primary-foreground: oklch(0.985 0.002 264);
+  --secondary: oklch(0.96 0.003 264);
+  --secondary-foreground: oklch(0.28 0.006 264);
+  --muted: oklch(0.96 0.003 264);
+  --muted-foreground: oklch(0.52 0.008 264);
+  --accent: oklch(0.96 0.003 264);
+  --accent-foreground: oklch(0.28 0.006 264);
+  --destructive: oklch(0.58 0.19 25);
+  --border: oklch(0.91 0.004 264);
+  --input: oklch(0.91 0.004 264);
+  --ring: oklch(0.21 0.006 264);
+
+  /* Product surfaces layered above --background. */
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(0.975 0.003 264);
+  --surface-sunken: oklch(0.962 0.003 264);
+  --hairline: oklch(0.21 0.006 264 / 0.09);
+  --hairline-strong: oklch(0.21 0.006 264 / 0.16);
+  --faint: oklch(0.64 0.008 264);
+
+  /*
+    Case-status palette. Semantic, deliberately separate from --primary so the
+    accent never competes with pipeline state. Hue encodes progression:
+    cold grey → warm research → cool qualified → jade active → orange urgent.
+  */
+  --status-new: oklch(0.58 0.01 264);
+  --status-researching: oklch(0.62 0.13 75);
+  --status-ready: oklch(0.6 0.12 235);
+  --status-contacted: oklch(0.56 0.14 265);
+  --status-in-conversation: oklch(0.58 0.13 165);
+  --status-hot-handoff: oklch(0.63 0.18 45);
+  --status-won: oklch(0.55 0.15 150);
+  --status-lost: oklch(0.58 0.16 15);
+  --status-dead: oklch(0.62 0.006 264);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+.dark {
+  /* Dark — the default. Operators live in this view all day. */
+  --background: oklch(0.155 0.005 264);
+  --foreground: oklch(0.955 0.002 264);
+  --card: oklch(0.192 0.006 264);
+  --card-foreground: oklch(0.955 0.002 264);
+  --popover: oklch(0.21 0.007 264);
+  --popover-foreground: oklch(0.955 0.002 264);
+  --primary: oklch(0.955 0.002 264);
+  --primary-foreground: oklch(0.155 0.005 264);
+  --secondary: oklch(0.245 0.007 264);
+  --secondary-foreground: oklch(0.93 0.003 264);
+  --muted: oklch(0.235 0.007 264);
+  --muted-foreground: oklch(0.68 0.008 264);
+  --accent: oklch(0.255 0.008 264);
+  --accent-foreground: oklch(0.95 0.003 264);
+  --destructive: oklch(0.68 0.18 24);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.955 0.002 264);
+
+  --surface: oklch(0.192 0.006 264);
+  --surface-raised: oklch(0.225 0.007 264);
+  --surface-sunken: oklch(0.132 0.005 264);
+  --hairline: oklch(1 0 0 / 0.08);
+  --hairline-strong: oklch(1 0 0 / 0.15);
+  --faint: oklch(0.55 0.008 264);
+
+  --status-new: oklch(0.66 0.012 264);
+  --status-researching: oklch(0.76 0.13 78);
+  --status-ready: oklch(0.72 0.12 235);
+  --status-contacted: oklch(0.7 0.13 265);
+  --status-in-conversation: oklch(0.74 0.13 166);
+  --status-hot-handoff: oklch(0.76 0.16 50);
+  --status-won: oklch(0.75 0.15 152);
+  --status-lost: oklch(0.7 0.16 18);
+  --status-dead: oklch(0.5 0.006 264);
+}
+
+/*
+  Public marketing page (`/`) only. Namespaced under `.landing` and locked to
+  the dark palette on purpose: the console follows the operator's theme, but the
+  landing page is one committed composition and must not flip to paper-white for
+  a visitor who happens to have toggled the app to light. Nothing inside the
+  authenticated app reads these variables.
+
+  Radius system on that page: pills for buttons and chips, 28px trays with a
+  22px core for panels.
+
+  The palette is deliberately monochrome: every token below has zero chroma. On
+  a page whose hierarchy is carried by outcome figures, the numbers are the only
+  thing allowed to shout, so there is no hue competing with them. "Accent" here
+  means near-white on near-black, not a colour.
+*/
+.landing {
+  color-scheme: dark;
+
+  --l-bg: oklch(0.145 0 0);
+  --l-bg-deep: oklch(0.112 0 0);
+  --l-surface: oklch(0.185 0 0);
+  --l-text: oklch(0.97 0 0);
+  --l-muted: oklch(0.72 0 0);
+  --l-faint: oklch(0.56 0 0);
+  --l-hairline: oklch(1 0 0 / 0.08);
+  --l-hairline-strong: oklch(1 0 0 / 0.16);
+  --l-accent: oklch(0.97 0 0);
+  --l-accent-soft: oklch(1 0 0 / 0.12);
+  /* Ink sitting on the accent fill. Near-black, so a white button clears AA. */
+  --l-accent-ink: oklch(0.145 0 0);
+
+  /* Focus ring inherits from the app token, which is near-black in light mode
+     and would vanish here. Pin it to the accent instead. */
+  --ring: var(--l-accent);
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-faint: var(--faint);
+
+  --color-status-new: var(--status-new);
+  --color-status-researching: var(--status-researching);
+  --color-status-ready: var(--status-ready);
+  --color-status-contacted: var(--status-contacted);
+  --color-status-in-conversation: var(--status-in-conversation);
+  --color-status-hot-handoff: var(--status-hot-handoff);
+  --color-status-won: var(--status-won);
+  --color-status-lost: var(--status-lost);
+  --color-status-dead: var(--status-dead);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Single motion curve for the whole product. No linear, no ease-in-out. */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    height: 100%;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100%;
+  }
+
+  /* Tabular numerals wherever a number is compared against another number. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 28%, transparent);
+  }
+
+  :focus-visible {
+    @apply outline-ring outline-2 outline-offset-2;
+  }
+
+  /* Scrollbars: visible enough to grab, quiet enough to ignore. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--hairline-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--faint);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  /*
+    The viewport scrollbar belongs to the root element, so `.landing` cannot
+    restyle it from inside its own subtree: without this the marketing page
+    renders a near-white gutter down the side of a near-black page, because the
+    root is still on the light token set. Scoped with `:has()` so the console
+    keeps the scrollbar that follows the operator's theme. Browsers without
+    `:has()` simply fall back to the rules above.
+
+    `color-scheme` is what makes the gutter itself dark; the rules under it are
+    for WebKit, which paints a custom scrollbar instead.
+  */
+  :root:has(.landing) {
+    color-scheme: dark;
+    scrollbar-color: oklch(0.34 0 0) oklch(0.112 0 0);
+  }
+  :root:has(.landing)::-webkit-scrollbar-track {
+    background: oklch(0.112 0 0);
+  }
+  :root:has(.landing)::-webkit-scrollbar-thumb {
+    /* Not pure black: a thumb the same value as its track cannot be found. */
+    background: oklch(0.34 0 0);
+    border: 3px solid oklch(0.112 0 0);
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  :root:has(.landing)::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.46 0 0);
+    border: 3px solid oklch(0.112 0 0);
+    background-clip: content-box;
   }
 }
 
-html {
-  height: 100%;
+@layer utilities {
+  /* Entry animation for server-rendered lists. Transform + opacity only. */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .animate-rise {
+    animation: rise 0.45s var(--ease-out-quint) both;
+  }
+
+  /*
+    Applied to standalone cards that float in a grid (stat tiles, sparklines) —
+    never to divide-y list rows, where a lift would overlap the shared border
+    with the next row. Transform + a tinted shadow only; the global
+    prefers-reduced-motion block above zeroes the transition duration.
+  */
+  .card-interactive {
+    transition:
+      transform 300ms var(--ease-out-quint),
+      box-shadow 300ms var(--ease-out-quint),
+      border-color 300ms var(--ease-out-quint);
+  }
+
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: var(--hairline-strong);
+    box-shadow: 0 10px 30px -12px color-mix(in oklch, var(--foreground) 22%, transparent);
+  }
+
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .skeleton {
+    @apply bg-surface-raised relative overflow-hidden;
+  }
+
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 6%, transparent),
+      transparent
+    );
+    animation: shimmer 1.6s var(--ease-out-quint) infinite;
+  }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

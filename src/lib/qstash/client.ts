@@ -29,3 +29,18 @@ export async function scheduleCron(path: string, cron: string): Promise<string> 
     })
   }
 }
+
+export async function publishJsonWithDelay(
+  path: string,
+  body: Record<string, unknown>,
+  delaySeconds: number,
+): Promise<string> {
+  try {
+    const res = await client.publishJSON({ url: destination(path), body, delay: delaySeconds })
+    return res.messageId
+  } catch (cause) {
+    throw new AppError('EXTERNAL_ERROR', 'QStash delayed publish failed', {
+      path, delaySeconds, cause: cause instanceof Error ? cause.message : String(cause),
+    })
+  }
+}

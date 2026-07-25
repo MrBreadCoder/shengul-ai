@@ -43,9 +43,123 @@ describe('outlookProvider', () => {
 
   it('should send mail and synthesize ids (Graph sendMail returns 202 no body)', async () => {
     mockFetchJson.mockResolvedValueOnce({}) // sendMail: empty/accepted
-    const tokens = { accessToken: 'at', refreshToken: 'rt', expiresAt: new Date(Date.now() + 60_000).toISOString() }
+    const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }
     const { result } = await outlookProvider.sendEmail(tokens, { to: 'x@y.com', subject: 'S', body: 'B' })
     expect(result.providerMessageId).toMatch(/^outlook-/)
     expect(result.threadId).toMatch(/^outlook-/)
+  })
+
+  it('should include internetMessageHeaders when threading a follow-up', async () => {
+    mockFetchJson.mockResolvedValueOnce({})
+    const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }
+    await outlookProvider.sendEmail(tokens, {
+      to: 'x@y.com', subject: 'Re: S', body: 'B',
+      threadId: 'thr1', inReplyToMessageId: '<abc@mail>', references: '<abc@mail>',
+    })
+    // safe: mockResolvedValueOnce above guarantees exactly one recorded call
+    const sendCall = mockFetchJson.mock.calls[0]!
+    const body = JSON.parse((sendCall[1] as { body: string }).body)
+    expect(body.message.internetMessageHeaders).toEqual([
+      { name: 'In-Reply-To', value: '<abc@mail>' },
+      { name: 'References', value: '<abc@mail>' },
+    ])
+  })
+
+  it('should omit internetMessageHeaders when not threading', async () => {
+    mockFetchJson.mockResolvedValueOnce({})
+    const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }
+    await outlookProvider.sendEmail(tokens, { to: 'x@y.com', subject: 'S', body: 'B' })
+    // safe: mockResolvedValueOnce above guarantees exactly one recorded call
+    const sendCall = mockFetchJson.mock.calls[0]!
+    const body = JSON.parse((sendCall[1] as { body: string }).body)
+    expect(body.message.internetMessageHeaders).toBeUndefined()
+  })
+})
+
+describe('outlookProvider.fetchInbound', () => {
+  const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }
+
+  // This describe block previously relied on the sibling 'outlookProvider'
+  // describe's beforeEach, which doesn't run for tests here — harmless while
+  // no test asserted on call counts, but the 410 re-baseline tests below do.
+  beforeEach(() => mockFetchJson.mockReset())
+
+  it('should baseline (no messages) when cursor is null', async () => {
+    mockFetchJson.mockResolvedValueOnce({ value: [], '@odata.deltaLink': 'https://graph/delta?token=xyz' })
+    const { result } = await outlookProvider.fetchInbound(tokens, null)
+    expect(result).toEqual({ messages: [], cursor: 'https://graph/delta?token=xyz' })
+  })
+
+  it('should map delta messages and return the next delta link', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      value: [
+        {
+          id: 'g1', conversationId: 'conv1', subject: 'Re: Quick idea',
+          from: { emailAddress: { address: 'Jane@Acme.com' } },
+          receivedDateTime: '2026-07-19T10:00:00Z',
+          body: { content: 'Interested' }, isDraft: false,
+        },
+      ],
+      '@odata.deltaLink': 'https://graph/delta?token=next',
+    })
+    const { result } = await outlookProvider.fetchInbound(tokens, 'https://graph/delta?token=prev')
+    expect(result.cursor).toBe('https://graph/delta?token=next')
+    expect(result.messages[0]).toMatchObject({
+      providerMessageId: 'g1', threadId: 'conv1', fromEmail: 'jane@acme.com', body: 'Interested',
+    })
+  })
+
+  it('should skip drafts and messages without a sender', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      value: [
+        { id: 'd1', isDraft: true, from: { emailAddress: { address: 'x@y.com' } } },
+        { id: 'n1', isDraft: false, from: null },
+      ],
+      '@odata.deltaLink': 'https://graph/delta?token=next',
+    })
+    const { result } = await outlookProvider.fetchInbound(tokens, 'https://graph/delta?token=prev')
+    expect(result.messages).toHaveLength(0)
+  })
+
+  it('should re-baseline when the delta link has expired (410 resyncRequired)', async () => {
+    const { AppError } = await import('@/lib/errors/app-error')
+    mockFetchJson
+      .mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'HTTP 410', { status: 410 }))
+      .mockResolvedValueOnce({ value: [], '@odata.deltaLink': 'https://graph/delta?token=rebaselined' })
+    const { result } = await outlookProvider.fetchInbound(tokens, 'https://graph/delta?token=expired')
+    expect(result).toEqual({ messages: [], cursor: 'https://graph/delta?token=rebaselined' })
+    expect(mockFetchJson).toHaveBeenCalledTimes(2)
+    // The re-baseline call must start from the base delta URL, not the expired cursor.
+    expect(mockFetchJson.mock.calls[1]![0]).toBe(
+      'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta' +
+        '?$select=id,conversationId,subject,from,receivedDateTime,body,isDraft,internetMessageHeaders',
+    )
+  })
+
+  it('should rethrow non-410 errors without re-baselining', async () => {
+    const { AppError } = await import('@/lib/errors/app-error')
+    mockFetchJson.mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'HTTP 500', { status: 500 }))
+    await expect(outlookProvider.fetchInbound(tokens, 'https://graph/delta?token=prev')).rejects.toThrow('HTTP 500')
+    expect(mockFetchJson).toHaveBeenCalledTimes(1)
   })
 })
