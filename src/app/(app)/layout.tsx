@@ -24,10 +24,10 @@ export default async function AuthedLayout({
   ])
 
   // Operators aren't scoped to one client, so they always see the default
-  // Beacon mark. `clients_select` RLS already permits a client-role user to
+  // Shengul AI mark. `clients_select` RLS already permits a client-role user to
   // read their own row, so this reuses the viewer-scoped client rather than
   // the admin client. A missing row (should never happen while client_id is
-  // set) just falls back to Beacon instead of failing the whole layout.
+  // set) just falls back to Shengul AI instead of failing the whole layout.
   let brand: SidebarBrand | null = null
   if (appUser.role === 'client' && appUser.client_id) {
     const client = await getClientById(supabase, appUser.client_id)

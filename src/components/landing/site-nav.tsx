@@ -45,14 +45,8 @@ export function SiteNav(): React.ReactElement {
           'shadow-[inset_0_1px_0_color-mix(in_oklch,white_10%,transparent)]',
         )}
       >
-        <Link href="/" className="flex items-center gap-2.5" onClick={closeMenu}>
-          <span
-            aria-hidden
-            className="grid size-7 place-items-center rounded-full bg-[var(--l-accent-soft)] text-[13px] font-semibold text-[var(--l-accent)]"
-          >
-            B
-          </span>
-          <span className="text-sm font-semibold tracking-tight">Beacon</span>
+        <Link href="/" className="flex items-center" onClick={closeMenu}>
+          <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
         </Link>
 
         <div className="hidden items-center gap-7 md:flex">

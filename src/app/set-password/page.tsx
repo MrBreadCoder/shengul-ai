@@ -3,7 +3,12 @@ import { redirect } from 'next/navigation'
 import { createServerClient } from '@/lib/supabase/server'
 import { SetPasswordForm } from './set-password-form'
 
-export const metadata: Metadata = { title: 'Set your password' }
+// Reachable only from an invite link, so it must never appear in an index or
+// be attributed a canonical URL of its own.
+export const metadata: Metadata = {
+  title: 'Set your password',
+  robots: { index: false, follow: false },
+}
 
 export default async function SetPasswordPage(): Promise<React.ReactElement> {
   const supabase = await createServerClient()
@@ -13,14 +18,8 @@ export default async function SetPasswordPage(): Promise<React.ReactElement> {
   return (
     <main className="grid min-h-[100dvh] place-items-center px-4 py-16">
       <div className="w-full max-w-[360px]">
-        <div className="flex items-center gap-2.5">
-          <span
-            aria-hidden
-            className="bg-primary/15 text-primary grid size-8 place-items-center rounded-md text-sm font-bold"
-          >
-            B
-          </span>
-          <span className="text-sm font-semibold tracking-tight">Beacon</span>
+        <div className="flex items-center">
+          <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
         </div>
 
         <h1 className="mt-8 text-xl font-semibold tracking-tight">Set your password</h1>

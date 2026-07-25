@@ -10,20 +10,58 @@ import { Capabilities } from '@/components/landing/capabilities'
 import { Safeguards } from '@/components/landing/safeguards'
 import { Privacy } from '@/components/landing/privacy'
 import { Faq } from '@/components/landing/faq'
+import { FAQ_ITEMS } from '@/components/landing/faq-items'
 import { ClosingCta } from '@/components/landing/closing-cta'
 import { SiteFooter } from '@/components/landing/site-footer'
+import { JsonLd } from '@/components/seo/json-ld'
+import { buildLandingJsonLd } from '@/lib/seo/json-ld'
+import {
+  CONTENT_PUBLISHED_AT,
+  CONTENT_UPDATED_AT,
+  LANDING_DESCRIPTION,
+  OG_IMAGE_ALT,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_PATH,
+  OG_IMAGE_WIDTH,
+  SITE_NAME,
+  SITE_TITLE,
+} from '@/lib/seo/site'
+import { SITE_URL } from '@/lib/seo/site-url'
+
+/** Resolved against `metadataBase` in the root layout. */
+const OG_IMAGE = {
+  url: OG_IMAGE_PATH,
+  width: OG_IMAGE_WIDTH,
+  height: OG_IMAGE_HEIGHT,
+  alt: OG_IMAGE_ALT,
+} as const
 
 export const metadata: Metadata = {
-  title: 'Outbound, handled',
-  description:
-    'Leads found, emails sent, replies answered, meetings booked. You describe the buyer, we do the outbound, and you take the meetings. Book a call to see what your first month would look like.',
+  title: SITE_TITLE,
+  description: LANDING_DESCRIPTION,
+  alternates: { canonical: '/' },
   openGraph: {
-    title: 'Beacon · More meetings, none of the outbound',
-    description:
-      'Four numbers we report on: leads found, emails sent, replies, meetings booked. You close the fifth.',
     type: 'website',
+    url: '/',
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} · ${SITE_TITLE}`,
+    description: LANDING_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `${SITE_NAME} · ${SITE_TITLE}`,
+    description: LANDING_DESCRIPTION,
+    images: [OG_IMAGE],
   },
 }
+
+const LANDING_JSON_LD = buildLandingJsonLd({
+  siteUrl: SITE_URL,
+  faqItems: FAQ_ITEMS,
+  publishedAt: CONTENT_PUBLISHED_AT,
+  updatedAt: CONTENT_UPDATED_AT,
+})
 
 /**
  * Public marketing page. A signed-in operator has no use for it, so they are
@@ -37,6 +75,7 @@ export default async function MarketingPage(): Promise<React.ReactElement> {
 
   return (
     <div className="landing min-h-[100dvh] bg-[var(--l-bg)] text-[var(--l-text)] antialiased">
+      <JsonLd data={LANDING_JSON_LD} />
       <SiteNav />
       <main>
         <Hero />

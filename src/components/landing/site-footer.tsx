@@ -10,14 +10,8 @@ export function SiteFooter(): React.ReactElement {
     <footer className="px-4 pb-12">
       <div className="mx-auto max-w-[1180px] border-t border-[var(--l-hairline)] pt-10">
         <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden
-              className="grid size-7 place-items-center rounded-full bg-[var(--l-accent-soft)] text-[13px] font-semibold text-[var(--l-accent)]"
-            >
-              B
-            </span>
-            <span className="text-sm font-semibold tracking-tight">Beacon</span>
+          <div className="flex items-center">
+            <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
           </div>
 
           <nav aria-label="Footer" className="flex items-center gap-7 text-[13px]">
@@ -48,7 +42,7 @@ export function SiteFooter(): React.ReactElement {
         </div>
 
         <p className="mt-10 text-[12px] text-[var(--l-faint)]">
-          {year} Beacon. Outbound, handled.
+          {year} Shengul AI. Outbound, handled.
         </p>
       </div>
     </footer>

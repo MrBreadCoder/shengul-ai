@@ -29,7 +29,7 @@ export function Hero(): React.ReactElement {
 
           <Reveal delay={0.06}>
             <h1 className="mt-7 text-[2.75rem] leading-[1.02] font-medium tracking-tighter text-balance sm:text-6xl lg:text-[4.25rem]">
-              More meetings, none of the outbound.
+              More meetings booked, none of the outbound work.
             </h1>
           </Reveal>
 

@@ -1,4 +1,5 @@
 import { BookMeetingButton } from './book-meeting-button'
+import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
 export function ClosingCta(): React.ReactElement {
@@ -21,6 +22,10 @@ export function ClosingCta(): React.ReactElement {
             <div className="mt-10 flex justify-center">
               <BookMeetingButton size="lg" />
             </div>
+            <p className="mt-7 text-[13px] text-[var(--l-faint)]">
+              Already working with us? <InlineLink href="/login">Sign in to your console</InlineLink>{' '}
+              to see today&rsquo;s replies.
+            </p>
           </Reveal>
         </div>
       </div>

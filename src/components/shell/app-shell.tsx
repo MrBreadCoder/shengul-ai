@@ -10,8 +10,8 @@ import { ThemeToggle } from './theme-toggle'
 import { Button } from '@/components/ui/button'
 import { CompanyMark } from '@/components/company-mark'
 
-// A client-role user's own company, shown in place of "Beacon". `null` (or
-// omitted entirely) means: show the default Beacon mark — always the case for
+// A client-role user's own company, shown in place of "Shengul AI". `null` (or
+// omitted entirely) means: show the default Shengul AI mark — always the case for
 // operators, who aren't scoped to a single client.
 export interface SidebarBrand {
   name: string
@@ -37,15 +37,8 @@ function Brand({ brand }: { brand?: SidebarBrand | null }): React.ReactElement {
           logoUrl={brand.logoUrl}
           className="size-7 rounded-md text-[13px] font-bold"
         />
-      ) : (
-        <span
-          aria-hidden
-          className="bg-primary/15 text-primary grid size-7 place-items-center rounded-md text-[13px] font-bold"
-        >
-          B
-        </span>
-      )}
-      <span className="truncate text-[13px] font-semibold tracking-tight">{brand?.name ?? 'Beacon'}</span>
+      ) : null}
+      <span className="truncate text-[13px] font-semibold tracking-tight">{brand?.name ?? 'Shengul AI'}</span>
     </Link>
   )
 }

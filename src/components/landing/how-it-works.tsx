@@ -1,6 +1,7 @@
 import type { Icon } from '@phosphor-icons/react'
 import { CalendarCheck, ChatsCircle, Crosshair, PenNib } from '@phosphor-icons/react/dist/ssr'
 import { BookMeetingButton } from './book-meeting-button'
+import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
 interface Movement {
@@ -48,7 +49,8 @@ export function HowItWorks(): React.ReactElement {
               </h2>
               <p className="mt-5 max-w-[38ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
                 Nothing to learn, nothing to log into every morning. Your part is the first step
-                and the last one. Everything between them is handled.
+                and the last one. Everything between them is handled, and reported back as{' '}
+                <InlineLink href="#outcomes">four numbers</InlineLink>.
               </p>
             </Reveal>
           </div>

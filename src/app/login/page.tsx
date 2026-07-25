@@ -34,14 +34,8 @@ export default function LoginPage(): React.ReactElement {
   return (
     <main className="grid min-h-[100dvh] place-items-center px-4 py-16">
       <div className="w-full max-w-[360px]">
-        <div className="flex items-center gap-2.5">
-          <span
-            aria-hidden
-            className="bg-primary/15 text-primary grid size-8 place-items-center rounded-md text-sm font-bold"
-          >
-            B
-          </span>
-          <span className="text-sm font-semibold tracking-tight">Beacon</span>
+        <div className="flex items-center">
+          <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
         </div>
 
         <h1 className="mt-8 text-xl font-semibold tracking-tight">Sign in</h1>

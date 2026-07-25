@@ -1,16 +1,43 @@
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
-import { GeistSans } from 'geist/font/sans'
+import { Inter } from 'next/font/google'
 import { GeistMono } from 'geist/font/mono'
 import { Toaster } from '@/components/ui/sonner'
+import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME } from '@/lib/seo/site'
+import { SITE_URL } from '@/lib/seo/site-url'
 import './globals.css'
 
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+})
+
 export const metadata: Metadata = {
+  // Resolves every relative URL below — and each page's `alternates.canonical`
+  // — against the real origin. Without it Next emits relative og:url and
+  // canonical values, which crawlers resolve inconsistently.
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Beacon',
-    template: '%s · Beacon',
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
   },
-  description: 'Outreach pipeline, mail and case knowledge in one console.',
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    siteName: SITE_NAME,
+    locale: SITE_LOCALE,
+    url: '/',
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
 }
 
 /**
@@ -24,7 +51,7 @@ export default function RootLayout({ children }: { children: ReactNode }): React
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${inter.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
       <head>

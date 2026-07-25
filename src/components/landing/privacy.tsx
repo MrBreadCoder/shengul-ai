@@ -1,6 +1,7 @@
 import type { Icon } from '@phosphor-icons/react'
 import { ClockCounterClockwise, LockKey, Plugs, Vault } from '@phosphor-icons/react/dist/ssr'
 import { BookMeetingButton } from './book-meeting-button'
+import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
 interface Commitment {
@@ -52,7 +53,8 @@ export function Privacy(): React.ReactElement {
           </h2>
           <p className="mt-5 text-[15px] leading-relaxed text-[var(--l-muted)]">
             Outbound means handing a system your mailbox and the list of people you want to reach.
-            Here is what happens to both.
+            Here is what happens to both — and separately, what happens to{' '}
+            <InlineLink href="#safeguards">the reputation of the domain you send from</InlineLink>.
           </p>
         </Reveal>
 

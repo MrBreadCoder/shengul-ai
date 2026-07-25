@@ -1,6 +1,7 @@
 import type { Icon } from '@phosphor-icons/react'
 import { ChartLineUp, Power, ShieldCheck } from '@phosphor-icons/react/dist/ssr'
 import { BookMeetingButton } from './book-meeting-button'
+import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
 interface Reassurance {
@@ -43,7 +44,8 @@ export function Safeguards(): React.ReactElement {
               Your emails do not deserve to sit in a spam folder. The quickest way to put them
               there is to blast a domain, so this does the opposite: small numbers, human hours,
               your own mailbox. Every month it runs, the reputation you spent years earning is
-              worth more, not less.
+              worth more, not less. The mailbox itself is handled just as carefully:{' '}
+              <InlineLink href="#privacy">how your data is stored and deleted</InlineLink>.
             </p>
           </Reveal>
 
