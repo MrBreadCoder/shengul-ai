@@ -297,6 +297,7 @@ password.
 **Operational notes:**
 - `APP_URL` must be the **canonical** production origin (the host the apex/`www` redirect settles on). It is the origin baked into every invite link. No Supabase redirect allow-listing is required — see the invite-link outage note at the end of this file.
 - Migration `0009_analytics_client_filter.sql` must be applied (`supabase db push` / `supabase migration up`) to the target project before the client analytics filter works.
+  - **2026-07-26 — confirmed NOT applied on the live project (`axtrfreoydwokehypbpr`), and it takes the whole `/analytics` page down, not just the client filter.** `src/lib/db/analytics.ts` calls the 4-arg `analytics_overview` / `analytics_daily`; only the 3-arg 0008 signatures exist remotely, so PostgREST answers `404 PGRST202` ("no matches found in the schema cache"), `getOverviewMetrics` / `getDailyMetrics` throw `AppError('DB_ERROR')`, and `app/(app)/analytics/error.tsx` renders "Analytics unavailable". This is unrelated to how much data exists — the zero-data path already renders the `EmptyState` correctly. Probed with the service-role key: `analytics_by_campaign` / `analytics_mailboxes` / `analytics_event_counts` return 200, `invite_links` (0017) exists, so 0009 is the only skipped migration. Fix: run `supabase/migrations/0009_analytics_client_filter.sql` in the Supabase SQL editor (it is idempotent — `drop function if exists` then `create function`).
 
 ## Client Detail Workspace — Group A: lifecycle DB + API (2026-07-21)
 
@@ -1020,3 +1021,31 @@ returns 409 — remove the login from the Users tab first, then invite again.
 link survives a second open inside the window, that the raw token never reaches the database,
 that expired and unknown tokens land on different messages, and that a failed link insert
 deletes the auth user rather than consuming the address.
+
+---
+
+## AI Resources — sendable client collateral (spec approved 2026-07-26)
+
+**Spec:** `docs/superpowers/specs/2026-07-26-ai-resources-design.md`. Not yet implemented.
+
+Lets the agent send files — portfolio PDFs, design mockups, one-pagers — to a lead that asked
+for them, as real MIME attachments on a reply. Resources are deliberately **not** knowledge:
+they are never chunked, embedded, or retrieved by `retrieveClientKnowledge()`. The only thing
+the AI ever learns about a resource is its `title` and operator-written `description`, offered
+as a numbered menu in the reply prompt; the model returns ordinals, not uuids.
+
+**Constrained to replies.** `write.ts` (first touch) and `followup.ts` (3/7/14d) build no menu
+and pass no attachments, so no code path exists for a cold email to carry one — the deliverability
+guard is structural, not a flag. Ceiling is 3 MB / 3 files per email, which keeps Gmail, Graph
+and SMTP all on their simple send paths (no Graph upload sessions).
+
+**Reverses `0014`'s operator-only RLS.** Clients can now upload and manage their *own* knowledge
+sources and resources on `/knowledge`; operators keep full control everywhere. This is the first
+table in the codebase a client-role session can write to, so `.claude/architecture.md` §11
+("clients are read-only") needs updating alongside. Because the routes use the admin client,
+RLS stops protecting them — route-level ownership checks are the real boundary and get their
+own tests.
+
+Also widens knowledge uploads from PDF-only to pdf/txt/md, and adds an attachment picker to both
+the `/inbox` knowledge-request answer form and the draft-approval row (the AI's picks are shown
+and editable before an operator approves).
