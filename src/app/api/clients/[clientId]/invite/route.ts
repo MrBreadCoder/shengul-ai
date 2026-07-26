@@ -17,6 +17,29 @@ function isDuplicateEmailError(error: { code?: string; message: string }): boole
   return error.code === 'email_exists' || /already registered|already exists/i.test(error.message);
 }
 
+/**
+ * Builds the invite link ourselves instead of handing out `action_link`.
+ *
+ * `action_link` points at GoTrue's `/auth/v1/verify`, which finishes the
+ * verification at Supabase and 302s to `redirect_to` with the session in the
+ * URL *fragment* — a fragment the browser never sends to our server, so the
+ * user lands on a page with no cookie and no session. Worse, GoTrue silently
+ * replaces a `redirect_to` that is missing from the project's redirect
+ * allow-list with the Site URL, which is how an invite ended up on the
+ * marketing page.
+ *
+ * `hashed_token` is the same token without the hosted redirect: our own route
+ * exchanges it via `verifyOtp` and writes the session cookies server-side, so
+ * the flow depends on nothing but `APP_URL`.
+ */
+function buildInviteLink(hashedToken: string): string {
+  const link = new URL('/auth/callback', env.APP_URL)
+  link.searchParams.set('token_hash', hashedToken)
+  link.searchParams.set('type', 'invite')
+  link.searchParams.set('next', '/set-password')
+  return link.toString()
+}
+
 export async function POST(request: Request, context: { params: Promise<{ clientId: string }> }) {
   const { appUser } = await requireUser()
   if (appUser.role !== 'operator') {
@@ -36,9 +59,8 @@ export async function POST(request: Request, context: { params: Promise<{ client
     const { data, error } = await admin.auth.admin.generateLink({
       type: 'invite',
       email: body.email,
-      options: { redirectTo: `${env.APP_URL}/auth/callback` },
     })
-    if (error || !data.user) {
+    if (error || !data.user || !data.properties?.hashed_token) {
       const status = error && isDuplicateEmailError(error) ? 409 : 500
       return NextResponse.json(
         { error: status === 409 ? 'email_already_registered' : 'invite_failed' },
@@ -67,7 +89,11 @@ export async function POST(request: Request, context: { params: Promise<{ client
       // Audit logging is best-effort — the invite was already created successfully.
     }
 
-    return NextResponse.json({ ok: true, link: data.properties.action_link, email: body.email })
+    return NextResponse.json({
+      ok: true,
+      link: buildInviteLink(data.properties.hashed_token),
+      email: body.email,
+    })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
