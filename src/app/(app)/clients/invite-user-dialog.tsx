@@ -14,12 +14,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { formatInviteTtl, INVITE_TTL_MINUTES } from '@/lib/auth/invite-ttl'
 
 type InviteState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'error'; message: string }
-  | { status: 'success'; link: string }
+  | { status: 'success'; link: string; expiresInMinutes: number }
 
 export function InviteUserDialog({ clientId }: { clientId: string }): React.ReactElement {
   const [open, setOpen] = useState(false)
@@ -46,7 +47,14 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
       }
       const link =
         typeof json === 'object' && json !== null && 'link' in json ? String((json as { link: unknown }).link) : ''
-      setState({ status: 'success', link })
+      // Falls back to the compiled-in window rather than showing nothing: the
+      // server is the authority on the expiry it actually stored, but a
+      // missing field must not leave the operator without a deadline to quote.
+      const expiresInMinutes =
+        typeof json === 'object' && json !== null && typeof (json as { expiresInMinutes?: unknown }).expiresInMinutes === 'number'
+          ? (json as { expiresInMinutes: number }).expiresInMinutes
+          : INVITE_TTL_MINUTES
+      setState({ status: 'success', link, expiresInMinutes })
     } catch {
       setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
     }
@@ -81,8 +89,9 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
         {state.status === 'success' ? (
           <div className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">
-              Send this link to the client. It lets them set their own password and sign in — it is not reusable
-              once they do.
+              Send this link to the client. It lets them set their own password and sign in, and works for the
+              next {formatInviteTtl(state.expiresInMinutes)} — they can open it more than once in that time. After
+              that it stops working and you issue a new one.
             </p>
             <div className="flex items-center gap-2">
               <Input readOnly value={state.link} className="text-xs" />
@@ -98,7 +107,7 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
             // Declarative WebMCP: an agent may fill this in, but the operator
             // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
             toolname="createClientInviteLink"
-            tooldescription="Generates a single-use link that lets this client set their own password and sign in. The link is shown on screen to copy; nothing is emailed."
+            tooldescription="Generates a link that lets this client set their own password and sign in. It stays usable for a couple of hours and can be opened more than once in that time, then expires. The link is shown on screen to copy; nothing is emailed."
             className="flex flex-col gap-4"
           >
             <div className="flex flex-col gap-2">

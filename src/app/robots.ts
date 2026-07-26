@@ -20,6 +20,7 @@ const PRIVATE_PATHS: readonly string[] = [
   '/mail',
   '/settings',
   '/set-password',
+  '/auth',
 ]
 
 /**

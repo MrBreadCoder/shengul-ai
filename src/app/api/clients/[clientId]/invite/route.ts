@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, insertAppUser } from '@/lib/db/clients'
+import { insertInviteLink, deleteInviteLinksForUser } from '@/lib/db/invite-links'
+import { generateInviteToken, hashInviteToken } from '@/lib/auth/invite-token'
+import { inviteExpiryFrom, INVITE_TTL_MINUTES } from '@/lib/auth/invite-ttl'
 import { logEvent } from '@/lib/events/log-event'
 import { env } from '@/lib/env'
 import { isAppError } from '@/lib/errors/app-error'
@@ -18,24 +21,17 @@ function isDuplicateEmailError(error: { code?: string; message: string }): boole
 }
 
 /**
- * Builds the invite link ourselves instead of handing out `action_link`.
+ * The link the operator hands over.
  *
- * `action_link` points at GoTrue's `/auth/v1/verify`, which finishes the
- * verification at Supabase and 302s to `redirect_to` with the session in the
- * URL *fragment* — a fragment the browser never sends to our server, so the
- * user lands on a page with no cookie and no session. Worse, GoTrue silently
- * replaces a `redirect_to` that is missing from the project's redirect
- * allow-list with the Site URL, which is how an invite ended up on the
- * marketing page.
- *
- * `hashed_token` is the same token without the hosted redirect: our own route
- * exchanges it via `verifyOtp` and writes the session cookies server-side, so
- * the flow depends on nothing but `APP_URL`.
+ * It carries our own token rather than a Supabase one. A Supabase email token
+ * is single-use, so the first fetch of the URL redeems it — and that fetch is
+ * routinely a mail or chat platform prefetching the link rather than the
+ * person it was sent to, which silently burned invites before anyone clicked.
+ * This token stays usable until it expires; see `lib/auth/invite-token.ts`.
  */
-function buildInviteLink(hashedToken: string): string {
+function buildInviteLink(token: string): string {
   const link = new URL('/auth/callback', env.APP_URL)
-  link.searchParams.set('token_hash', hashedToken)
-  link.searchParams.set('type', 'invite')
+  link.searchParams.set('token', token)
   link.searchParams.set('next', '/set-password')
   return link.toString()
 }
@@ -56,11 +52,14 @@ export async function POST(request: Request, context: { params: Promise<{ client
   try {
     const body = inviteSchema.parse(await request.json())
 
-    const { data, error } = await admin.auth.admin.generateLink({
-      type: 'invite',
+    // `email_confirm` skips Supabase's own confirmation mail: nothing is
+    // emailed by this flow, and the account cannot be used until the invitee
+    // sets a password through the link anyway.
+    const { data, error } = await admin.auth.admin.createUser({
       email: body.email,
+      email_confirm: true,
     })
-    if (error || !data.user || !data.properties?.hashed_token) {
+    if (error || !data.user) {
       const status = error && isDuplicateEmailError(error) ? 409 : 500
       return NextResponse.json(
         { error: status === 409 ? 'email_already_registered' : 'invite_failed' },
@@ -71,11 +70,29 @@ export async function POST(request: Request, context: { params: Promise<{ client
     try {
       await insertAppUser(admin, { id: data.user.id, role: 'client', client_id: clientId })
     } catch (insertError) {
-      // The auth user was already created by generateLink — without this
-      // cleanup a failed app_users insert would leave an orphaned login with
-      // no client link, invisible to this admin page but present in auth.users.
+      // The auth user was already created above — without this cleanup a
+      // failed app_users insert would leave an orphaned login with no client
+      // link, invisible to this admin page but present in auth.users.
       await admin.auth.admin.deleteUser(data.user.id)
       throw insertError
+    }
+
+    const token = generateInviteToken()
+    try {
+      // Reissuing must not leave the earlier link alive alongside the new one.
+      await deleteInviteLinksForUser(admin, data.user.id)
+      await insertInviteLink(admin, {
+        token_hash: hashInviteToken(token),
+        user_id: data.user.id,
+        client_id: clientId,
+        created_by: appUser.id,
+        expires_at: inviteExpiryFrom(new Date()).toISOString(),
+      })
+    } catch (linkError) {
+      // A login nobody can reach is worse than no login: it consumes the
+      // address, so the operator cannot even retry with the same email.
+      await admin.auth.admin.deleteUser(data.user.id)
+      throw linkError
     }
 
     try {
@@ -83,7 +100,7 @@ export async function POST(request: Request, context: { params: Promise<{ client
         clientId,
         actor: `human:${appUser.id}`,
         type: 'client.user_invited',
-        payload: { email: body.email },
+        payload: { email: body.email, expiresInMinutes: INVITE_TTL_MINUTES },
       })
     } catch {
       // Audit logging is best-effort — the invite was already created successfully.
@@ -91,8 +108,9 @@ export async function POST(request: Request, context: { params: Promise<{ client
 
     return NextResponse.json({
       ok: true,
-      link: buildInviteLink(data.properties.hashed_token),
+      link: buildInviteLink(token),
       email: body.email,
+      expiresInMinutes: INVITE_TTL_MINUTES,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

@@ -31,10 +31,15 @@ type TableName = keyof Database['public']['Tables']
 // Reverse dependency order. `events` and `app_users` are listed explicitly
 // rather than relying on the cascade from `clients`: cron events carry a null
 // client_id and would otherwise survive the wipe.
-const TABLES_IN_DELETE_ORDER: readonly TableName[] = [
+// `satisfies` rather than a `readonly TableName[]` annotation: the annotation
+// widened this to every table in the schema, so the `.neq('id', ...)` filter
+// below had to type-check against tables that are not listed here — and broke
+// the moment one without an `id` column (invite_links) was added. Rows in the
+// tables left out cascade from `clients`.
+const TABLES_IN_DELETE_ORDER = [
   'events', 'suppressions', 'knowledge_requests', 'sequences', 'emails',
   'case_knowledge', 'leads', 'cases', 'campaigns', 'mailboxes', 'app_users', 'clients',
-]
+] as const satisfies readonly TableName[]
 
 const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),

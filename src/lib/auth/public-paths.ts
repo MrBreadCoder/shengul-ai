@@ -34,6 +34,10 @@ const PUBLIC_PATH_PREFIXES: readonly string[] = [
   '/api/pipeline/',
   '/api/inbound/',
   '/auth/callback',
+  // Reached only by someone holding a dead invite link, who by definition has
+  // no session. Gating it on one would answer "your link expired" with a
+  // sign-in form they cannot use.
+  '/auth/invite-expired',
 ]
 
 export function isPublicPath(pathname: string): boolean {

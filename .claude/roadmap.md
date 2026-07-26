@@ -965,3 +965,58 @@ exact first-party link and that the response never contains `/auth/v1/verify`. 2
 those two files, 1153/1153 across the suite, `tsc --noEmit` clean.
 
 **Operator follow-up:** invite links issued before this fix are unusable — re-issue them.
+
+---
+
+## Invite links: reusable for a fixed window instead of single-use (2026-07-26)
+
+**Symptom, after the earlier invite fix shipped:** a freshly issued link answered
+`/login?error=invite_expired`. The evidence was in the auth user's own timestamps —
+`invited_at 17:14:21.574`, `confirmed_at 17:14:28.283`. The token was not expired or
+malformed, it was **spent**, 6.7 seconds after it was created, by the first GET that reached
+`/auth/callback`. A fresh `verifyOtp` against the same project succeeded, confirming the
+mechanism itself was healthy.
+
+**Root cause:** Supabase email tokens are single-use, and the URL that gets pasted into mail
+and chat is now our own route, so *any* fetch redeems it. Mail and chat platforms (Safe
+Links, Gmail, Slack unfurls, antivirus proxies) fetch links the moment they are sent, which
+burns the invite before the recipient ever clicks. 6.7s is equally consistent with the
+operator pasting it themselves — and that ambiguity is the point: the flow could not tell a
+human apart from a scanner, and either one locked the other out.
+
+**Fix:** the URL no longer carries a Supabase token. `invite_links`
+(`0017_invite_links.sql`) stores a SHA-256 of a 32-byte CSPRNG token — the raw value only
+ever exists in the link — against the user, the client, the issuer and an `expires_at`.
+Redemption looks the row up by hash, checks expiry, then mints a *fresh* magiclink token
+server-side and spends it immediately (`lib/auth/mint-session.ts`). The token that gets
+consumed lived for microseconds and never left the server, so the link stays usable until it
+lapses. A scanner fetching it no longer locks anyone out.
+
+**Window:** `INVITE_TTL_MINUTES` in `lib/auth/invite-ttl.ts`, **120** (2 hours), defined in
+exactly one place. Wide enough to survive email — a recipient reading their mail an hour later
+still gets in — at the cost of the link being a bearer credential for that long. The TTL and
+its wording live in `invite-ttl.ts` rather than `invite-token.ts` because the latter imports
+`node:crypto` and so cannot be pulled into the Client Component that quotes the window;
+`formatInviteTtl` keeps copy reading "2 hours" rather than "120 minutes".
+
+**Expiry UX:** a lapsed link no longer redirects to `/login`. `/auth/invite-expired` says so
+and tells the visitor to ask for a new one, distinguishing `expired` (ask again) from
+`invalid` (never real / truncated in transit / superseded), because telling a stranded user
+the wrong one wastes their time. Added to `PUBLIC_PATH_PREFIXES` and to the robots disallow
+list.
+
+**Also caught by the compiler, not by a test:** `invite_links.created_by` initially had a
+plain `references app_users(id)`, which defaults to NO ACTION — removing an operator would
+have failed outright while any invite they issued was outstanding. Now `on delete cascade`.
+Separately, `seed-dev.ts`'s `TABLES_IN_DELETE_ORDER` was annotated `readonly TableName[]`,
+which widened it to every table in the schema and made its `.neq('id', ...)` filter
+type-check against tables it never touches; switched to `as const satisfies`.
+
+**Reissuing:** `deleteInviteLinksForUser` runs before every insert, so a reissue cannot leave
+two live links against one account. Re-inviting an address that already has an account still
+returns 409 — remove the login from the Users tab first, then invite again.
+
+**Tests:** 48 across the callback route, invite route and token helpers — including that the
+link survives a second open inside the window, that the raw token never reaches the database,
+that expired and unknown tokens land on different messages, and that a failed link insert
+deletes the auth user rather than consuming the address.

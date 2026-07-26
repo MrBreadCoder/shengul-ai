@@ -496,6 +496,41 @@ export interface Database {
           },
         ]
       }
+      invite_links: {
+        Row: {
+          token_hash: string
+          user_id: string
+          client_id: string
+          created_by: string
+          expires_at: string
+          created_at: string
+        }
+        Insert: {
+          token_hash: string
+          user_id: string
+          client_id: string
+          created_by: string
+          expires_at: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['invite_links']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'invite_links_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'invite_links_created_by_fkey'
+            columns: ['created_by']
+            isOneToOne: false
+            referencedRelation: 'app_users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       mailboxes: {
         Row: {
           id: string
