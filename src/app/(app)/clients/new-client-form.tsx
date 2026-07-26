@@ -46,12 +46,25 @@ export function NewClientForm(): React.ReactElement {
   const isSubmitting = state.status === 'submitting'
 
   return (
-    <form action={onSubmit} className="border-hairline bg-surface flex flex-col gap-4 rounded-lg border p-5 sm:flex-row sm:items-end">
+    <form
+      action={onSubmit}
+      // Declarative WebMCP: an agent may fill this in, but the operator presses
+      // the button. No `toolautosubmit` — see `@/types/webmcp`.
+      toolname="createClient"
+      tooldescription="Adds a client to the console. Creating one does not start any outreach; a campaign has to be set up for it separately."
+      className="border-hairline bg-surface flex flex-col gap-4 rounded-lg border p-5 sm:flex-row sm:items-end"
+    >
       <div className="flex flex-1 flex-col gap-2">
         <Label htmlFor="name" className="text-xs">
           Client name
         </Label>
-        <Input id="name" name="name" required placeholder="Acme Corp" />
+        <Input
+          id="name"
+          name="name"
+          required
+          placeholder="Acme Corp"
+          toolparamdescription="The client company's name, as it should appear throughout the console."
+        />
       </div>
       <div className="flex items-center gap-3">
         <Button type="submit" size="sm" disabled={isSubmitting}>

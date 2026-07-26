@@ -815,3 +815,73 @@ clause, liability cap, SCC elections) need counsel review before they are relied
 question flagged to the operator: the documents still identify the site as
 `foundersideai.com`, because the contact addresses are on that domain and contact details
 were out of scope — confirm whether that is still the operating domain for Shengul AI.
+
+---
+
+## WebMCP — tools for browsing agents DONE
+
+**Date:** 2026-07-25. Closes the three Lighthouse *Agentic Browsing* audits
+(`webmcp-registered-tools`, `webmcp-form-coverage`, `webmcp-schema-validity`). The layer
+above `llms.txt` and JSON-LD: those hand a *crawler* the page's facts, this hands the
+*agent standing on the page* typed, callable tools.
+
+**API sources.** `document.modelContext.registerTool(tool, { signal })` per the W3C draft
+(`webmachinelearning.github.io/webmcp`), with a `navigator.modelContext` fallback for
+Chrome's origin trial (deprecated in Chrome 150). Neither is in `lib.dom.d.ts`, so the
+shapes are hand-written in `src/types/webmcp.ts`.
+
+**Security decision — read-only tools, declarative mutations.** A WebMCP tool runs in-page
+as the signed-in operator, so a prompt-injected agent calling a mutating tool would act with
+the full session. Every registered tool is therefore `readOnlyHint: true`, and every
+mutation stays a declarative form annotation: the agent fills it, the operator presses
+submit. No form carries `toolautosubmit` — the attribute is deliberately left out of the JSX
+augmentation so using it is a compile error, not a code-review catch.
+
+- [x] `src/lib/webmcp/define-tool.ts` — one Zod schema generates the JSON Schema the agent
+  reads *and* validates the arguments it sends, so the two cannot drift (which is exactly
+  what `webmcp-schema-validity` audits). Bad input returns `isError` rather than rejecting,
+  so the agent self-corrects; a throwing handler is escalated via `reportError` and the agent
+  gets a bare failure — a transcript is not a stack-trace sink.
+- [x] `model-context.ts` / `register.ts` / `use-webmcp-tools.ts` — probe, registration under
+  one `AbortSignal` (one `abort()` in React cleanup unregisters everything), and the hook.
+  Registration never throws: no browser has WebMCP yet and a missing API must not take a
+  page down. **Lazily imported** — the eager cost is one property read, and the descriptors
+  plus Zod (2.8 KB gzipped chunk, was landing in the marketing page's critical path) are
+  only fetched once the browser is known to support WebMCP.
+- [x] **Marketing `/`** — `getProductOverview`, `answerFaq`, `getBookingLink`. Answers come
+  from the same constants `/llms.txt` renders; `WHAT_IT_DOES` / `LIMITS` / the overview
+  paragraph moved to `src/lib/seo/product-facts.ts` so the crawler and the agent cannot get
+  different answers. `answerFaq` is a lexical scorer (`faq-match.ts`), not a model call —
+  a network hop would be slower than the agent just reading `/llms.txt`.
+- [x] **App** — `listClients` (`/clients`), `listCampaigns` (`/campaigns`),
+  `getMailboxHealth` (`/settings`, plus derived `remainingSendsToday`). Each answers from
+  data the page already fetched under the viewer's own scope, passed in as props: a
+  `WebMcpTool` carries an `execute` function so descriptors cannot cross the server/client
+  boundary, only the data can. Projections in `src/types/webmcp-app.ts`, `snake_case` →
+  `camelCase` mapped explicitly. `listCampaigns` exposes `mailboxCount`, never `mailbox_ids`.
+- [x] **Eight annotated forms** (`toolname` + `tooldescription`, `toolparamdescription` on
+  every field): `createClient`, `createCampaign`, `renameClient`, `setClientWebsite`,
+  `createClientInviteLink`, `discoverClientWebsitePages`, `addKnowledgePageUrl`,
+  `answerKnowledgeRequest`. Controlled inputs that had no `name` got one — a required field
+  without a `name` is a `webmcp-schema-validity` failure. The campaign form's Radix `Select`
+  gained `name="clientId"`, which makes its hidden native select a named required field; the
+  submit handler still reads `clientId` from state.
+- [x] **Four forms deliberately left unannotated**, each with a comment saying why, so nobody
+  "completes the coverage" later: `/login` and `/set-password` (an annotated credential form
+  advertises a password sink to any agent driving the browser), the SMTP connect dialog (takes
+  the mailbox password the whole pipeline sends with), and sign-out (no input, and the only
+  thing an agent could do with it is destroy its own access to every other tool). Lighthouse
+  listing these under `webmcp-form-coverage` is the intended state — that audit is
+  informational and does not fail.
+
+**Verified:** `tsc --noEmit` clean, `eslint` clean (0 errors; the 6 warnings are pre-existing
+`_omit` test bindings), 127 test files / 1145 tests green. `next build` succeeds with no
+warnings; all eight `toolname` values present in the build output; React confirmed to forward
+`toolname` / `tooldescription` / `toolparamdescription` to the DOM verbatim via
+`renderToStaticMarkup`. Against `next start`: `/` 200 with JSON-LD intact and the tools chunk
+**not** preloaded, `/login` 200 and carrying no `toolname`.
+
+**Not done:** no end-to-end check against a browser that actually implements WebMCP — none
+was available here, so registration is proven by unit tests over `resolveModelContext` and
+`registerWebMcpTools` rather than by a live agent call. Worth re-running Lighthouse's Agentic
+Browsing category once Chrome's flag is on.

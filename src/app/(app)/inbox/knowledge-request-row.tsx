@@ -66,6 +66,11 @@ export function KnowledgeRequestRow({
   return (
     <form
       action={onSubmit}
+      // Declarative WebMCP: an agent may draft the answer, but the operator
+      // presses the button — submitting this sends mail to the prospect. No
+      // `toolautosubmit` — see `@/types/webmcp`.
+      toolname="answerKnowledgeRequest"
+      tooldescription="Answers a question the outreach agent is blocked on, saves it as knowledge for this company, and replies to the prospect. Submitting sends an email."
       className="bg-surface rounded-lg border"
       // Open questions block the agent mid-conversation, so this row carries a
       // warmer edge than a draft: it is the thing to deal with first.
@@ -96,7 +101,12 @@ export function KnowledgeRequestRow({
       <div className="flex flex-col gap-4 px-4 py-4">
         <p className="max-w-[75ch] text-sm leading-relaxed">{question}</p>
 
-        <input type="hidden" name="knowledgeRequestId" value={knowledgeRequestId} />
+        <input
+          type="hidden"
+          name="knowledgeRequestId"
+          value={knowledgeRequestId}
+          toolparamdescription="Prefilled. Identifies which blocked question this answers — leave it exactly as it is."
+        />
 
         <div className="flex flex-col gap-2">
           <Label htmlFor={`answer-${knowledgeRequestId}`} className="text-xs">
@@ -111,6 +121,7 @@ export function KnowledgeRequestRow({
             onChange={(event) => setAnswer(event.target.value)}
             placeholder="State the fact plainly. The agent rewrites it in its own voice before replying."
             className="max-w-[75ch] resize-y"
+            toolparamdescription="The factual answer to the question shown above, stated plainly. It is rewritten in the sender's voice before it goes out, so phrasing does not matter but accuracy does. Never guess here."
           />
           <p className="text-faint text-[11px]">
             Saved as case knowledge, so the agent can reuse it on this company later.

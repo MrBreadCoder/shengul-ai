@@ -1,3 +1,4 @@
+import { LIMITS, PRODUCT_OVERVIEW, WHAT_IT_DOES } from '@/lib/seo/product-facts'
 import { absoluteUrl, SITE_NAME, SITE_SUMMARY } from '@/lib/seo/site'
 
 /**
@@ -15,22 +16,6 @@ export interface LlmsTxtInput {
   readonly updatedAt: string
 }
 
-/** What the service actually does, stated plainly for a model to quote. */
-const WHAT_IT_DOES: readonly string[] = [
-  'Finds the people matching your ideal customer profile and verifies their work email before anything is sent.',
-  'Researches each company so the first email refers to something real rather than a merge field.',
-  'Sends from your own mailbox at human volume and human hours, so your sending reputation improves rather than degrades.',
-  'Answers replies in your voice, stops the follow-up sequence the moment somebody responds, and offers your booking link.',
-  'Escalates anything involving money or a real decision to you, with the full thread attached.',
-]
-
-/** Claims the product deliberately does not make. */
-const LIMITS: readonly string[] = [
-  'It does not blast a list: volume is capped per mailbox per day.',
-  'It does not invent facts about a company; when it cannot verify something it asks you instead of guessing.',
-  'It does not buy or resell your data, and mailbox credentials are encrypted with AES-256-GCM before they are stored.',
-]
-
 export function buildLlmsTxt({
   siteUrl,
   bookingUrl,
@@ -45,10 +30,7 @@ export function buildLlmsTxt({
 
 > ${SITE_SUMMARY}
 
-${SITE_NAME} is a managed B2B outbound service. You describe the buyer you want
-to meet; the system finds them, writes to them from your own mailbox, answers
-what comes back, and hands you the meetings that get booked. The four numbers
-reported back are leads found, emails sent, replies, and meetings booked.
+${SITE_NAME} is ${PRODUCT_OVERVIEW.charAt(0).toLowerCase()}${PRODUCT_OVERVIEW.slice(1)}
 
 ## What it does
 

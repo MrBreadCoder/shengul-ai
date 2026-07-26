@@ -148,6 +148,12 @@ export function ConnectSmtpDialog(): React.ReactElement {
           <DialogTitle>Connect a mailbox over SMTP</DialogTitle>
         </DialogHeader>
 
+        {/*
+          Deliberately unannotated for WebMCP. This form takes a mailbox password
+          — the credential the whole pipeline sends with — so it is not something
+          an agent should be filling in, even with a human on the submit button.
+          Lighthouse listing it under `webmcp-form-coverage` is intended.
+        */}
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <p className="text-muted-foreground text-xs">
             Sending uses SMTP and reading replies uses IMAP. Both are checked before the mailbox is saved.

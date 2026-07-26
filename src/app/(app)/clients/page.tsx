@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { Buildings, Warning } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { listClientsFull } from '@/lib/db/clients'
+import { listClientsFull, type ClientRow } from '@/lib/db/clients'
 import { countRecentErrorsByClient } from '@/lib/db/events'
 import type { ClientErrorCount } from '@/types/logs'
+import type { ClientDirectoryEntry } from '@/types/webmcp-app'
 import { formatRelative } from '@/lib/format'
 import { CLIENT_STATUS } from '@/lib/ui/status'
 import { StatusPill } from '@/components/status-dot'
@@ -14,6 +15,7 @@ import { CompanyMark } from '@/components/company-mark'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { NewClientForm } from './new-client-form'
+import { ClientsWebMcpTools } from './clients-webmcp-tools'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +24,14 @@ export const metadata: Metadata = { title: 'Clients' }
 // The window the health chip summarises. Short on purpose: an operator scanning
 // this list wants "is this broken right now", not a lifetime error total.
 const HEALTH_WINDOW_HOURS = 24
+
+/**
+ * Narrows a row to the fields the `listClients` WebMCP tool answers with, and
+ * renames the Postgres columns to the `camelCase` the tool's schema declares.
+ */
+function toWebMcpEntry({ id, name, status, domain, created_at }: ClientRow): ClientDirectoryEntry {
+  return { id, name, status, domain, createdAt: created_at }
+}
 
 interface ClientHealthChipProps {
   counts: ClientErrorCount | undefined
@@ -67,6 +77,7 @@ export default async function ClientsPage(): Promise<React.ReactElement> {
 
   return (
     <div className="flex max-w-3xl flex-col gap-10">
+      <ClientsWebMcpTools clients={clients.map(toWebMcpEntry)} />
       <PageHeader
         title="Clients"
         description="Every client the agent runs campaigns for. Open one to manage its campaigns, analytics, and logins."

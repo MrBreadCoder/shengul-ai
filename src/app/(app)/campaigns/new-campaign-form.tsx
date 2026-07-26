@@ -115,11 +115,21 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
   const isSubmitting = state.status === 'submitting'
 
   return (
-    <form action={onSubmit} className="border-hairline bg-surface flex flex-col gap-5 rounded-lg border p-5">
+    <form
+      action={onSubmit}
+      // Declarative WebMCP: an agent may fill this in, but the operator presses
+      // the button. No `toolautosubmit` — see `@/types/webmcp`.
+      toolname="createCampaign"
+      tooldescription="Sets up an outreach campaign: which client it runs for, what it promises, and the ideal customer profile the daily Apollo discovery run searches against."
+      className="border-hairline bg-surface flex flex-col gap-5 rounded-lg border p-5"
+    >
       <div className="grid gap-5 sm:grid-cols-2">
         {isFixed ? null : (
           <Field id="clientId" label="Client">
-            <Select value={clientId} onValueChange={setClientId} required>
+            {/* `name` makes Radix's hidden native select a named required field,
+                which is what an agent (and Lighthouse) looks for. The submit
+                handler still reads `clientId` from state. */}
+            <Select value={clientId} onValueChange={setClientId} name="clientId" required>
               <SelectTrigger id="clientId" className="w-full">
                 <SelectValue placeholder="Select a client" />
               </SelectTrigger>
@@ -135,7 +145,13 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
         )}
 
         <Field id="name" label="Campaign name">
-          <Input id="name" name="name" required placeholder="Q3 mid-market ops" />
+          <Input
+            id="name"
+            name="name"
+            required
+            placeholder="Q3 mid-market ops"
+            toolparamdescription="An internal label for this campaign. Never shown to a prospect."
+          />
         </Field>
       </div>
 
@@ -151,12 +167,19 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           rows={3}
           placeholder="We cut invoice reconciliation time for finance teams running NetSuite."
           className="resize-y"
+          toolparamdescription="One or two sentences naming the outcome the client delivers, not the product. Every first email is grounded on this, so vague copy produces vague email."
         />
       </Field>
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field id="bookingLink" label="Booking link" hint="Optional. Used on a hot handoff.">
-          <Input id="bookingLink" name="bookingLink" type="url" placeholder="https://cal.com/you/30min" />
+          <Input
+            id="bookingLink"
+            name="bookingLink"
+            type="url"
+            placeholder="https://cal.com/you/30min"
+            toolparamdescription="Optional. The scheduler URL offered when a prospect turns into a real decision. Leave blank to hand those threads straight to the operator instead."
+          />
         </Field>
 
         <Field id="dailyTarget" label="Daily discovery target" hint="Apollo records pulled per day.">
@@ -168,6 +191,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
             min={1}
             max={100}
             className="tnum"
+            toolparamdescription="How many new people to pull from Apollo each day, 1 to 100. Defaults to 50."
           />
         </Field>
       </div>
@@ -177,7 +201,12 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
         <p className="text-xs font-medium">Ideal customer profile</p>
 
         <Field id="personTitles" label="Target titles" hint="Comma-separated.">
-          <Input id="personTitles" name="personTitles" placeholder="vp sales, head of revenue, founder" />
+          <Input
+            id="personTitles"
+            name="personTitles"
+            placeholder="vp sales, head of revenue, founder"
+            toolparamdescription="Comma-separated job titles to search for. Broad titles find more people; narrow ones find better ones."
+          />
         </Field>
 
         <Field id="organizationLocations" label="Company locations" hint="Comma-separated.">
@@ -185,6 +214,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
             id="organizationLocations"
             name="organizationLocations"
             placeholder="united states, united kingdom"
+            toolparamdescription="Comma-separated countries or regions the target company is headquartered in."
           />
         </Field>
 
@@ -197,20 +227,42 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
             id="excludeOrganizationLocations"
             name="excludeOrganizationLocations"
             placeholder="ireland, india"
+            toolparamdescription="Comma-separated countries or regions to skip. Companies headquartered in one of these are never contacted."
           />
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field id="employeeMin" label="Min employees">
-            <Input id="employeeMin" name="employeeMin" type="number" min={1} placeholder="50" className="tnum" />
+            <Input
+              id="employeeMin"
+              name="employeeMin"
+              type="number"
+              min={1}
+              placeholder="50"
+              className="tnum"
+              toolparamdescription="Smallest headcount to consider. Leave blank for no lower bound."
+            />
           </Field>
           <Field id="employeeMax" label="Max employees">
-            <Input id="employeeMax" name="employeeMax" type="number" min={1} placeholder="500" className="tnum" />
+            <Input
+              id="employeeMax"
+              name="employeeMax"
+              type="number"
+              min={1}
+              placeholder="500"
+              className="tnum"
+              toolparamdescription="Largest headcount to consider. Leave blank for no upper bound."
+            />
           </Field>
         </div>
 
         <Field id="keywords" label="Keywords" hint="Comma-separated.">
-          <Input id="keywords" name="keywords" placeholder="saas, logistics, fintech" />
+          <Input
+            id="keywords"
+            name="keywords"
+            placeholder="saas, logistics, fintech"
+            toolparamdescription="Comma-separated industry or market words the target company should match."
+          />
         </Field>
 
         <Field
@@ -218,7 +270,12 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           label="Exclude keywords"
           hint="Comma-separated. Matched against company name and title — Apollo doesn't expose company keyword/industry text at search time, so this filter runs after Apollo returns results, not inside Apollo's own search."
         >
-          <Input id="excludeKeywords" name="excludeKeywords" placeholder="staffing, agency, recruiting" />
+          <Input
+            id="excludeKeywords"
+            name="excludeKeywords"
+            placeholder="staffing, agency, recruiting"
+            toolparamdescription="Comma-separated words that disqualify a company. Matched against its name and the person's title after Apollo returns results."
+          />
         </Field>
       </fieldset>
 

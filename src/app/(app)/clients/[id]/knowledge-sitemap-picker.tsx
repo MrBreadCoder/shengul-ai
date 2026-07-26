@@ -154,14 +154,23 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
 
   return (
     <div className="border-hairline bg-surface flex flex-col gap-4 rounded-lg border p-4">
-      <form onSubmit={(e) => void onDiscover(e)} className="flex items-center gap-2">
+      <form
+        onSubmit={(e) => void onDiscover(e)}
+        // Declarative WebMCP: an agent may fill this in, but the operator
+        // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
+        toolname="discoverClientWebsitePages"
+        tooldescription="Lists the pages on a website by reading its sitemap, falling back to a crawl. Only lists them for review — nothing is scraped until pages are selected and added."
+        className="flex items-center gap-2"
+      >
         <Input
           type="url"
+          name="websiteUrl"
           required
           placeholder="https://client-website.com"
           value={websiteUrl}
           onChange={(e) => setWebsiteUrl(e.target.value)}
           aria-label="Website URL"
+          toolparamdescription="The site's home page URL, including https://. Its sitemap is read to find every page."
         />
         <Button type="submit" disabled={isDiscovering}>
           <MagnifyingGlass size={14} weight="light" />
@@ -173,13 +182,22 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
         <p role="alert" className="text-destructive text-[13px]">{discoverState.message}</p>
       ) : null}
 
-      <form onSubmit={onAddManualUrl} className="flex items-center gap-2">
+      <form
+        onSubmit={onAddManualUrl}
+        // Declarative WebMCP: an agent may fill this in, but the operator
+        // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
+        toolname="addKnowledgePageUrl"
+        tooldescription="Adds one page URL to the list below and ticks it, for a page the sitemap missed. The page is only queued for scraping once the list is submitted with Add selected."
+        className="flex items-center gap-2"
+      >
         <Input
           type="url"
+          name="pageUrl"
           placeholder="https://client-website.com/specific-page"
           value={manualUrl}
           onChange={(e) => setManualUrl(e.target.value)}
           aria-label="Add a page URL manually"
+          toolparamdescription="The full URL of a single page, including https://."
         />
         <Button type="submit" variant="outline" disabled={manualUrl.trim().length === 0}>
           <PlusIcon size={14} weight="light" />

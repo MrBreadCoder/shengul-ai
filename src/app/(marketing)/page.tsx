@@ -13,6 +13,7 @@ import { Faq } from '@/components/landing/faq'
 import { FAQ_ITEMS } from '@/components/landing/faq-items'
 import { ClosingCta } from '@/components/landing/closing-cta'
 import { SiteFooter } from '@/components/landing/site-footer'
+import { MarketingWebMcpTools } from '@/components/landing/webmcp-tools'
 import { JsonLd } from '@/components/seo/json-ld'
 import { buildLandingJsonLd } from '@/lib/seo/json-ld'
 import {
@@ -76,6 +77,7 @@ export default async function MarketingPage(): Promise<React.ReactElement> {
   return (
     <div className="landing min-h-[100dvh] bg-[var(--l-bg)] text-[var(--l-text)] antialiased">
       <JsonLd data={LANDING_JSON_LD} />
+      <MarketingWebMcpTools />
       <SiteNav />
       <main>
         <Hero />

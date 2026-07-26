@@ -2,15 +2,48 @@ import type { Metadata } from 'next'
 import { Envelope } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
-import { listMailboxesForViewer } from '@/lib/db/mailboxes'
+import { listMailboxesForViewer, type MailboxSummary } from '@/lib/db/mailboxes'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { ConnectButtons } from './connect-buttons'
 import { MailboxRow } from './mailbox-row'
+import { MailboxesWebMcpTools } from './mailboxes-webmcp-tools'
+import type { MailboxHealthEntry } from '@/types/webmcp-app'
 
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = { title: 'Settings' }
+
+/**
+ * Narrows a row to the fields the `getMailboxHealth` WebMCP tool answers with,
+ * renaming the Postgres columns to the `camelCase` the tool's schema declares.
+ * Stored credentials never appear in `MailboxSummary`, so none can leak here.
+ */
+function toWebMcpEntry({
+  id,
+  provider,
+  email_address,
+  display_name,
+  health,
+  health_reason,
+  daily_cap,
+  sent_today,
+  warmup_profile,
+  warmup_started_at,
+}: MailboxSummary): MailboxHealthEntry {
+  return {
+    id,
+    provider,
+    emailAddress: email_address,
+    displayName: display_name,
+    health,
+    healthReason: health_reason,
+    dailyCap: daily_cap,
+    sentToday: sent_today,
+    warmupProfile: warmup_profile,
+    warmupStartedAt: warmup_started_at,
+  }
+}
 
 export default async function SettingsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
@@ -21,6 +54,7 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
 
   return (
     <div className="flex max-w-3xl flex-col gap-10">
+      <MailboxesWebMcpTools mailboxes={connected.map(toWebMcpEntry)} />
       <PageHeader
         title="Settings"
         description={`Signed in as ${appUser.role}. Mailboxes connected here are what the agent sends from.`}

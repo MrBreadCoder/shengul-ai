@@ -43,6 +43,9 @@ export function SetPasswordForm(): React.ReactElement {
   }
 
   return (
+    // Deliberately unannotated for WebMCP, like the sign-in form: an agent has
+    // no business choosing or typing an account password. Lighthouse listing it
+    // under `webmcp-form-coverage` is the intended state.
     <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="password" className="text-xs">

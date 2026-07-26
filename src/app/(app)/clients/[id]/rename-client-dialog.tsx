@@ -69,12 +69,26 @@ export function RenameClientDialog({ clientId, currentName }: { clientId: string
         <DialogHeader>
           <DialogTitle>Rename client</DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <form
+          onSubmit={onSubmit}
+          // Declarative WebMCP: an agent may fill this in, but the operator
+          // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
+          toolname="renameClient"
+          tooldescription="Changes a client's display name across the console. Cosmetic only — campaigns, cases and mail are unaffected."
+          className="flex flex-col gap-4"
+        >
           <div className="flex flex-col gap-2">
             <Label htmlFor="clientName" className="text-xs">
               Name
             </Label>
-            <Input id="clientName" value={name} onChange={(event) => setName(event.target.value)} required />
+            <Input
+              id="clientName"
+              name="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              toolparamdescription="The client's new name. Cannot be blank."
+            />
           </div>
           {state.status === 'error' ? (
             <p role="alert" className="text-destructive text-xs">

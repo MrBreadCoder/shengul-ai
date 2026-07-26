@@ -64,6 +64,11 @@ function SidebarBody({
           <p className="text-faint text-[11px] capitalize">{role}</p>
         </div>
         <ThemeToggle />
+        {/*
+          Deliberately unannotated for WebMCP: it takes no input, and the only
+          thing an agent could do with it is end the operator's session — which
+          also destroys the agent's own access to every other tool on the page.
+        */}
         <form action="/api/auth/signout" method="post">
           <Button
             type="submit"

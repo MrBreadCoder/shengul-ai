@@ -93,18 +93,27 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
             </div>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <form
+            onSubmit={onSubmit}
+            // Declarative WebMCP: an agent may fill this in, but the operator
+            // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
+            toolname="createClientInviteLink"
+            tooldescription="Generates a single-use link that lets this client set their own password and sign in. The link is shown on screen to copy; nothing is emailed."
+            className="flex flex-col gap-4"
+          >
             <div className="flex flex-col gap-2">
               <Label htmlFor={`invite-email-${clientId}`} className="text-xs">
                 Client&apos;s email
               </Label>
               <Input
                 id={`invite-email-${clientId}`}
+                name="email"
                 type="email"
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="person@client.com"
+                toolparamdescription="The email address that will own the login. It becomes the account's identity, so it has to be one the client controls."
               />
             </div>
             {state.status === 'error' ? (

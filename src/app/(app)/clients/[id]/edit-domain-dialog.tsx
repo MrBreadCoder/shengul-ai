@@ -77,16 +77,25 @@ export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogPr
         <DialogHeader>
           <DialogTitle>Website</DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <form
+          onSubmit={onSubmit}
+          // Declarative WebMCP: an agent may fill this in, but the operator
+          // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
+          toolname="setClientWebsite"
+          tooldescription="Records the client's own website, used to auto-fetch its logo from the site favicon. Submitting it empty clears the field."
+          className="flex flex-col gap-4"
+        >
           <div className="flex flex-col gap-2">
             <Label htmlFor="clientDomain" className="text-xs">
               Domain
             </Label>
             <Input
               id="clientDomain"
+              name="domain"
               value={domain}
               onChange={(event) => setDomain(event.target.value)}
               placeholder="acme.com"
+              toolparamdescription="The client's bare domain, without a scheme or path — for example acme.com. Optional; leave blank to clear it."
             />
             <p className="text-faint text-[11px]">
               Used to auto-fetch a logo from the site&apos;s favicon when no logo is uploaded. Leave blank to clear it.

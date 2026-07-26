@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { Lightning } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { listCampaignsForClient } from '@/lib/db/campaigns'
+import { listCampaignsForClient, type CampaignRow } from '@/lib/db/campaigns'
 import { listClients } from '@/lib/db/clients'
 import { formatRelative } from '@/lib/format'
 import { CAMPAIGN_STATUS } from '@/lib/ui/status'
@@ -12,10 +12,39 @@ import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { NewCampaignForm } from './new-campaign-form'
 import { CampaignRowActions } from './campaign-row-actions'
+import { CampaignsWebMcpTools } from './campaigns-webmcp-tools'
+import type { CampaignDirectoryEntry } from '@/types/webmcp-app'
 
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = { title: 'Campaigns' }
+
+/**
+ * Narrows a row to the fields the `listCampaigns` WebMCP tool answers with. The
+ * mailbox ids themselves stay behind — an agent needs to know how many
+ * mailboxes a campaign sends from, not which.
+ */
+function toWebMcpEntry({
+  id,
+  client_id,
+  name,
+  status,
+  value_prop,
+  daily_target,
+  mailbox_ids,
+  created_at,
+}: CampaignRow): CampaignDirectoryEntry {
+  return {
+    id,
+    clientId: client_id,
+    name,
+    status,
+    valueProp: value_prop,
+    dailyTarget: daily_target,
+    mailboxCount: mailbox_ids.length,
+    createdAt: created_at,
+  }
+}
 
 export default async function CampaignsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
@@ -30,6 +59,7 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
 
   return (
     <div className="flex max-w-3xl flex-col gap-10">
+      <CampaignsWebMcpTools campaigns={campaigns.map(toWebMcpEntry)} />
       <PageHeader
         title="Campaigns"
         description="A campaign defines who the agent looks for and what it says. Discovery runs daily against these filters."

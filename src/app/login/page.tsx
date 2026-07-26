@@ -43,6 +43,12 @@ export default function LoginPage(): React.ReactElement {
           Your outreach pipeline, mail and case knowledge.
         </p>
 
+        {/*
+          Deliberately carries no WebMCP `toolname`/`tooldescription`. Lighthouse
+          reports it under `webmcp-form-coverage`; that is the intended state. An
+          annotated sign-in form advertises a credential sink to any agent
+          driving the browser, and no agent should be typing a password.
+        */}
         <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4" noValidate={false}>
           <div className="flex flex-col gap-2">
             <Label htmlFor="email" className="text-xs">
