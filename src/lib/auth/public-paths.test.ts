@@ -34,12 +34,26 @@ describe('isPublicPath', () => {
     }
   })
 
-  it('should keep pipeline routes behind the session check', () => {
-    expect(isPublicPath('/api/pipeline/write')).toBe(false)
+  // QStash delivers these with no cookies at all. A session check here does not
+  // reject the request, it 307s it to /login, and QStash follows the redirect
+  // with the POST intact — so the worker sees a 405 from the sign-in page and
+  // burns all of its retries. The signature check inside each route is the
+  // actual authentication.
+  it('should allow signed-request worker routes', () => {
+    for (const path of [
+      '/api/pipeline/write',
+      '/api/pipeline/knowledge-scrape',
+      '/api/inbound/poll',
+      '/api/inbound/reply',
+    ]) {
+      expect(isPublicPath(path), path).toBe(true)
+    }
   })
 
   it('should not treat a path that merely starts with a public segment as public', () => {
     expect(isPublicPath('/legalese')).toBe(false)
     expect(isPublicPath('/legal-hold')).toBe(false)
+    expect(isPublicPath('/api/pipelines-admin')).toBe(false)
+    expect(isPublicPath('/api/inbound-admin')).toBe(false)
   })
 })

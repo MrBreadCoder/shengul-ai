@@ -16,11 +16,23 @@ const EXACT_PUBLIC_PATHS: readonly string[] = ['/', '/legal']
  * `/legal/` is public because the documents are written for people who do not
  * have an account and never will: somebody who received a cold email and wants
  * it to stop must not be answered with a sign-in form.
+ *
+ * `/api/pipeline/` and `/api/inbound/` are public to the *middleware* only —
+ * every route under them verifies an `upstash-signature` at entry, which is
+ * strictly stronger than a cookie for a machine-to-machine caller that has no
+ * cookies. Gating them on the session did not reject QStash's delivery, it
+ * redirected it: the 307 preserves the POST, QStash follows it, and the
+ * sign-in page answers 405 until the message exhausts its retries.
+ *
+ * The trailing slashes matter — without them a future `/api/pipelines-admin`
+ * page would be served to anyone.
  */
 const PUBLIC_PATH_PREFIXES: readonly string[] = [
   '/legal/',
   '/login',
-  '/api/cron',
+  '/api/cron/',
+  '/api/pipeline/',
+  '/api/inbound/',
   '/auth/callback',
 ]
 

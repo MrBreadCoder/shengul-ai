@@ -885,3 +885,40 @@ warnings; all eight `toolname` values present in the build output; React confirm
 was available here, so registration is proven by unit tests over `resolveModelContext` and
 `registerWebMcpTools` rather than by a live agent call. Worth re-running Lighthouse's Agentic
 Browsing category once Chrome's flag is on.
+
+---
+
+## Fix — QStash workers were being redirected to `/login` (405, all retries burned)
+
+**Symptom:** every QStash message to a worker route failed with `HTTP status 405`,
+`X-Matched-Path: /login`, `Content-Length: 0`, `X-Vercel-Cache: HIT`. Observed on
+`/api/pipeline/knowledge-scrape` (`{"sourceId": ...}`), but it applied to every route under
+`/api/pipeline/` and `/api/inbound/`, which is the entire background pipeline: discover,
+research, write, followup, collision-notify, stuck-sweep, log-retention, mailbox-health,
+mailbox-reset, inbound poll and reply.
+
+**Root cause:** `isPublicPath` listed only `/api/cron` as a machine-callable prefix, so the
+middleware's session check caught the worker routes. QStash sends no cookies, so
+`supabase.auth.getUser()` returned no user and the middleware answered
+`NextResponse.redirect(/login)` — a **307**, which preserves the method and body. QStash's
+HTTP client follows redirects, so the POST landed on the statically-cached `/login` page,
+which has no `POST` handler → 405. Each message then retried three times into the same wall.
+The session check never rejected these requests; it re-routed them.
+
+**Fix:** `/api/pipeline/` and `/api/inbound/` added to `PUBLIC_PATH_PREFIXES` in
+`src/lib/auth/public-paths.ts`. They are public *to the middleware only* — every route under
+both prefixes calls `verifyQstashSignature` at entry, which is strictly stronger auth than a
+cookie for a caller that has no cookies. `/api/cron` gained a trailing slash to match the
+other prefixes, so a future `/api/cron-admin` cannot be exposed by prefix collision.
+
+**Test:** `should keep pipeline routes behind the session check` encoded the bug and was
+replaced with `should allow signed-request worker routes` (asserts pipeline + inbound), plus
+prefix-collision cases for `/api/pipelines-admin` and `/api/inbound-admin`.
+
+**Verified:** `public-paths.test.ts` 8/8 green — confirmed failing on the old source first
+(`expected false to be true` for `/api/pipeline/write`), passing after the fix.
+
+**Backlog left by the outage:** messages that already exhausted their retries are gone.
+Knowledge sources stuck in a non-`ready` state need to be re-queued (the re-scrape action
+re-publishes through the same route); sequence-side work is picked back up by `stuck-sweep`
+once it can run.
