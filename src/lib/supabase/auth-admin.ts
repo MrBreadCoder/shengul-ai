@@ -27,6 +27,46 @@ export async function unbanAuthUsers(admin: SupabaseClient<Database>, userIds: s
   }
 }
 
+/** Supabase reports a missing user as a 404 with this code. */
+const USER_NOT_FOUND_CODE = 'user_not_found'
+
+function isUserNotFound(error: { status?: number; code?: string }): boolean {
+  return error.status === 404 || error.code === USER_NOT_FOUND_CODE
+}
+
+/**
+ * Reads one auth user's email, for confirming a destructive action against the
+ * address the operator actually typed. Returns null when the user is gone, so
+ * the caller can answer 404 rather than throw.
+ */
+export async function getAuthUserEmail(
+  admin: SupabaseClient<Database>,
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await admin.auth.admin.getUserById(userId)
+  if (error) {
+    if (isUserNotFound(error)) return null
+    throw new AppError('EXTERNAL_ERROR', 'Failed to load an auth user', { userId, cause: error.message })
+  }
+  return data.user?.email ?? null
+}
+
+/**
+ * Deletes a single login.
+ *
+ * A user that is already gone counts as success. Removing a login is two
+ * deletes against two systems that share no transaction, so a failure between
+ * them has to be retryable: without this, a retry after the auth user was
+ * deleted but its `app_users` row was not would fail forever on a user that no
+ * longer exists.
+ */
+export async function deleteAuthUser(admin: SupabaseClient<Database>, userId: string): Promise<void> {
+  const { error } = await admin.auth.admin.deleteUser(userId)
+  if (error && !isUserNotFound(error)) {
+    throw new AppError('EXTERNAL_ERROR', 'Failed to delete an auth user', { userId, cause: error.message })
+  }
+}
+
 // Called only after the corresponding clients row (and its cascaded app_users
 // row) has already been deleted — auth.users has no FK to clients, so this is
 // the only thing that removes the login itself.

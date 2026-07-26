@@ -59,6 +59,15 @@ export async function insertAppUser(
   if (error) throw new AppError('DB_ERROR', 'Failed to insert app_user', { cause: error.message })
 }
 
+// Removes the role/client link only. The Supabase Auth user is a separate
+// resource with no FK to this table, so callers must delete it themselves —
+// see `deleteAuthUser`, which the users route calls *first* for exactly that
+// reason.
+export async function deleteAppUser(supabase: SupabaseClient<Database>, id: string): Promise<void> {
+  const { error } = await supabase.from('app_users').delete().eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to delete app_user', { id, cause: error.message })
+}
+
 const DEMO_CLIENT_NAME = 'Demo Client'
 
 // P0 has no campaign/client UI. The operator demo attaches mailboxes to a single

@@ -23,6 +23,7 @@ import { AnalyticsView } from '../../analytics/analytics-view'
 import { NewCampaignForm } from '../../campaigns/new-campaign-form'
 import { CampaignRowActions } from '../../campaigns/campaign-row-actions'
 import { InviteUserDialog } from '../invite-user-dialog'
+import { RemoveUserDialog } from '../remove-user-dialog'
 import { RenameClientDialog } from './rename-client-dialog'
 import { EditDomainDialog } from './edit-domain-dialog'
 import { LogoUpload } from './logo-upload'
@@ -239,8 +240,12 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             ) : (
               <ul className="flex flex-col gap-2">
                 {users.map((user) => (
-                  <li key={user.id} className="border-hairline bg-surface rounded-lg border p-3 text-sm">
-                    {user.email}
+                  <li
+                    key={user.id}
+                    className="border-hairline bg-surface flex items-center gap-3 rounded-lg border p-3 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{user.email}</span>
+                    <RemoveUserDialog clientId={client.id} userId={user.id} email={user.email} />
                   </li>
                 ))}
               </ul>

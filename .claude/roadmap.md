@@ -287,7 +287,7 @@ password.
 - [x] `src/lib/supabase/list-auth-users.ts` — paginated `auth.admin.listUsers()` wrapper for joining `app_users` to an email.
 - [x] `POST /api/clients` — operator-only client creation.
 - [x] `POST /api/clients/[clientId]/invite` — generates a Supabase `generateLink({ type: 'invite' })` URL, links the resulting auth user to the client via `app_users`, with auth-user cleanup if the link insert fails.
-- [x] `/auth/callback` + `/set-password` — exchanges the invite code for a session and lets the invited user set their password, reusing the existing `/login` page afterward.
+- [x] `/auth/callback` + `/set-password` — verifies the invite token and lets the invited user set their password, reusing the existing `/login` page afterward.
 - [x] `/clients` admin page, nav entry (operator-only, same pattern as `/campaigns`).
 - [x] Regression test added confirming campaign creation was already, and remains, operator-only (`src/app/api/campaigns/route.test.ts`).
 - [x] `supabase/migrations/0009_analytics_client_filter.sql` — optional `p_client_id` filter added to `analytics_overview`/`analytics_daily`, mirroring the existing `p_campaign_id` pattern; RLS/`SECURITY INVOKER` semantics for client-role viewers unchanged.
@@ -295,7 +295,7 @@ password.
 - [x] `/clients` page links each client row straight to `/analytics?client=<id>`.
 
 **Operational notes:**
-- Supabase Dashboard → Authentication → URL Configuration must allow-list `${APP_URL}/auth/callback`, or invite links will fail to redirect.
+- `APP_URL` must be the **canonical** production origin (the host the apex/`www` redirect settles on). It is the origin baked into every invite link. No Supabase redirect allow-listing is required — see the invite-link outage note at the end of this file.
 - Migration `0009_analytics_client_filter.sql` must be applied (`supabase db push` / `supabase migration up`) to the target project before the client analytics filter works.
 
 ## Client Detail Workspace — Group A: lifecycle DB + API (2026-07-21)
@@ -345,6 +345,7 @@ Tasks 13–15. `/clients/[id]` now mirrors `/cases/[id]`'s header+tabs shape exa
 - [x] Campaigns tab embeds `NewCampaignForm` inline (Task 14): its props widened to `{ clients }` (unchanged, `/campaigns` page) `| { fixedClientId; fixedClientName }` (new) — when fixed, the client dropdown is skipped entirely and `clientId` state is pre-seeded, so creating a campaign from the client page never shows a client picker and never redirects (`router.refresh()`, same as before).
 - [x] Analytics tab renders `AnalyticsView` (Group C) with `scope: { kind: 'client', clientId }` — identical stat tiles/trend/campaign/mailbox/event-log sections as the global `/analytics` page, forced to this client, filter changes stay on `/clients/[id]?tab=analytics`.
 - [x] Users tab reuses the existing `InviteUserDialog`.
+- [x] **Remove a login** (2026-07-26): `DELETE /api/clients/[clientId]/users/[userId]` + `RemoveUserDialog` on each Users-tab row. Deletes the Supabase Auth user *and* the `app_users` row permanently, freeing the address to be invited again. Type-the-email confirmation, re-checked server-side. Every identity check runs before any delete — the row must exist, be `role: 'client'`, and belong to the client in the path; each failure answers 404 rather than 403 so probing ids for another client's users reveals nothing. The auth user is deleted **before** the `app_users` row (the reverse of the client-level delete): the Users tab is rendered from `app_users`, so dropping that row first and then failing would hide a login that still exists with its email permanently consumed — invisible and unretryable. `deleteAuthUser` treats an already-missing user as success so a retry after a partial failure converges. Audited as `client.user_removed`.
 - [x] `/clients` list page (Task 15) simplified: each row is now a single `Link` card straight to `/clients/[id]` (name, status pill, created-at) — the inline `InviteUserDialog`, user-email badges, and "View analytics" button/link are gone from the list entirely, now living on the detail page instead. `listClientRoleAppUsers`/`listAllAuthUsers` no longer queried on this page.
 
 Verified: `pnpm build` succeeds — `/clients/[id]` now a registered dynamic route (28 routes total) — `tsc --noEmit` clean (including the `isFixed`-narrowed union access in `NewCampaignForm`, via TS's aliased-condition control-flow analysis), full suite still 504/504 (no existing tested function signatures changed). Manual check: unauthenticated `GET /clients` and `GET /clients/<uuid>` both 307 to `/login`, no 500s. Full authenticated visual parity (rename dialog, lifecycle buttons, tab navigation, campaign creation without redirect) not exercised live — no Supabase session available in this environment. Commits skipped per instruction.
@@ -922,3 +923,45 @@ prefix-collision cases for `/api/pipelines-admin` and `/api/inbound-admin`.
 Knowledge sources stuck in a non-`ready` state need to be re-queued (the re-scrape action
 re-publishes through the same route); sequence-side work is picked back up by `stuck-sweep`
 once it can run.
+
+---
+
+## Outage note — invite links opened the marketing page instead of signing the user in (2026-07-26)
+
+**Symptom:** a client invite link
+(`…supabase.co/auth/v1/verify?token=…&type=invite&redirect_to=https://shengulai.com`)
+landed on the marketing home page with the session in the URL fragment
+(`https://www.shengulai.com/#access_token=…&type=invite`). No cookie, no session, no
+`/set-password`. Every invited client was dead on arrival.
+
+**Root cause — two defects, and fixing only the visible one would not have worked:**
+
+1. `redirect_to` was **not** `${APP_URL}/auth/callback`, which is what the invite route asked
+   for. GoTrue validates `redirectTo` against the project's redirect allow-list and, when it
+   does not match, silently substitutes the **Site URL** rather than erroring. The Site URL is
+   the marketing origin, so the invite was pointed at `/` by the auth server itself.
+2. Even with the allow-list fixed, the flow could not work. `admin.generateLink` produces an
+   **implicit-flow** link — the server requesting it holds no PKCE code verifier, so GoTrue's
+   `/verify` endpoint completes the verification itself and 302s to `redirect_to` with the
+   tokens in the URL **fragment**. A fragment is never sent to the server, so
+   `/auth/callback`'s `exchangeCodeForSession` would have found no `?code=` and bounced to
+   `/login` anyway.
+
+**Fix:** stop using the hosted verify link. `POST /api/clients/[clientId]/invite` now drops the
+`redirectTo` option entirely and builds its own first-party link from
+`data.properties.hashed_token`:
+`${APP_URL}/auth/callback?token_hash=…&type=invite&next=/set-password`. `/auth/callback` gained
+a `token_hash`/`type` branch that calls `supabase.auth.verifyOtp(...)` and writes the session
+cookies server-side; the `?code=` PKCE branch stays for OAuth. `type` is validated against a
+closed union first — `EmailOtpType` in `@supabase/auth-js` is widened with `(string & {})` and
+validates nothing.
+
+This removes the redirect allow-list from the invite path completely: no Supabase Dashboard
+configuration is involved any more, only `APP_URL`.
+
+**Tests:** `src/app/auth/callback/route.test.ts` gained the token_hash success, expired-token,
+unknown-type, code-fallthrough and open-redirect cases; the invite route test now asserts the
+exact first-party link and that the response never contains `/auth/v1/verify`. 20/20 green in
+those two files, 1153/1153 across the suite, `tsc --noEmit` clean.
+
+**Operator follow-up:** invite links issued before this fix are unusable — re-issue them.

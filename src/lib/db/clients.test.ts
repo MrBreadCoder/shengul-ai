@@ -6,6 +6,7 @@ import {
   getClientById,
   listClientRoleAppUsers,
   insertAppUser,
+  deleteAppUser,
   updateClientName,
   updateClientStatus,
   deleteClientCascade,
@@ -126,6 +127,22 @@ describe('insertAppUser', () => {
       from: () => ({ insert: () => Promise.resolve({ error: { message: 'boom' } }) }),
     } as never
     await expect(insertAppUser(supabase, { id: 'u1', role: 'client', client_id: 'c1' })).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('deleteAppUser', () => {
+  it('should delete only the row with the given id', async () => {
+    const eq = vi.fn(() => Promise.resolve({ error: null }))
+    const supabase = { from: () => ({ delete: () => ({ eq }) }) } as never
+    await expect(deleteAppUser(supabase, 'u1')).resolves.toBeUndefined()
+    expect(eq).toHaveBeenCalledWith('id', 'u1')
+  })
+
+  it('should throw DB_ERROR on delete failure', async () => {
+    const supabase = {
+      from: () => ({ delete: () => ({ eq: () => Promise.resolve({ error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(deleteAppUser(supabase, 'u1')).rejects.toBeInstanceOf(AppError)
   })
 })
 
