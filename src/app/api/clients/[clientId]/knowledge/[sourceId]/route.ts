@@ -3,7 +3,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSourceById, deleteSource } from '@/lib/db/client-knowledge'
 import { deleteClientKnowledgePdfObject } from '@/lib/storage/client-knowledge-pdfs'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
@@ -36,6 +36,14 @@ export async function DELETE(
     })
     return NextResponse.json({ ok: true })
   } catch (error) {
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'knowledge.delete_route_failed',
+      source: 'app',
+      error,
+      payload: { sourceId, sourceType: source.source_type },
+    })
     return NextResponse.json({ error: isAppError(error) ? error.code : 'unknown' }, { status: 500 })
   }
 }

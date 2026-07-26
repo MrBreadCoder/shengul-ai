@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById } from '@/lib/db/clients'
 import { insertPendingWebsiteSources } from '@/lib/db/client-knowledge'
 import { publishJson } from '@/lib/qstash/client'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
@@ -51,6 +51,16 @@ export async function POST(request: Request, context: { params: Promise<{ client
 
     return NextResponse.json({ ok: true, insertedCount: inserted.length })
   } catch (error) {
+    // The sources may already be inserted at this point (the fan-out runs after
+    // the insert), so this row is the only record of why they will sit pending.
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'knowledge.pages_route_failed',
+      source: 'app',
+      error,
+      payload: { requestedCount: parsed.data.urls.length },
+    })
     return NextResponse.json({ error: isAppError(error) ? error.code : 'unknown' }, { status: 500 })
   }
 }

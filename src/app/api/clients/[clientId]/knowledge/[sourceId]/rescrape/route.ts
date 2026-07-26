@@ -3,7 +3,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSourceById, resetSourceToPending } from '@/lib/db/client-knowledge'
 import { publishJson } from '@/lib/qstash/client'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
@@ -39,6 +39,14 @@ export async function POST(
     })
     return NextResponse.json({ ok: true })
   } catch (error) {
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'knowledge.rescrape_route_failed',
+      source: 'app',
+      error,
+      payload: { sourceId, url: source.url },
+    })
     return NextResponse.json({ error: isAppError(error) ? error.code : 'unknown' }, { status: 500 })
   }
 }

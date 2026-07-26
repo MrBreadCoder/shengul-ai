@@ -5,7 +5,7 @@ import { getClientById } from '@/lib/db/clients'
 import { uploadClientKnowledgePdf } from '@/lib/storage/client-knowledge-pdfs'
 import { extractPdfText } from '@/lib/knowledge/pdf-extract'
 import { insertPdfSourceReady, embedAndStoreChunks } from '@/lib/db/client-knowledge'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
@@ -50,6 +50,15 @@ export async function POST(request: Request, context: { params: Promise<{ client
     if (isAppError(error) && error.code === 'VALIDATION_ERROR') {
       return NextResponse.json({ error: 'validation_error', issues: error.message }, { status: 400 })
     }
+    // Only the non-validation branch is logged — a rejected file is the
+    // operator's problem to fix, not a fault worth surfacing in the Logs tab.
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'knowledge.pdf_route_failed',
+      source: 'app',
+      error,
+    })
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })
   }

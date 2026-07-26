@@ -3,20 +3,23 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { discoverSitemapPages } from '@/lib/knowledge/sitemap'
 import { brightdataResearch } from '@/lib/research/brightdata'
+import { logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
 
 const bodySchema = z.object({ websiteUrl: z.string().url() })
 
-// Operator-only, no clientId scoping needed for the discovery step itself —
-// it doesn't write anything, just returns candidate urls for the picker.
-export async function POST(request: Request) {
+// Operator-only. Discovery doesn't write anything — it just returns candidate
+// urls for the picker — so the clientId is read purely to attribute a failure
+// to the client whose Logs tab the operator will go looking in.
+export async function POST(request: Request, context: { params: Promise<{ clientId: string }> }) {
   const { appUser } = await requireUser()
   if (appUser.role !== 'operator') {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
+  const { clientId } = await context.params
   const rawBody: unknown = await request.json().catch(() => null)
   const parsed = bodySchema.safeParse(rawBody)
   if (!parsed.success) {
@@ -30,6 +33,14 @@ export async function POST(request: Request) {
     if (isAppError(error) && error.code === 'VALIDATION_ERROR') {
       return NextResponse.json({ error: 'validation_error', issues: error.message }, { status: 400 })
     }
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'knowledge.discover_sitemap_route_failed',
+      source: 'app',
+      error,
+      payload: { websiteUrl: parsed.data.websiteUrl },
+    })
     return NextResponse.json({ error: isAppError(error) ? error.code : 'unknown' }, { status: 500 })
   }
 }
