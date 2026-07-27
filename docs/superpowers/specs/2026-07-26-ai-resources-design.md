@@ -426,6 +426,10 @@ server actions, 80% on the DB layer.
 - `src/lib/db/email-attachments.ts`
 - `src/lib/mailbox/attachments.ts`
 - `src/lib/resources/menu.ts`
+- `src/lib/resources/load-attachments.ts`
+- `src/lib/auth/can-manage-client.ts` — the shared ownership guard; the whole boundary for client-role writes (§5.2)
+- `src/lib/knowledge/ingest-file.ts` — file → storage → text → source row → chunks, shared by the upload route and the `/inbox` answer form
+- `src/lib/format/bytes.ts`
 - `src/app/api/clients/[clientId]/resources/route.ts`
 - `src/app/api/clients/[clientId]/resources/[resourceId]/route.ts`
 - `src/app/api/clients/[clientId]/knowledge/file/route.ts` (renamed from `knowledge/pdf/`)
