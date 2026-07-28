@@ -1179,3 +1179,72 @@ resource no longer removes the storage object, since the row is retained precise
 mail resolves; and the `client_resources` / `client_knowledge_sources` update+delete policies now
 check `client_id = current_client_id()` alongside `created_by`, so a reassigned user cannot keep
 editing rows in the tenant they left.
+
+---
+
+## Resource content — the agent reads the files it sends (shipped 2026-07-28)
+
+Spec: `docs/superpowers/specs/2026-07-27-resource-content-design.md`.
+Plan: `docs/superpowers/plans/2026-07-27-resource-content.md` — all 12 tasks done.
+
+`formatResourceMenu` used to emit `ordinal — title — description`, and that
+string was everything the model knew about a file. Selection was a hunch, and a
+deck that already answered the lead's question still escalated to a human.
+
+A QStash worker (`/api/pipeline/resource-read`) now derives `content` and a
+capped `content_summary` for every upload: `extractPdfText` where a PDF has a
+usable text layer, Gemini vision for images and for PDFs whose text trims below
+`RESOURCE_PDF_TEXT_FLOOR` (200), raw utf-8 for txt/md/svg, and `unsupported` for
+GIF, which Gemini's image input rejects. `generateJson` grew an optional `files`
+field to carry the bytes; the no-files path is byte-identical, pinned by a test.
+The content is chunked and embedded into the existing knowledge index through a
+companion `client_knowledge_sources` row (`source_type = 'resource'`, linked by
+`resource_id`), so `retrieveClientKnowledge` picks it up with no new RPC or
+index — and `match_client_knowledge_chunks` now returns `resource_id`, so a
+matched chunk from a menu resource renders `- (Deck, attachable #1) …` and the
+model attaches the file its answer leaned on. A resource outside the 40-entry
+menu, or the `knowledge-answer` path that builds no menu, renders plain: an
+unlabelled line reads as ordinary company knowledge, so the model answers from
+it without claiming an attachment it has no ordinal to make.
+
+This **reverses** `0018`'s rule that a resource is never chunked, embedded or
+retrieved. Consequences handled:
+
+- **Companion rows are not knowledge UI.** Both list queries carry
+  `.is('resource_id', null)`, and `DELETE /knowledge/[sourceId]` refuses a
+  resource-backed source with 400 — deleting it there would strand the resource
+  reporting `ready` with no chunks behind it.
+- **Deactivating a resource deletes its source** (chunks cascade), guarded by the
+  existing deactivation claim so a concurrent delete cannot run it twice.
+  Otherwise the agent keeps answering from a file it can no longer attach.
+- **`description` became optional.** The agent derives *what* a file contains, so
+  that field narrowed to a "when to send" hint; a blank and an absent field both
+  store as null.
+- **Failure never blocks an upload.** A publish failure marks the row `failed`
+  and still returns the resource; the worker records a derivation failure and
+  returns 200, since a file we cannot read is not a fault to retry forever. The
+  UI shows all four content states and offers Re-read on `failed`.
+- **A failed read takes its old content with it.** The worker deletes the
+  companion source before it marks the row `failed`, so a re-read that breaks
+  cannot leave chunks from the previous success retrievable behind a row whose
+  menu line has lost its summary — content no operator could see or explain.
+- **One read per row at a time.** `POST …/read` answers 409 while the row is
+  already `pending`. Two workers on one resource would race the
+  delete-then-insert that keeps its chunks unique: one delete can land between
+  the other's delete and insert, leaving duplicates or nothing.
+- **Menu values cannot spell a separator.** `formatResourceMenu` strips `—` and
+  `|` as well as newlines from the title, the hint and the summary. The summary
+  is model-written from bytes the file supplied, so a row could otherwise forge
+  a `when to send:` or `contains:` field it was never given.
+- **An unreadable worker payload is a 400.** A 500 would put a body that can
+  never parse through QStash's entire retry budget.
+
+`retrieveClientKnowledge` moved to an options object to carry the ordinal map —
+that touched two more call sites than the plan listed (`write.ts` and
+`followup.ts`), both converted; neither passes a map, since neither builds a menu.
+
+Deploy order matters: apply `0019`, deploy so `/api/pipeline/resource-read`
+exists, then run `tsx scripts/backfill-resource-content.ts` once per
+environment — `0019` defaults pre-existing rows to `pending` with no job behind
+them. Publishing to a route that is not deployed yet would burn QStash retries
+and mark rows failed.

@@ -96,7 +96,16 @@ create unique index client_knowledge_sources_resource_id_key
 
 -- Retrieval must be able to trace a matched chunk back to an attachable file, so
 -- the reply prompt can label the line and the model knows it may send the source.
-create or replace function match_client_knowledge_chunks(
+--
+-- Dropped first, not CREATE OR REPLACEd: adding resource_id changes the row type
+-- defined by the OUT parameters, and Postgres refuses to replace a function whose
+-- return type changed (42P13). No CASCADE — nothing else depends on this function,
+-- and a plain drop fails loudly if that ever stops being true. The original in
+-- 0014 granted nothing explicitly, so the recreate below restores the same
+-- default privileges.
+drop function if exists match_client_knowledge_chunks(uuid, vector(768), integer);
+
+create function match_client_knowledge_chunks(
   p_client_id uuid,
   p_query_embedding vector(768),
   p_limit integer

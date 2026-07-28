@@ -159,7 +159,11 @@ create unique index client_knowledge_sources_resource_id_key
   on client_knowledge_sources (resource_id) where resource_id is not null;
 
 -- Retrieval must be able to trace a matched chunk back to an attachable file.
-create or replace function match_client_knowledge_chunks(
+-- Dropped first rather than replaced: adding resource_id changes the OUT-parameter
+-- row type, which CREATE OR REPLACE refuses (42P13).
+drop function if exists match_client_knowledge_chunks(uuid, vector(768), integer);
+
+create function match_client_knowledge_chunks(
   p_client_id uuid,
   p_query_embedding vector(768),
   p_limit integer
