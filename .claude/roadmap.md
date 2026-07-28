@@ -1214,9 +1214,14 @@ retrieved. Consequences handled:
   `.is('resource_id', null)`, and `DELETE /knowledge/[sourceId]` refuses a
   resource-backed source with 400 — deleting it there would strand the resource
   reporting `ready` with no chunks behind it.
-- **Deactivating a resource deletes its source** (chunks cascade), guarded by the
-  existing deactivation claim so a concurrent delete cannot run it twice.
-  Otherwise the agent keeps answering from a file it can no longer attach.
+- **Deactivating a resource deletes its source** (chunks cascade). Deliberately
+  *outside* the deactivation claim: nothing spans both statements in one
+  transaction, so a cleanup that fails after a successful deactivation leaves an
+  inactive row with live chunks, and the retry that would fix it gets `null`
+  back from the claim. Gating on the claim made that state permanent. Deleting
+  by `resource_id` is idempotent, so the concurrent-delete case costs a no-op —
+  only the event log stays behind the claim. Otherwise the agent keeps answering
+  from a file it can no longer attach.
 - **`description` became optional.** The agent derives *what* a file contains, so
   that field narrowed to a "when to send" hint; a blank and an absent field both
   store as null.
@@ -1238,6 +1243,19 @@ retrieved. Consequences handled:
   a `when to send:` or `contains:` field it was never given.
 - **An unreadable worker payload is a 400.** A 500 would put a body that can
   never parse through QStash's entire retry budget.
+- **A blank model answer never marks a row ready.** `visionSchema` and
+  `textSchema` trim before `.min(1)`, so whitespace-only `content`/`summary`
+  fails validation instead of producing a menu line with no `contains:` and
+  vision content that chunks to nothing.
+- **What the model may claim is bound to a file.** The reply prompt permits
+  answering from a company-knowledge line tagged `attachable #N` (untagged lines
+  stay background), and the `/inbox` knowledge-answer prompt now lists each
+  attachment with its own derived summary — a file with none reads
+  `contents not read` and may be named but not described.
+
+Two UI strings were qualified alongside this: `image/gif` uploads fine but
+`chooseReadStrategy` returns `unsupported` for it, so "the agent reads each one"
+overpromised on the client and Resources pages and in the upload hint.
 
 `retrieveClientKnowledge` moved to an options object to carry the ordinal map —
 that touched two more call sites than the plan listed (`write.ts` and

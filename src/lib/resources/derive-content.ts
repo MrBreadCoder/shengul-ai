@@ -15,8 +15,12 @@ const RESOURCE_READ_MAX_OUTPUT_TOKENS = 1_600
 // waiting on this call — it runs in a QStash worker, not a user's request.
 const RESOURCE_READ_TIMEOUT_MS = 45_000
 
-const visionSchema = z.object({ content: z.string().min(1), summary: z.string().min(1) })
-const textSchema = z.object({ summary: z.string().min(1) })
+// Trimmed before the length check, so a model that answers with nothing but
+// whitespace fails here rather than marking the row ready with a blank summary —
+// a menu line with no `contains:` and, on the vision path, content that chunks
+// to nothing and leaves the file silently unanswerable.
+const visionSchema = z.object({ content: z.string().trim().min(1), summary: z.string().trim().min(1) })
+const textSchema = z.object({ summary: z.string().trim().min(1) })
 
 export type ResourceReadResult =
   | { status: 'ready'; content: string; summary: string }

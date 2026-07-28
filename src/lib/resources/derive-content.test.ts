@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { z } from 'zod'
 import type { ClientResourceRow } from '@/lib/db/client-resources'
 import { AppError } from '@/lib/errors/app-error'
 import { RESOURCE_CONTENT_MAX_CHARS } from './read-strategy'
@@ -126,6 +127,49 @@ describe('readResourceContent', () => {
       readResourceContent({} as never, resource({ mime_type: 'text/markdown' })),
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     expect(generateJsonMock).not.toHaveBeenCalled()
+  })
+
+  // generateJson hands the schema to the SDK, which validates the model's JSON
+  // against it. Mirrored here so these exercise the real schema rather than a
+  // mock's idea of one.
+  const parseModelOutput = (output: unknown) => (
+    (_context: unknown, args: { schema: z.ZodType }) => Promise.resolve(args.schema.parse(output))
+  )
+
+  it('should reject a whitespace-only summary on the text path', async () => {
+    downloadClientResourceMock.mockResolvedValue(Buffer.from('Our rate card starts at 2500 EUR'))
+    generateJsonMock.mockImplementation(parseModelOutput({ summary: '  \n\t ' }))
+
+    await expect(
+      readResourceContent({} as never, resource({ mime_type: 'text/plain' })),
+    ).rejects.toThrow()
+  })
+
+  it('should reject whitespace-only content on the vision path', async () => {
+    downloadClientResourceMock.mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    generateJsonMock.mockImplementation(parseModelOutput({ content: '   ', summary: 'Navy logo mark' }))
+
+    await expect(
+      readResourceContent({} as never, resource({ mime_type: 'image/png' })),
+    ).rejects.toThrow()
+  })
+
+  it('should reject a whitespace-only summary on the vision path', async () => {
+    downloadClientResourceMock.mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    generateJsonMock.mockImplementation(parseModelOutput({ content: 'A dark navy logo mark', summary: ' ' }))
+
+    await expect(
+      readResourceContent({} as never, resource({ mime_type: 'image/png' })),
+    ).rejects.toThrow()
+  })
+
+  it('should keep a padded summary once trimmed rather than rejecting it', async () => {
+    downloadClientResourceMock.mockResolvedValue(Buffer.from('Our rate card starts at 2500 EUR'))
+    generateJsonMock.mockImplementation(parseModelOutput({ summary: '  Rate card from 2500 EUR  ' }))
+
+    const result = await readResourceContent({} as never, resource({ mime_type: 'text/plain' }))
+
+    expect(result).toMatchObject({ status: 'ready', summary: 'Rate card from 2500 EUR' })
   })
 
   it('should let an LLM failure propagate so the worker can record it', async () => {

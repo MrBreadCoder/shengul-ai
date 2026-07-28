@@ -37,12 +37,18 @@ export async function DELETE(
     // already carried this file pointing at nothing, gutting the audit trail
     // the retained row exists to preserve.
     const deactivated = await deactivateClientResource(admin, resourceId)
+    // The derived content goes with it: leaving the chunks in place would let
+    // the agent keep answering from a file it can no longer attach.
+    //
+    // Deliberately outside the deactivation claim. There is no transaction
+    // spanning both statements, so a cleanup that fails after a successful
+    // deactivation leaves the row inactive with its chunks intact — and the
+    // retry that fixes it finds the row already inactive and gets null back.
+    // Gating this on the claim would make that state permanent. Deleting by
+    // resource_id is idempotent, so the concurrent-delete case costs a no-op.
+    await deleteResourceKnowledgeSource(admin, resourceId)
     // null means a concurrent delete already won — do not log it twice.
     if (deactivated) {
-      // The derived content goes with it: leaving the chunks in place would let
-      // the agent keep answering from a file it can no longer attach. Guarded by
-      // the deactivation claim, so a concurrent delete does not run this twice.
-      await deleteResourceKnowledgeSource(admin, resourceId)
       await logEventSafe({
         clientId, actor: `human:${appUser.id}`, type: 'resource.deleted',
         payload: { resourceId, title: resource.title },

@@ -48,7 +48,7 @@ export default async function ResourcesPage(): Promise<React.ReactElement> {
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Resources"
-        description="Files the agent can send to a lead who asks to see something. The agent reads each one, so it can also answer from what is inside."
+        description="Files the agent can send to a lead who asks to see something. The agent reads the ones whose format it can read, so it can also answer from what is inside."
         actions={
           <span className="text-muted-foreground tnum text-sm">
             {summaries.length} {summaries.length === 1 ? 'resource' : 'resources'}

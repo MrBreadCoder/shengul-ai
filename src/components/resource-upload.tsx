@@ -78,7 +78,8 @@ export function ResourceUpload({ clientId }: ResourceUploadProps): React.ReactEl
           placeholder="Only when a lead asks to see examples."
         />
         <p className="text-faint text-[11px]">
-          The agent reads the file itself. Use this only to say when it should be sent.
+          The agent reads the file itself when the format can be read. Use this only to say when
+          it should be sent.
         </p>
       </div>
       <div className="flex flex-col gap-2">

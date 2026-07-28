@@ -103,13 +103,27 @@ describe('DELETE /api/clients/[clientId]/resources/[resourceId]', () => {
     expect(deleteResourceKnowledgeSourceMock).toHaveBeenCalledWith(expect.anything(), 'r1')
   })
 
-  it('should not touch the knowledge source when a concurrent delete already won', async () => {
+  // A retry after a cleanup failure finds the row already inactive. Skipping the
+  // cleanup on that path would strand the chunks for good, leaving the agent
+  // answering out of a file nobody can attach any more.
+  it('should still clear the knowledge source when the row was already deactivated', async () => {
     getResourceByIdMock.mockResolvedValue(resource)
     deactivateClientResourceMock.mockResolvedValue(null)
 
     const res = await DELETE(new Request('http://x', { method: 'DELETE' }), params)
 
     expect(res.status).toBe(200)
-    expect(deleteResourceKnowledgeSourceMock).not.toHaveBeenCalled()
+    expect(deleteResourceKnowledgeSourceMock).toHaveBeenCalledWith(expect.anything(), 'r1')
+    expect(logEventSafeMock).not.toHaveBeenCalled()
+  })
+
+  it('should 500 so the caller can retry when the knowledge cleanup fails', async () => {
+    getResourceByIdMock.mockResolvedValue(resource)
+    deactivateClientResourceMock.mockResolvedValue(resource)
+    deleteResourceKnowledgeSourceMock.mockRejectedValue(new Error('boom'))
+
+    const res = await DELETE(new Request('http://x', { method: 'DELETE' }), params)
+
+    expect(res.status).toBe(500)
   })
 })

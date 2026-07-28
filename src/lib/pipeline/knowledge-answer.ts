@@ -23,13 +23,44 @@ const SYSTEM_PROMPT = [
   'another language — translate any facts you use, never copy foreign-language text.',
 ].join(' ')
 
+interface AttachedFile {
+  title: string
+  /** The agent-derived one-liner, null when the file was never read. */
+  summary: string | null
+}
+
+// The block is one file per line, so a title or a model-written summary must not
+// be able to spell a line break and forge an entry it was never given.
+function promptSafe(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+// Each file carries its own derived summary, so a claim about what is inside one
+// is tied to that file rather than to the attachment list as a whole. A file
+// that was never read says so, and the model is told it may not describe it.
+function buildAttachmentBlock(attachedFiles: readonly AttachedFile[]): string {
+  if (attachedFiles.length === 0) return ''
+  const lines = attachedFiles.map(({ title, summary }) => (
+    summary
+      ? `- ${promptSafe(title)} — contains: ${promptSafe(summary)}`
+      : `- ${promptSafe(title)} — contents not read`
+  ))
+  return [
+    'These files are attached to this email — reference them naturally, and',
+    'describe what they contain only from the knowledge above and the line for',
+    'that exact file below. If a file says "contents not read" and no fact above',
+    'names it, name it and say nothing about what is inside it.',
+    ...lines,
+  ].join('\n')
+}
+
 function buildAnswerPrompt(args: {
   thread: EmailRow[]
   knowledge: KnowledgeRow[]
   humanAnswer: string
   valueProp: string | null
   clientKnowledge: string
-  attachedFiles: string[]
+  attachedFiles: readonly AttachedFile[]
 }): string {
   const dossier = args.knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   const lastInbound = [...args.thread].reverse().find((e) => e.direction === 'inbound')
@@ -39,9 +70,7 @@ function buildAnswerPrompt(args: {
     args.clientKnowledge ? `About our company:\n${args.clientKnowledge}` : '',
     `Dossier:\n${dossier}`,
     `The prospect's question:\n${lastInbound?.body ?? ''}`,
-    args.attachedFiles.length > 0
-      ? `These files are attached to this email — reference them naturally, and describe what they contain only from the knowledge above: ${args.attachedFiles.join(', ')}`
-      : '',
+    buildAttachmentBlock(args.attachedFiles),
     'Write only the reply body (no subject line).',
   ]
     .filter(Boolean)
@@ -107,7 +136,7 @@ export async function runKnowledgeAnswer(
     instructions: SYSTEM_PROMPT,
     prompt: buildAnswerPrompt({
       thread, knowledge, humanAnswer: kr.human_answer, valueProp: campaign.value_prop, clientKnowledge,
-      attachedFiles: attachResources.map((r) => r.title),
+      attachedFiles: attachResources.map((r) => ({ title: r.title, summary: r.content_summary ?? null })),
     }),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })

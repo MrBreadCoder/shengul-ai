@@ -33,7 +33,8 @@ export async function ResourcesSection({ clientId }: ResourcesSectionProps): Pro
     <div className="flex flex-col gap-4">
       <p className="text-muted-foreground max-w-[60ch] text-[13px]">
         Resources — files the agent can send to a lead who asks to see something. The agent
-        reads each one, so it can answer from what is inside as well as attach it.
+        reads the ones whose format it can read, so it can answer from what is inside as well
+        as attach it.
       </p>
       <ResourceUpload clientId={clientId} />
       <ResourceList resources={summaries} />
