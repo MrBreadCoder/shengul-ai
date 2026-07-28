@@ -101,8 +101,18 @@ The panel contains:
   name.
 - Inline edit and delete on your own notes only; an operator sees the controls on
   every note.
-- A note count on each contact card in the Contacts section, so a person with
-  history is visible without opening the panel.
+
+A note about a person can be started from **either** end, because both readings
+of "notes on leads and companies" are legitimate and they write the same row:
+
+- from the panel, by switching the **About** selector to that contact; or
+- from that person's card in the Contacts section, which shows their note count
+  and an **Add note** control that focuses the panel composer with **About**
+  already set to them.
+
+There is one composer and one list — the contact card is a shortcut into it, not
+a second surface. A card with no notes still shows the control, so the first note
+on a person is as easy to write as the tenth.
 
 Four states handled: loading (`loading.tsx` already exists for this route), error
 (`error.tsx`), empty ("No notes yet — anything you know about this company that
