@@ -242,7 +242,15 @@ Chosen behaviours, each deliberate:
   `current_step === step - 1` guard and returns `skipped`.
 
 New DB helpers: `requestFollowupSkip(supabase, leadId)` and
-`consumeFollowupSkip(supabase, sequenceId, step)` in `src/lib/db/sequences.ts`.
+`consumeFollowupSkip(supabase, sequenceId)` in `src/lib/db/sequences.ts`.
+
+`consumeFollowupSkip` claims the flag and **nothing else** — `current_step` is
+advanced only after the next step is successfully enqueued. Advancing inside the
+claim would open a window where a publish failure leaves the sequence at the new
+step with no message behind it, and the retried delivery would fail the
+`current_step === step - 1` guard and end the cadence for good. Split this way,
+a publish failure loses the skip and sends a real nudge on retry, which is
+strictly the better failure.
 
 ### Cap bypass
 
