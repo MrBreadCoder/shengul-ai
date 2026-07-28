@@ -1266,3 +1266,26 @@ exists, then run `tsx scripts/backfill-resource-content.ts` once per
 environment — `0019` defaults pre-existing rows to `pending` with no job behind
 them. Publishing to a route that is not deployed yet would burn QStash retries
 and mark rows failed.
+
+---
+
+## Client notes + client-written email — designed (2026-07-28)
+
+Design agreed and written to
+`docs/superpowers/specs/2026-07-28-client-notes-and-manual-send-design.md`. Not
+implemented yet.
+
+Two client-facing features sharing migration `0020`:
+
+- **Notes** — a `notes` table (case-anchored, optional `lead_id`), RLS mirroring
+  `client_resources`: the whole client reads, only the author edits. No prompt
+  ever reads a note, so a client can record something unflattering without it
+  reaching outbound copy. Panel sits at the top of the case page, above Contacts
+  — not a tab.
+- **Manual send** — a client writes and sends inside a case, through the
+  campaign's mailboxes. Three decisions carry the weight: a manual email with no
+  step-0 outbound *claims* that slot (otherwise the write cron cold-emails the
+  same person and `find_stuck_cases` drags the case back to `ready`); an
+  interjection sets `sequences.skip_next_step`, consumed at fire time so the
+  cadence continues rather than dying; and the cap bypass is a separate
+  `claim_mailbox_send_uncapped` RPC, never a parameter on the capped one.
