@@ -39,6 +39,8 @@ export default async function ResourcesPage(): Promise<React.ReactElement> {
     fileName: resource.file_name,
     mimeType: resource.mime_type,
     byteSize: resource.byte_size,
+    contentStatus: resource.content_status,
+    contentSummary: resource.content_summary,
     canManage: canManageOwnRow(appUser, resource),
   }))
 
@@ -46,7 +48,7 @@ export default async function ResourcesPage(): Promise<React.ReactElement> {
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Resources"
-        description="Files the agent can send to a lead who asks to see something. These are never used to answer questions."
+        description="Files the agent can send to a lead who asks to see something. The agent reads each one, so it can also answer from what is inside."
         actions={
           <span className="text-muted-foreground tnum text-sm">
             {summaries.length} {summaries.length === 1 ? 'resource' : 'resources'}

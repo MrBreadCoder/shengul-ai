@@ -95,6 +95,66 @@ describe('generateJson', () => {
       generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, timeoutMs: 5 }),
     ).rejects.toMatchObject({ code: 'EXTERNAL_TIMEOUT' })
   })
+
+  it('should pass a string prompt and no messages when no files are given', async () => {
+    generateObjectMock.mockResolvedValue({ object: { title: 'Acme' }, usage: {} })
+    const schema = z.object({ title: z.string() })
+    await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100 })
+    const call = generateObjectMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(call.prompt).toBe('p')
+    expect(call.messages).toBeUndefined()
+  })
+
+  it('should pass a string prompt when files is an empty array', async () => {
+    generateObjectMock.mockResolvedValue({ object: { title: 'Acme' }, usage: {} })
+    const schema = z.object({ title: z.string() })
+    await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, files: [] })
+    const call = generateObjectMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(call.prompt).toBe('p')
+    expect(call.messages).toBeUndefined()
+  })
+
+  it('should send one user message with a text part and a file part per file', async () => {
+    generateObjectMock.mockResolvedValue({ object: { title: 'Acme' }, usage: {} })
+    const schema = z.object({ title: z.string() })
+    const data = Buffer.from('%PDF-1.7')
+    await generateJson(ctx, {
+      instructions: 's',
+      prompt: 'describe this',
+      schema,
+      maxOutputTokens: 100,
+      files: [{ data, mediaType: 'application/pdf' }],
+    })
+    const call = generateObjectMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(call.prompt).toBeUndefined()
+    expect(call.instructions).toBe('s')
+    expect(call.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this' },
+          { type: 'file', data, mediaType: 'application/pdf' },
+        ],
+      },
+    ])
+  })
+
+  it('should still log usage and return the object on the file path', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { title: 'Acme' },
+      usage: { inputTokens: 900, outputTokens: 120 },
+    })
+    const schema = z.object({ title: z.string() })
+    const result = await generateJson(ctx, {
+      instructions: 's',
+      prompt: 'p',
+      schema,
+      maxOutputTokens: 100,
+      files: [{ data: Buffer.from('x'), mediaType: 'image/png' }],
+    })
+    expect(result).toEqual({ title: 'Acme' })
+    expect(logEventMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('generateText', () => {

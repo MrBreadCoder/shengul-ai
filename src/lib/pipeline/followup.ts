@@ -162,9 +162,10 @@ export async function runFollowupStep(
   }
 
   const context: LlmCallContext = { clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR }
-  const clientKnowledge = await retrieveClientKnowledge(
-    supabase, sequence.client_id, `${firstOutbound?.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
-  )
+  const clientKnowledge = await retrieveClientKnowledge(supabase, {
+    clientId: sequence.client_id,
+    queryText: `${firstOutbound?.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
+  })
   const nudgeBody = await generateText(context, {
     instructions: SYSTEM_PROMPT,
     prompt: buildNudgePrompt(

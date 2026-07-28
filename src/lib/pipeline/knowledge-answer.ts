@@ -40,7 +40,7 @@ function buildAnswerPrompt(args: {
     `Dossier:\n${dossier}`,
     `The prospect's question:\n${lastInbound?.body ?? ''}`,
     args.attachedFiles.length > 0
-      ? `These files are attached to this email — reference them naturally, do not describe their contents: ${args.attachedFiles.join(', ')}`
+      ? `These files are attached to this email — reference them naturally, and describe what they contain only from the knowledge above: ${args.attachedFiles.join(', ')}`
       : '',
     'Write only the reply body (no subject line).',
   ]
@@ -99,9 +99,10 @@ export async function runKnowledgeAnswer(
 
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(
-    supabase, inbound.client_id, `${dossierText} ${kr.human_answer} ${campaign.value_prop ?? ''}`.trim(),
-  )
+  const clientKnowledge = await retrieveClientKnowledge(supabase, {
+    clientId: inbound.client_id,
+    queryText: `${dossierText} ${kr.human_answer} ${campaign.value_prop ?? ''}`.trim(),
+  })
   const body = await generateText(context, {
     instructions: SYSTEM_PROMPT,
     prompt: buildAnswerPrompt({

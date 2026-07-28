@@ -10,10 +10,13 @@ import { KnowledgeSourceActions } from './knowledge-source-actions'
 
 // Keyed by the enum so a new source type cannot reach the table as a blank or
 // mislabelled cell. 'pdf' is the legacy value; 'file' covers pdf/txt/md uploads.
+// 'resource' is the companion row behind a sendable file — filtered out of this
+// list, and labelled here only so the map stays total over the enum.
 const SOURCE_TYPE_LABEL: Record<Database['public']['Enums']['knowledge_source_type'], string> = {
   website_page: 'Web page',
   pdf: 'PDF',
   file: 'File',
+  resource: 'Resource file',
 }
 
 interface KnowledgeSourcesListProps {

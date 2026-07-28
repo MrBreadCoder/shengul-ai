@@ -262,6 +262,7 @@ export interface Database {
           source_type: Database['public']['Enums']['knowledge_source_type']
           url: string | null
           storage_path: string | null
+          resource_id: string | null
           title: string
           content: string | null
           char_count: number | null
@@ -277,6 +278,7 @@ export interface Database {
           source_type: Database['public']['Enums']['knowledge_source_type']
           url?: string | null
           storage_path?: string | null
+          resource_id?: string | null
           title: string
           content?: string | null
           char_count?: number | null
@@ -332,12 +334,17 @@ export interface Database {
           id: string
           client_id: string
           title: string
-          description: string
+          description: string | null
           file_name: string
           mime_type: string
           byte_size: number
           storage_path: string
           is_active: boolean
+          content_status: Database['public']['Enums']['resource_content_status']
+          content: string | null
+          content_summary: string | null
+          content_error: string | null
+          read_at: string | null
           created_by: string
           created_at: string
         }
@@ -345,12 +352,17 @@ export interface Database {
           id?: string
           client_id: string
           title: string
-          description: string
+          description?: string | null
           file_name: string
           mime_type: string
           byte_size: number
           storage_path: string
           is_active?: boolean
+          content_status?: Database['public']['Enums']['resource_content_status']
+          content?: string | null
+          content_summary?: string | null
+          content_error?: string | null
+          read_at?: string | null
           created_by: string
           created_at?: string
         }
@@ -754,6 +766,7 @@ export interface Database {
         Returns: {
           source_id: string
           source_title: string
+          resource_id: string | null
           content: string
           similarity: number
         }[]
@@ -860,8 +873,9 @@ export interface Database {
       warmup_profile: 'standard' | 'slow' | 'none'
       suppression_reason: 'replied' | 'bounced' | 'manual' | 'price_handoff'
       author_kind: 'agent' | 'human'
-      knowledge_source_type: 'website_page' | 'pdf' | 'file'
+      knowledge_source_type: 'website_page' | 'pdf' | 'file' | 'resource'
       knowledge_source_status: 'pending' | 'ready' | 'failed'
+      resource_content_status: 'pending' | 'ready' | 'failed' | 'unsupported'
     }
     CompositeTypes: Record<string, never>
   }

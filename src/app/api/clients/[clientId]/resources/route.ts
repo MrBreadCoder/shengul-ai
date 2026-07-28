@@ -6,6 +6,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById } from '@/lib/db/clients'
 import { uploadClientResource, deleteClientResourceObject } from '@/lib/storage/client-resources'
 import { insertClientResource } from '@/lib/db/client-resources'
+import { publishJson } from '@/lib/qstash/client'
+import { markResourceContentFailed } from '@/lib/db/resource-content'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -13,9 +15,15 @@ export const runtime = 'nodejs'
 
 const bodySchema = z.object({
   title: z.string().trim().min(1).max(120),
-  // Required: an undescribed resource never reaches the AI's menu, so an empty
-  // description makes the upload pointless.
-  description: z.string().trim().min(1).max(500),
+  // Optional since 0019: the agent reads the file itself, so this is a steering
+  // hint about when to send rather than a description of the contents. A blank
+  // field and an absent field mean the same thing and are both stored as null.
+  description: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((value) => (value && value.length > 0 ? value : null)),
 })
 
 export async function POST(request: Request, context: { params: Promise<{ clientId: string }> }) {
@@ -67,6 +75,20 @@ export async function POST(request: Request, context: { params: Promise<{ client
       clientId, actor: `human:${appUser.id}`, type: 'resource.uploaded',
       payload: { resourceId: resource.id, title: resource.title, byteSize: resource.byte_size },
     })
+
+    // Reading the file needs Gemini, so it is deferred rather than made part of
+    // the upload request. A publish failure is not an upload failure: the file
+    // is stored and already sendable, so the row is marked failed and the UI
+    // offers a re-read instead of spinning on 'pending' forever.
+    try {
+      await publishJson('/api/pipeline/resource-read', { resourceId: resource.id })
+    } catch (publishError) {
+      await markResourceContentFailed(admin, resource.id, 'Could not start reading this file')
+      await logError({
+        clientId, actor: `human:${appUser.id}`, type: 'resource.read_enqueue_failed',
+        source: 'qstash', error: publishError, payload: { resourceId: resource.id },
+      })
+    }
 
     return NextResponse.json({ ok: true, resource })
   } catch (error) {

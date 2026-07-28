@@ -24,14 +24,16 @@ export async function ResourcesSection({ clientId }: ResourcesSectionProps): Pro
     fileName: resource.file_name,
     mimeType: resource.mime_type,
     byteSize: resource.byte_size,
+    contentStatus: resource.content_status,
+    contentSummary: resource.content_summary,
     canManage: true,
   }))
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-muted-foreground max-w-[60ch] text-[13px]">
-        Resources — files the agent can send to a lead who asks to see something. Never
-        used to answer questions, and only ever attached to a reply.
+        Resources — files the agent can send to a lead who asks to see something. The agent
+        reads each one, so it can answer from what is inside as well as attach it.
       </p>
       <ResourceUpload clientId={clientId} />
       <ResourceList resources={summaries} />

@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { canManageOwnRow } from '@/lib/auth/can-manage-client'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getResourceById, deactivateClientResource } from '@/lib/db/client-resources'
+import { deleteResourceKnowledgeSource } from '@/lib/db/resource-content'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -38,6 +39,10 @@ export async function DELETE(
     const deactivated = await deactivateClientResource(admin, resourceId)
     // null means a concurrent delete already won — do not log it twice.
     if (deactivated) {
+      // The derived content goes with it: leaving the chunks in place would let
+      // the agent keep answering from a file it can no longer attach. Guarded by
+      // the deactivation claim, so a concurrent delete does not run this twice.
+      await deleteResourceKnowledgeSource(admin, resourceId)
       await logEventSafe({
         clientId, actor: `human:${appUser.id}`, type: 'resource.deleted',
         payload: { resourceId, title: resource.title },

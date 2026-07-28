@@ -57,6 +57,8 @@ export default async function InboxPage(): Promise<React.ReactElement> {
         fileName: resource.file_name,
         mimeType: resource.mime_type,
         byteSize: resource.byte_size,
+        contentStatus: resource.content_status,
+        contentSummary: resource.content_summary,
         // /inbox never deletes; the picker ignores this flag.
         canManage: false,
       })),

@@ -12,7 +12,9 @@ import {
 const row = {
   id: 'r1', client_id: 'c1', title: 'Deck', description: 'send on request',
   file_name: 'deck.pdf', mime_type: 'application/pdf', byte_size: 1000,
-  storage_path: 'c1/x.pdf', is_active: true, created_by: 'u1', created_at: '2026-07-26T00:00:00Z',
+  storage_path: 'c1/x.pdf', is_active: true, content_status: 'pending' as const,
+  content: null, content_summary: null, content_error: null, read_at: null,
+  created_by: 'u1', created_at: '2026-07-26T00:00:00Z',
 }
 
 describe('insertClientResource', () => {

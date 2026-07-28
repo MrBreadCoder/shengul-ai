@@ -3,12 +3,15 @@ import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 
 export type ClientResourceRow = Database['public']['Tables']['client_resources']['Row']
+export type ResourceContentStatus = Database['public']['Enums']['resource_content_status']
 
 export interface InsertClientResourceInput {
   clientId: string
   createdBy: string
   title: string
-  description: string
+  // Optional since 0019: the agent reads the file itself, so this narrows to a
+  // steering hint about when to send rather than a description of the contents.
+  description: string | null
   fileName: string
   mimeType: string
   byteSize: number

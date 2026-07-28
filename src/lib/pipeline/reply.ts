@@ -70,6 +70,8 @@ const SYSTEM_PROMPT = [
   'one only when the prospect explicitly asked for something that resource',
   'provides — never as a bonus. Put the numbers in attachResourceIds, or leave',
   'it empty. When you do attach, say so naturally in replyBody.',
+  'A company-knowledge line tagged "attachable #N" was taken from one of those',
+  'files: when your answer leans on that line, put N in attachResourceIds.',
   'Replies are short, human, no bulk markers, no unsubscribe footer.',
 ].join(' ')
 
@@ -248,12 +250,17 @@ export async function runReplyForInbound(
     listActiveResourcesForClient(supabase, inbound.client_id, MAX_RESOURCE_MENU),
   ])
   const resourceMenu = buildResourceMenu(resources)
+  // Lets retrieval label a chunk that came from one of these files, so a fact
+  // and the file it came from arrive at the model together.
+  const resourceOrdinalById = new Map(resourceMenu.map((entry) => [entry.resource.id, entry.ordinal]))
 
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(
-    supabase, inbound.client_id, `${dossierText} ${inbound.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
-  )
+  const clientKnowledge = await retrieveClientKnowledge(supabase, {
+    clientId: inbound.client_id,
+    queryText: `${dossierText} ${inbound.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
+    resourceOrdinalById,
+  })
   const classification = await classifyReply(context, {
     thread, knowledge, valueProp: campaign.value_prop, inboundBody: inbound.body ?? '', clientKnowledge,
     resourceMenu: formatResourceMenu(resourceMenu),

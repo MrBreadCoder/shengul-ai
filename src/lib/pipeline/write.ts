@@ -159,9 +159,10 @@ export async function runWriteForCase(
   const leads = await listActiveLeadsForCase(supabase, input.caseId)
 
   const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(
-    supabase, input.clientId, `${dossierText} ${input.valueProp ?? ''}`.trim(),
-  )
+  const clientKnowledge = await retrieveClientKnowledge(supabase, {
+    clientId: input.clientId,
+    queryText: `${dossierText} ${input.valueProp ?? ''}`.trim(),
+  })
 
   let sent = 0
   let drafted = 0

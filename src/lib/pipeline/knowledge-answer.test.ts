@@ -90,6 +90,18 @@ describe('runKnowledgeAnswer attachments', () => {
     expect(promptArg.prompt).toContain('attached')
   })
 
+  it('should let the body describe attached files from retrieved knowledge', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([
+      { id: 'r1', title: 'Concept A', description: 'homepage concept' },
+    ])
+
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1', resourceIds: ['r1'] })
+
+    const call = generateTextMock.mock.calls[0]![1] as { prompt: string }
+    expect(call.prompt).toContain('describe what they contain only from the knowledge above')
+    expect(call.prompt).not.toContain('do not describe their contents')
+  })
+
   it('should send no attachments and mention none when the operator picked none', async () => {
     await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
 

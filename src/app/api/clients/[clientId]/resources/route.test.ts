@@ -7,6 +7,8 @@ const uploadClientResourceMock = vi.fn()
 const deleteClientResourceObjectMock = vi.fn()
 const insertClientResourceMock = vi.fn()
 const logEventSafeMock = vi.fn()
+const publishJsonMock = vi.fn()
+const markResourceContentFailedMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -21,6 +23,10 @@ vi.mock('@/lib/db/client-resources', () => ({
 vi.mock('@/lib/events/log-event', () => ({
   logEventSafe: (...a: unknown[]) => logEventSafeMock(...a),
   logError: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/qstash/client', () => ({ publishJson: (...a: unknown[]) => publishJsonMock(...a) }))
+vi.mock('@/lib/db/resource-content', () => ({
+  markResourceContentFailed: (...a: unknown[]) => markResourceContentFailedMock(...a),
 }))
 
 import { POST } from './route'
@@ -41,6 +47,8 @@ beforeEach(() => {
   insertClientResourceMock.mockReset().mockResolvedValue({ id: 'r1', title: 'Deck', byte_size: 10 })
   deleteClientResourceObjectMock.mockReset().mockResolvedValue(undefined)
   logEventSafeMock.mockReset().mockResolvedValue(undefined)
+  publishJsonMock.mockReset().mockResolvedValue('msg1')
+  markResourceContentFailedMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('POST /api/clients/[clientId]/resources', () => {
@@ -72,9 +80,44 @@ describe('POST /api/clients/[clientId]/resources', () => {
     expect(response.status).toBe(404)
   })
 
-  it('should return 400 when the description is missing', async () => {
+  it('should accept an upload with no description at all', async () => {
     const response = await POST(formRequest({ title: 'Deck', file: pdf() }), params)
+    expect(response.status).toBe(200)
+    expect(insertClientResourceMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: 'Deck', description: null }),
+    )
+  })
+
+  it('should store a blank description as null rather than an empty string', async () => {
+    const response = await POST(formRequest({ title: 'Deck', description: '   ', file: pdf() }), params)
+    expect(response.status).toBe(200)
+    expect(insertClientResourceMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ description: null }),
+    )
+  })
+
+  it('should return 400 when the title is missing', async () => {
+    const response = await POST(formRequest({ description: 'examples', file: pdf() }), params)
     expect(response.status).toBe(400)
+  })
+
+  it('should enqueue the read job for the new resource', async () => {
+    await POST(formRequest({ title: 'Deck', description: 'examples', file: pdf() }), params)
+    expect(publishJsonMock).toHaveBeenCalledWith('/api/pipeline/resource-read', { resourceId: 'r1' })
+  })
+
+  it('should keep the upload and mark the row failed when the read job cannot be queued', async () => {
+    publishJsonMock.mockRejectedValue(new AppError('EXTERNAL_ERROR', 'QStash publish failed'))
+
+    const response = await POST(formRequest({ title: 'Deck', description: 'examples', file: pdf() }), params)
+
+    expect(response.status).toBe(200)
+    expect(markResourceContentFailedMock).toHaveBeenCalledWith(
+      expect.anything(), 'r1', 'Could not start reading this file',
+    )
+    expect(deleteClientResourceObjectMock).not.toHaveBeenCalled()
   })
 
   it('should return 400 when no file was sent', async () => {

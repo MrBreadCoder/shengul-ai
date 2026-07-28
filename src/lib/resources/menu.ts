@@ -24,16 +24,39 @@ export function buildResourceMenu(resources: readonly ClientResourceRow[]): Reso
     .map((resource, index) => ({ ordinal: index + 1, resource }))
 }
 
+// 40 menu entries at this width costs roughly 4k prompt tokens — the ceiling
+// that keeps the whole-library menu affordable. Enforced when the worker writes
+// a summary and again here, so a row written before the cap changed cannot blow
+// the budget.
+export const RESOURCE_SUMMARY_MAX_CHARS = 240
+
+// The menu's own grammar: a newline ends a row, an em dash separates the fields
+// within one, and a pipe opens the derived summary. Every value on a line comes
+// from the resource itself — an operator's title and hint, and a summary the
+// model wrote from the file's own bytes — so none of them may be able to spell a
+// separator, or a row can forge a field it was never given.
+function menuSafe(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/[—|]/g, '-')
+    .trim()
+}
+
 // Ordinals rather than uuids: models mangle uuids, and 40 of them is pure token
-// waste. One line per entry, because a line break inside a description would
-// otherwise let a resource's text impersonate a new menu row.
+// waste. One line per entry, with every separator stripped from the values —
+// otherwise a resource's own text could impersonate a new menu row or a field
+// it was never given.
 export function formatResourceMenu(menu: readonly ResourceMenuEntry[]): string {
   if (menu.length === 0) return ''
   return menu
     .map(({ ordinal, resource }) => {
-      const title = resource.title.replace(/\s+/g, ' ').trim()
-      const description = resource.description.replace(/\s+/g, ' ').trim()
-      return `${ordinal} — ${title} — ${description}`
+      const segments = [`${ordinal} — ${menuSafe(resource.title)}`]
+      const description = resource.description ? menuSafe(resource.description) : ''
+      if (description) segments.push(`when to send: ${description}`)
+      const line = segments.join(' — ')
+      const summary = resource.content_summary ? menuSafe(resource.content_summary) : ''
+      if (!summary) return line
+      return `${line} | contains: ${summary.slice(0, RESOURCE_SUMMARY_MAX_CHARS)}`
     })
     .join('\n')
 }

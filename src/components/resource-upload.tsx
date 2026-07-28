@@ -68,18 +68,17 @@ export function ResourceUpload({ clientId }: ResourceUploadProps): React.ReactEl
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="resource-description" className="text-xs">
-          When should the agent send this?
+          When should the agent send this? (optional)
         </Label>
         <Textarea
           id="resource-description"
           name="description"
-          required
           maxLength={500}
           rows={2}
-          placeholder="12 recent brand projects — send when a lead asks to see examples."
+          placeholder="Only when a lead asks to see examples."
         />
         <p className="text-faint text-[11px]">
-          This is the only thing the agent knows about the file. Be specific about when to send it.
+          The agent reads the file itself. Use this only to say when it should be sent.
         </p>
       </div>
       <div className="flex flex-col gap-2">

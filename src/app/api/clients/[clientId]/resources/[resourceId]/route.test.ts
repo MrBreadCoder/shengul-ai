@@ -5,6 +5,7 @@ const getResourceByIdMock = vi.fn()
 const deactivateClientResourceMock = vi.fn()
 const deleteClientResourceObjectMock = vi.fn()
 const logEventSafeMock = vi.fn()
+const deleteResourceKnowledgeSourceMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -14,6 +15,9 @@ vi.mock('@/lib/db/client-resources', () => ({
 }))
 vi.mock('@/lib/storage/client-resources', () => ({
   deleteClientResourceObject: (...a: unknown[]) => deleteClientResourceObjectMock(...a),
+}))
+vi.mock('@/lib/db/resource-content', () => ({
+  deleteResourceKnowledgeSource: (...a: unknown[]) => deleteResourceKnowledgeSourceMock(...a),
 }))
 vi.mock('@/lib/events/log-event', () => ({
   logEventSafe: (...a: unknown[]) => logEventSafeMock(...a),
@@ -31,6 +35,7 @@ beforeEach(() => {
   deactivateClientResourceMock.mockReset()
   deleteClientResourceObjectMock.mockReset().mockResolvedValue(undefined)
   logEventSafeMock.mockReset().mockResolvedValue(undefined)
+  deleteResourceKnowledgeSourceMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('DELETE /api/clients/[clientId]/resources/[resourceId]', () => {
@@ -86,5 +91,25 @@ describe('DELETE /api/clients/[clientId]/resources/[resourceId]', () => {
     const response = await DELETE(new Request('http://x'), params)
     expect(response.status).toBe(200)
     expect(logEventSafeMock).not.toHaveBeenCalled()
+  })
+
+  it('should delete the derived knowledge source so the agent stops answering from it', async () => {
+    getResourceByIdMock.mockResolvedValue(resource)
+    deactivateClientResourceMock.mockResolvedValue(resource)
+
+    const res = await DELETE(new Request('http://x', { method: 'DELETE' }), params)
+
+    expect(res.status).toBe(200)
+    expect(deleteResourceKnowledgeSourceMock).toHaveBeenCalledWith(expect.anything(), 'r1')
+  })
+
+  it('should not touch the knowledge source when a concurrent delete already won', async () => {
+    getResourceByIdMock.mockResolvedValue(resource)
+    deactivateClientResourceMock.mockResolvedValue(null)
+
+    const res = await DELETE(new Request('http://x', { method: 'DELETE' }), params)
+
+    expect(res.status).toBe(200)
+    expect(deleteResourceKnowledgeSourceMock).not.toHaveBeenCalled()
   })
 })

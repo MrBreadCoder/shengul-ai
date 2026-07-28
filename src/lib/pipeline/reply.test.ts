@@ -20,6 +20,7 @@ const triggerCollisionNoticeMock = vi.fn()
 const listActiveResourcesForClientMock = vi.fn()
 const insertEmailAttachmentsMock = vi.fn()
 const loadResourceAttachmentsMock = vi.fn()
+const retrieveClientKnowledgeMock = vi.fn()
 
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
@@ -38,7 +39,9 @@ vi.mock('@/lib/db/knowledge-requests', () => ({ createKnowledgeRequest: (...a: u
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({ generateJson: (...a: unknown[]) => generateJsonMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
-vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
+vi.mock('@/lib/knowledge/client-context', () => ({
+  retrieveClientKnowledge: (...a: unknown[]) => retrieveClientKnowledgeMock(...a),
+}))
 vi.mock('@/lib/pipeline/collision-notify', () => ({
   triggerCollisionNotice: (...a: unknown[]) => triggerCollisionNoticeMock(...a),
 }))
@@ -74,7 +77,7 @@ beforeEach(() => {
     claimReplyEmailMock, markEmailSentMock, markEmailFailedMock, addSuppressionMock, stopSequenceForLeadMock,
     updateCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
     triggerCollisionNoticeMock, listActiveResourcesForClientMock, insertEmailAttachmentsMock,
-    loadResourceAttachmentsMock]) m.mockReset()
+    loadResourceAttachmentsMock, retrieveClientKnowledgeMock]) m.mockReset()
   getEmailByIdMock.mockResolvedValue(inbound)
   getLeadByIdMock.mockResolvedValue(lead)
   getCampaignForCaseMock.mockResolvedValue(campaign)
@@ -85,6 +88,7 @@ beforeEach(() => {
   listActiveResourcesForClientMock.mockResolvedValue([])
   insertEmailAttachmentsMock.mockResolvedValue(undefined)
   loadResourceAttachmentsMock.mockResolvedValue([])
+  retrieveClientKnowledgeMock.mockResolvedValue('')
 })
 
 describe('replyDisposition', () => {
@@ -210,7 +214,48 @@ describe('runReplyForInbound resource selection', () => {
     await runReplyForInbound({} as never, { emailId: 'in1' })
 
     const promptArg = generateJsonMock.mock.calls[0]![1] as { prompt: string }
-    expect(promptArg.prompt).toContain('1 — Deck — examples')
+    expect(promptArg.prompt).toContain('1 — Deck — when to send: examples')
+  })
+
+  it('should give retrieval the menu ordinal for every resource it offers', async () => {
+    listActiveResourcesForClientMock.mockResolvedValue([resource()])
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(retrieveClientKnowledgeMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ clientId: 'c1', resourceOrdinalById: new Map([['r1', 1]]) }),
+    )
+  })
+
+  it('should pass an empty ordinal map when the client has no resources', async () => {
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(retrieveClientKnowledgeMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ resourceOrdinalById: new Map() }),
+    )
+  })
+
+  it('should tell the model what an attachable knowledge line means', async () => {
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    const call = generateJsonMock.mock.calls[0]![1] as { instructions: string }
+    expect(call.instructions).toContain('attachable #N')
   })
 })
 

@@ -134,6 +134,14 @@ async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: num
   }
 }
 
+// Inline file input for a structured generation — a resource PDF or image handed
+// to the model to be read. Bytes only: the storage objects are private, so a URL
+// the provider could fetch does not exist.
+export interface LlmFile {
+  data: Buffer
+  mediaType: string
+}
+
 export interface GenerateJsonArgs<T> {
   instructions: string
   prompt: string
@@ -141,6 +149,7 @@ export interface GenerateJsonArgs<T> {
   maxOutputTokens: number
   timeoutMs?: number
   thinkingLevel?: ThinkingLevel
+  files?: readonly LlmFile[]
 }
 
 export async function generateJson<T>(
@@ -149,19 +158,38 @@ export async function generateJson<T>(
 ): Promise<T> {
   const startedAt = Date.now()
   try {
-    const result = await withTimeout(
-      (signal) =>
-        generateObject({
-          model,
-          instructions: args.instructions,
-          prompt: args.prompt,
-          schema: args.schema,
-          maxOutputTokens: args.maxOutputTokens,
-          abortSignal: signal,
-          providerOptions: providerOptionsFor(args.thinkingLevel),
-        }),
-      args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    )
+    const result = await withTimeout((signal) => {
+      const shared = {
+        model,
+        instructions: args.instructions,
+        schema: args.schema,
+        maxOutputTokens: args.maxOutputTokens,
+        abortSignal: signal,
+        providerOptions: providerOptionsFor(args.thinkingLevel),
+      }
+      // Two explicit calls rather than a spread: the SDK types `prompt` and
+      // `messages` as mutually exclusive, and branching keeps the far more
+      // common text-only path exactly as it was.
+      if (!args.files || args.files.length === 0) {
+        return generateObject({ ...shared, prompt: args.prompt })
+      }
+      return generateObject({
+        ...shared,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: args.prompt },
+              ...args.files.map((file) => ({
+                type: 'file' as const,
+                data: file.data,
+                mediaType: file.mediaType,
+              })),
+            ],
+          },
+        ],
+      })
+    }, args.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     await logUsage(context, result.usage, Date.now() - startedAt)
     return result.object
   } catch (cause) {

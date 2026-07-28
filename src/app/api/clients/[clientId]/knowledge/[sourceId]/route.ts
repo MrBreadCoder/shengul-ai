@@ -27,6 +27,12 @@ export async function DELETE(
   if (!canManageOwnRow(appUser, source)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
+  // This source is a resource's derived content, not a curated knowledge entry.
+  // Removing it here would leave the resource reporting 'ready' with no chunks
+  // behind it; removal belongs to the resource's own delete path.
+  if (source.resource_id) {
+    return NextResponse.json({ error: 'resource_backed' }, { status: 400 })
+  }
 
   try {
     await deleteSource(admin, sourceId)

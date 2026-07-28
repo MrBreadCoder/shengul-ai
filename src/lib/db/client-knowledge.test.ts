@@ -71,17 +71,31 @@ describe('listSourcesForClient', () => {
   it('should return sources ordered newest first', async () => {
     const rows = [{ id: 's1' }]
     const supabase = {
-      from: () => ({ select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: rows, error: null }) }) }) }),
+      from: () => ({
+        select: () => ({ eq: () => ({ order: () => ({ is: () => Promise.resolve({ data: rows, error: null }) }) }) }),
+      }),
     } as never
     const result = await listSourcesForClient(supabase, 'c1')
     expect(result).toEqual(rows)
+  })
+
+  it('should exclude resource-backed sources so they do not appear as knowledge', async () => {
+    const is = vi.fn().mockResolvedValue({ data: [], error: null })
+    const order = vi.fn().mockReturnValue({ is })
+    const eq = vi.fn().mockReturnValue({ order })
+    const supabase = { from: () => ({ select: () => ({ eq }) }) } as never
+
+    await listSourcesForClient(supabase, 'c1')
+
+    expect(is).toHaveBeenCalledWith('resource_id', null)
   })
 })
 
 describe('listSourcesForVisibleClients', () => {
   it('should return every source RLS exposes, newest first', async () => {
     const rows = [{ id: 's2' }, { id: 's1' }]
-    const orderMock = vi.fn().mockResolvedValue({ data: rows, error: null })
+    const is = vi.fn().mockResolvedValue({ data: rows, error: null })
+    const orderMock = vi.fn().mockReturnValue({ is })
     const supabase = { from: () => ({ select: () => ({ order: orderMock }) }) } as never
 
     const result = await listSourcesForVisibleClients(supabase)
@@ -90,9 +104,21 @@ describe('listSourcesForVisibleClients', () => {
     expect(orderMock).toHaveBeenCalledWith('created_at', { ascending: false })
   })
 
+  it('should exclude resource-backed sources so they do not appear as knowledge', async () => {
+    const is = vi.fn().mockResolvedValue({ data: [], error: null })
+    const order = vi.fn().mockReturnValue({ is })
+    const supabase = { from: () => ({ select: () => ({ order }) }) } as never
+
+    await listSourcesForVisibleClients(supabase)
+
+    expect(is).toHaveBeenCalledWith('resource_id', null)
+  })
+
   it('should throw DB_ERROR when the query fails', async () => {
     const supabase = {
-      from: () => ({ select: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+      from: () => ({
+        select: () => ({ order: () => ({ is: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+      }),
     } as never
     await expect(listSourcesForVisibleClients(supabase)).rejects.toMatchObject({ code: 'DB_ERROR' })
   })
@@ -212,10 +238,30 @@ describe('deleteChunksForSource', () => {
 
 describe('matchClientKnowledgeChunks', () => {
   it('should call the rpc and return its rows mapped to camelCase', async () => {
-    const rows = [{ source_id: 's1', source_title: 'About', content: 'x', similarity: 0.9 }]
+    const rows = [{ source_id: 's1', source_title: 'About', resource_id: null, content: 'x', similarity: 0.9 }]
     const supabase = { rpc: vi.fn().mockResolvedValue({ data: rows, error: null }) } as never
     const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1, 0.2], 6)
-    expect(result).toEqual([{ sourceId: 's1', sourceTitle: 'About', content: 'x', similarity: 0.9 }])
+    expect(result).toEqual([
+      { sourceId: 's1', sourceTitle: 'About', resourceId: null, content: 'x', similarity: 0.9 },
+    ])
+  })
+
+  it('should map the resource id through so a fact can be traced to an attachable file', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        { source_id: 's1', source_title: 'Deck', resource_id: 'r1', content: 'Three fintech identities.', similarity: 0.8 },
+        { source_id: 's2', source_title: 'About', resource_id: null, content: 'Founded 2019.', similarity: 0.7 },
+      ],
+      error: null,
+    })
+    const supabase = { rpc } as never
+
+    const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1], 6)
+
+    expect(result).toEqual([
+      { sourceId: 's1', sourceTitle: 'Deck', resourceId: 'r1', content: 'Three fintech identities.', similarity: 0.8 },
+      { sourceId: 's2', sourceTitle: 'About', resourceId: null, content: 'Founded 2019.', similarity: 0.7 },
+    ])
   })
 
   it('should throw DB_ERROR when the rpc fails', async () => {

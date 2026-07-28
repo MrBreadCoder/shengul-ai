@@ -45,6 +45,19 @@ describe('DELETE /api/clients/[clientId]/knowledge/[sourceId]', () => {
     expect(deleteSourceMock).not.toHaveBeenCalled()
   })
 
+  it('should refuse to delete a source that belongs to a resource', async () => {
+    getSourceByIdMock.mockResolvedValue({
+      id: 's1', client_id: 'c1', created_by: 'u1', source_type: 'resource',
+      storage_path: null, title: 'Deck', resource_id: 'r1',
+    })
+
+    const res = await DELETE(req(), ctx('c1', 's1'))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'resource_backed' })
+    expect(deleteSourceMock).not.toHaveBeenCalled()
+  })
+
   it('should allow a client user to delete their own source', async () => {
     requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
     getSourceByIdMock.mockResolvedValue({

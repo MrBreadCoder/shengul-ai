@@ -9,6 +9,8 @@ export type KnowledgeChunkRow = Database['public']['Tables']['client_knowledge_c
 export interface MatchedChunk {
   sourceId: string
   sourceTitle: string
+  /** Set when this chunk is the derived content of a sendable resource. */
+  resourceId: string | null
   content: string
   similarity: number
 }
@@ -63,6 +65,10 @@ export async function insertPendingWebsiteSources(
   return data ?? []
 }
 
+// Resource-backed sources are excluded: they are the derived content of a
+// client_resources row, managed from the Resources tab. Listing them here would
+// show the same file twice and offer a delete that would strand the resource
+// reporting 'ready' with no chunks behind it.
 export async function listSourcesForClient(
   supabase: SupabaseClient<Database>,
   clientId: string,
@@ -72,6 +78,7 @@ export async function listSourcesForClient(
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
+    .is('resource_id', null)
   if (error) throw new AppError('DB_ERROR', 'Failed to list knowledge sources', { clientId, cause: error.message })
   return data ?? []
 }
@@ -86,6 +93,8 @@ export async function listSourcesForVisibleClients(
     .from('client_knowledge_sources')
     .select('*')
     .order('created_at', { ascending: false })
+    // See listSourcesForClient.
+    .is('resource_id', null)
   if (error) throw new AppError('DB_ERROR', 'Failed to list knowledge sources', { cause: error.message })
   return data ?? []
 }
@@ -243,6 +252,7 @@ export async function matchClientKnowledgeChunks(
     throw new AppError('DB_ERROR', 'Failed to match knowledge chunks', { clientId, cause: error.message })
   }
   return (data ?? []).map((row) => ({
-    sourceId: row.source_id, sourceTitle: row.source_title, content: row.content, similarity: row.similarity,
+    sourceId: row.source_id, sourceTitle: row.source_title, resourceId: row.resource_id,
+    content: row.content, similarity: row.similarity,
   }))
 }
