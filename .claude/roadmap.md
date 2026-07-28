@@ -1024,9 +1024,95 @@ deletes the auth user rather than consuming the address.
 
 ---
 
-## AI Resources — sendable client collateral (spec approved 2026-07-26)
+## AI Resources — sendable client collateral (shipped 2026-07-26)
 
-**Spec:** `docs/superpowers/specs/2026-07-26-ai-resources-design.md`. Not yet implemented.
+**Spec:** `docs/superpowers/specs/2026-07-26-ai-resources-design.md`.
+**Plan:** `docs/superpowers/plans/2026-07-26-ai-resources.md`.
+
+**All 21 tasks done.** 1345 tests across 141 files, typecheck, lint and build all green.
+
+What landed:
+
+- **Two tables** — `client_resources` (sendable collateral, soft-deleted so sent mail keeps its
+  audit trail) and `email_attachments` (what each email actually carried).
+- **Attachment plumbing through all three providers** — Gmail `multipart/mixed`, Graph
+  `fileAttachment`, nodemailer, behind one `SendEmailInput.attachments` field.
+- **Ordinal-based AI selection in `reply.ts`** — the model picks numbers off a menu, never uuids,
+  and every ordinal is treated as untrusted.
+- **Knowledge uploads widened** from PDF-only to pdf/txt/md.
+- **The client-writable RLS reversal**, with `src/lib/auth/can-manage-client.ts` as the real
+  boundary, plus the three-tab `/knowledge` UI and the `/inbox` attach-and-edit flow.
+
+Migration `0018_client_resources.sql` adds `client_resources`
+and `email_attachments`, opens the two knowledge tables to client-role sessions, adds the
+`'file'` enum value, and creates the private `client-resources` bucket.
+`src/lib/mailbox/attachments.ts` holds the 3-file / 3 MB ceiling and upload-time filename
+sanitization; `SendEmailInput.attachments` is now serialized by all three providers — Gmail via a
+`multipart/mixed` branch in `encodeMessage`, Outlook via Graph `fileAttachment` entries, SMTP via
+nodemailer — and `sendViaMailbox` passes it straight through without touching rotation, the
+atomic cap claim, or jitter. Every provider re-asserts `assertNoHeaderInjection` on the filename
+and mime type before it reaches a header.
+
+Also landed: `src/lib/storage/client-resources.ts` (validate/upload/download/delete/sign against
+the private bucket), `src/lib/db/client-resources.ts` (CRUD, with `getActiveResourcesByIds`
+client-scoped so a forged id cannot resolve across tenants, and `deactivateClientResource` written
+as a claim so a concurrent soft-delete cannot double-remove the storage object),
+`src/lib/db/email-attachments.ts` (idempotent upsert on the `(email_id, resource_id)` unique
+index), and `src/lib/resources/menu.ts` — the whole AI-selection surface: menu building, one-line
+prompt formatting, and `resolveAttachments`, which treats every model ordinal as untrusted
+(out-of-range dropped, repeats collapsed, count and byte budget enforced in code, not in the
+prompt). All five new modules are at 100% statement/branch/function/line coverage.
+
+Tasks 11–15 wired the pipelines and opened knowledge curation to clients.
+`src/lib/resources/load-attachments.ts` turns resource ids into wire-ready attachments, ordered by
+the caller rather than the database, and fails loudly on a missing storage object — an email whose
+body promises "attached are the examples" must not go out empty. `reply.ts` now puts the numbered
+menu in the classify prompt, takes `attachResourceIds` ordinals back, resolves them server-side,
+records `email_attachments` before the draft branch (so `/inbox` can show and edit the AI's picks),
+and loads the bytes inside the existing try so a storage failure lands in the same `markEmailFailed`
+retry path as a send failure. A price handoff passes `resourceIds: []` unconditionally, and
+`write.ts` / `followup.ts` still mention attachments nowhere. `knowledge-answer.ts` takes the
+operator's selection instead — no LLM choice — re-resolved against the client so a tampered form
+value cannot attach another tenant's file, and tells the prompt which files ride along so the body
+references them rather than contradicting the envelope.
+
+`src/lib/auth/can-manage-client.ts` is the whole authorization boundary for client-role writes:
+both relaxed knowledge routes use the admin client, so RLS is not what stops cross-tenant writes —
+`canManageClient` / `canManageOwnRow` are. Knowledge uploads widened from PDF-only to pdf/txt/md:
+`client-knowledge-pdfs.ts` → `client-knowledge-files.ts` (mime allowlist, `extractKnowledgeText`
+routing text files past the PDF extractor, uploaded extension preserved), `insertPdfSourceReady` →
+`insertFileSourceReady` with an explicit `sourceType`, and `api/.../knowledge/pdf` →
+`.../knowledge/file`. The bucket id stays `client-knowledge-pdfs` — renaming it would mean
+migrating every existing object for nothing. Deleting a source is now owner-or-operator, checked
+after the 404 so a non-owner learns nothing extra.
+
+Tasks 16–21 built the routes and the UI. `POST /api/clients/[clientId]/resources` removes the
+uploaded object again when the row insert fails, so a bucket object can never outlive the row that
+points at it; `DELETE .../[resourceId]` soft-deletes through the `deactivateClientResource` claim
+and leaves the storage object alone (see the review pass below). `/knowledge` gained a tab strip and two
+sub-routes: *Sources* and *Resources*, each with its own `loading.tsx` / `error.tsx`, a client
+column for operators, per-row delete gated on `canManageOwnRow`, and an upload control only for a
+client-role user (an operator has no single client to scope an upload to and uploads from
+`/clients/[id]`). `ResourcePicker` enforces the 3-file / 3 MB budget in the UI — an unselected row
+is disabled when it would breach either cap, a selected row never is, so a choice is always
+reversible — and emits hidden inputs so it composes with a plain `<form action={serverAction}>`.
+
+`/inbox` is where the two halves meet. The knowledge-request row gained both slots the spec asked
+for: attach resources (sent to the lead) and add knowledge (a file the agent learns from, uploaded
+best-effort to the knowledge route after the answer lands, so it can neither delay nor block the
+reply the prospect is waiting on — see the review pass below). The draft row shows what the agent
+chose and lets an operator correct it through `updateDraftAttachments`, in its own form so editing
+can never trigger the send. `approveDraft` re-reads `email_attachments` from the database rather
+than trusting form state. `src/lib/knowledge/ingest-file.ts` is the one implementation of
+file → storage → text → source row → chunks, behind the upload route.
+
+Open question deferred from Task 1: `client_resources.created_by` was written as a plain FK to
+`app_users(id)` (matching `0014`), not the plan's `on delete cascade`, because cascade would
+silently destroy a client's collateral when an operator removes one login and would fight the
+`on delete restrict` on `email_attachments.resource_id`. Consequence: removing a login that has
+uploads fails loudly with a FK violation — same as knowledge sources today. Spec §5.1 wants the
+uploads to survive and become operator-only-editable, which needs a nullable `created_by` with
+`on delete set null`; decide before the removal flow is exercised against real resource rows.
 
 Lets the agent send files — portfolio PDFs, design mockups, one-pagers — to a lead that asked
 for them, as real MIME attachments on a reply. Resources are deliberately **not** knowledge:
@@ -1040,12 +1126,56 @@ guard is structural, not a flag. Ceiling is 3 MB / 3 files per email, which keep
 and SMTP all on their simple send paths (no Graph upload sessions).
 
 **Reverses `0014`'s operator-only RLS.** Clients can now upload and manage their *own* knowledge
-sources and resources on `/knowledge`; operators keep full control everywhere. This is the first
-table in the codebase a client-role session can write to, so `.claude/architecture.md` §11
-("clients are read-only") needs updating alongside. Because the routes use the admin client,
-RLS stops protecting them — route-level ownership checks are the real boundary and get their
-own tests.
+sources and resources on `/knowledge`; operators keep full control everywhere. These are the first
+tables in the codebase a client-role session can write to; `.claude/architecture.md` §5 and §11 were
+updated alongside. Because the routes use the admin client, RLS stops protecting them —
+`canManageClient` / `canManageOwnRow` are the real boundary and get their own tests.
 
-Also widens knowledge uploads from PDF-only to pdf/txt/md, and adds an attachment picker to both
-the `/inbox` knowledge-request answer form and the draft-approval row (the AI's picks are shown
-and editable before an operator approves).
+**Consequence to watch:** a client-role login now sees the knowledge base operators curated for
+them, including any internal framing in a scraped page or uploaded PDF. Existing content wants a
+sweep before this reaches a real client.
+
+### Review pass (2026-07-27)
+
+Ten findings from a full review of the branch, all fixed. Four changed real behaviour:
+
+1. **The inbox knowledge file could not exceed 1 MB.** It was submitted through
+   `answerKnowledgeRequest`, and Server Actions cap request bodies at 1 MB by default — which
+   almost every real PDF exceeds, so a file that was supposed to be optional and best-effort took
+   the whole answer down with it, and the prospect's reply never sent. The file now goes to
+   `POST /api/clients/[clientId]/knowledge/file` (a Route Handler, no such cap) from
+   `knowledge-request-row.tsx`, *after* the answer succeeds, so a slow or rejected upload can
+   neither delay nor block the reply. `ingestKnowledgeFile` is still the one implementation; only
+   the caller moved. The action no longer reads `knowledgeFile` at all.
+2. **A deleted resource silently vanished from an email that promised it.** `loadResourceAttachments`
+   filtered its results through `getActiveResourcesByIds` and dropped whatever failed to resolve,
+   so a resource soft-deleted between the pick and the send produced a mail whose body said
+   "attached are the examples" carrying nothing — the exact outcome its own docstring promised to
+   prevent. It now raises `NOT_FOUND` naming the missing ids. `approveDraft` resolves attachments
+   **before** `claimDraftForSend`, so this fails while the draft is still a draft the operator can
+   fix, instead of after the claim where the only move left is `markEmailFailed`.
+3. **The interactive paths never validated their picks.** `updateDraftAttachments` and
+   `answerKnowledgeRequest` checked only the id count, so an over-budget or cross-client selection
+   was written happily and only surfaced at send time as a dead email. Both now call
+   `resolveSelectedResources` (`src/lib/resources/select.ts`) before writing anything —
+   existence, tenant, count and byte budget — and `answerKnowledgeRequest` does it before the
+   claim, so a rejected form leaves the request open for a corrected resubmit. The automated path
+   keeps trimming rather than failing: `applyAttachmentBudget` was extracted out of
+   `resolveAttachments` and is now also applied defensively in `knowledge-answer.ts`, which logs
+   `droppedResourceIds`.
+4. **`/inbox` capped resources globally instead of per client.** One 200-row ceiling was spent in
+   `created_at` order across every visible client, so one busy client starved the rest of an empty
+   picker. `listActiveResourcesForClients` queries per client — in parallel, scoped to the clients
+   that actually have a row on the page — and gives each the full limit.
+
+The rest: the stale-attachment case is now escapable in the UI (`ResourcePicker` renders an
+explicit removable row for a selected id that is no longer in the library, and `draft-row` offers
+the editor whenever *anything* is attached, not only when the library is non-empty — otherwise a
+draft could be permanently stuck to a file it can no longer send); Gmail's multipart text part is
+base64 rather than a `7bit` declaration that model-written em dashes make untrue; `DraftRow` gets
+the three fields it renders instead of the whole row, keeping `storage_path` out of the browser
+payload; the knowledge storage key takes its extension from the sanitized filename; deleting a
+resource no longer removes the storage object, since the row is retained precisely so already-sent
+mail resolves; and the `client_resources` / `client_knowledge_sources` update+delete policies now
+check `client_id = current_client_id()` alongside `created_by`, so a reassigned user cannot keep
+editing rows in the tenant they left.

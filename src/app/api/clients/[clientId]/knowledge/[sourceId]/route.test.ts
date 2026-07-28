@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const requireUserMock = vi.fn()
 const getSourceByIdMock = vi.fn()
 const deleteSourceMock = vi.fn()
-const deleteClientKnowledgePdfObjectMock = vi.fn()
+const deleteClientKnowledgeFileObjectMock = vi.fn()
 const logEventSafeMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
@@ -12,8 +12,8 @@ vi.mock('@/lib/db/client-knowledge', () => ({
   getSourceById: (...a: unknown[]) => getSourceByIdMock(...a),
   deleteSource: (...a: unknown[]) => deleteSourceMock(...a),
 }))
-vi.mock('@/lib/storage/client-knowledge-pdfs', () => ({
-  deleteClientKnowledgePdfObject: (...a: unknown[]) => deleteClientKnowledgePdfObjectMock(...a),
+vi.mock('@/lib/storage/client-knowledge-files', () => ({
+  deleteClientKnowledgeFileObject: (...a: unknown[]) => deleteClientKnowledgeFileObjectMock(...a),
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventSafeMock(...a) }))
 
@@ -27,18 +27,32 @@ function req(): Request {
 }
 
 beforeEach(() => {
-  requireUserMock.mockReset().mockResolvedValue({ appUser: { id: 'op1', role: 'operator' } })
+  requireUserMock.mockReset().mockResolvedValue({ appUser: { id: 'op1', role: 'operator', client_id: null } })
   getSourceByIdMock.mockReset()
   deleteSourceMock.mockReset()
-  deleteClientKnowledgePdfObjectMock.mockReset().mockResolvedValue(undefined)
+  deleteClientKnowledgeFileObjectMock.mockReset().mockResolvedValue(undefined)
   logEventSafeMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('DELETE /api/clients/[clientId]/knowledge/[sourceId]', () => {
-  it('should return 403 when the caller is not an operator', async () => {
-    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client' } })
+  it('should reject a client user deleting a source they did not upload', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u9', role: 'client', client_id: 'c1' } })
+    getSourceByIdMock.mockResolvedValue({
+      id: 's1', client_id: 'c1', created_by: 'u1', source_type: 'pdf', storage_path: 'p', title: 't',
+    })
     const res = await DELETE(req(), ctx('c1', 's1'))
     expect(res.status).toBe(403)
+    expect(deleteSourceMock).not.toHaveBeenCalled()
+  })
+
+  it('should allow a client user to delete their own source', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    getSourceByIdMock.mockResolvedValue({
+      id: 's1', client_id: 'c1', created_by: 'u1', source_type: 'file', storage_path: 'p', title: 't',
+    })
+    deleteSourceMock.mockResolvedValue({ id: 's1' })
+    const res = await DELETE(req(), ctx('c1', 's1'))
+    expect(res.status).toBe(200)
   })
 
   it('should return 404 when the source does not exist', async () => {
@@ -58,7 +72,7 @@ describe('DELETE /api/clients/[clientId]/knowledge/[sourceId]', () => {
     deleteSourceMock.mockResolvedValue({ id: 's1' })
     const res = await DELETE(req(), ctx('c1', 's1'))
     expect(res.status).toBe(200)
-    expect(deleteClientKnowledgePdfObjectMock).not.toHaveBeenCalled()
+    expect(deleteClientKnowledgeFileObjectMock).not.toHaveBeenCalled()
   })
 
   it('should delete a pdf source and its storage object', async () => {
@@ -66,6 +80,6 @@ describe('DELETE /api/clients/[clientId]/knowledge/[sourceId]', () => {
     deleteSourceMock.mockResolvedValue({ id: 's1' })
     const res = await DELETE(req(), ctx('c1', 's1'))
     expect(res.status).toBe(200)
-    expect(deleteClientKnowledgePdfObjectMock).toHaveBeenCalledWith(expect.anything(), 'c1/x.pdf')
+    expect(deleteClientKnowledgeFileObjectMock).toHaveBeenCalledWith(expect.anything(), 'c1/x.pdf')
   })
 })

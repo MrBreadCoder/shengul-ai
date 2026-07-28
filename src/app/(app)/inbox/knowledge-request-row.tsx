@@ -9,22 +9,40 @@ import { answerKnowledgeRequest } from './actions'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { ResourcePicker } from '@/components/resource-picker'
+import type { ResourceSummary } from '@/components/resource-list'
 
 interface KnowledgeRequestRowProps {
   knowledgeRequestId: string
   caseId: string
+  /** Needed to address the knowledge-file upload route. */
+  clientId: string
   question: string
   companyName: string
   /** Preformatted on the server so no clock runs during hydration. */
   age: string
+  /** This client's sendable library; empty renders no picker at all. */
+  resources: readonly ResourceSummary[]
+}
+
+async function extractErrorMessage(res: Response, fallback: string): Promise<string> {
+  const json: unknown = await res.json().catch(() => ({}))
+  if (typeof json === 'object' && json !== null && 'issues' in json) {
+    const issues = (json as { issues: unknown }).issues
+    if (typeof issues === 'string') return issues
+  }
+  return fallback
 }
 
 export function KnowledgeRequestRow({
   knowledgeRequestId,
   caseId,
+  clientId,
   question,
   companyName,
   age,
+  resources,
 }: KnowledgeRequestRowProps): React.ReactElement {
   const [isPending, startTransition] = useTransition()
   const [isAnswered, setIsAnswered] = useState(false)
@@ -33,7 +51,39 @@ export function KnowledgeRequestRow({
 
   const isEmpty = answer.trim().length === 0
 
+  /**
+   * The knowledge file goes to the upload Route Handler, never through the
+   * Server Action below: Server Actions cap request bodies at 1MB by default,
+   * which almost every real PDF exceeds, and a file too large would otherwise
+   * take the whole answer down with it.
+   *
+   * Best-effort by design — a failed ingest must not block the reply the
+   * prospect is waiting on, because the operator's typed answer already carries
+   * the fact. So this warns and returns rather than throwing.
+   */
+  async function uploadKnowledgeFile(file: File): Promise<void> {
+    try {
+      const body = new FormData()
+      body.set('file', file)
+      const res = await fetch(`/api/clients/${clientId}/knowledge/file`, { method: 'POST', body })
+      if (!res.ok) {
+        toast.warning('The answer was sent, but the file was not saved', {
+          description: await extractErrorMessage(res, 'Could not read the file.'),
+        })
+      }
+    } catch {
+      toast.warning('The answer was sent, but the file was not saved', {
+        description: 'Network request failed. Check your connection and retry the upload.',
+      })
+    }
+  }
+
   const onSubmit = (formData: FormData): void => {
+    const knowledgeFile = formData.get('knowledgeFile')
+    // Always removed, empty or not: a File in the payload is exactly what the
+    // Server Action body limit rejects.
+    formData.delete('knowledgeFile')
+
     startTransition(async () => {
       try {
         await answerKnowledgeRequest(formData)
@@ -43,6 +93,12 @@ export function KnowledgeRequestRow({
         toast.error('Could not send the answer', {
           description: error instanceof Error ? error.message : 'Please try again.',
         })
+        return
+      }
+      // After the answer, so a slow upload never delays the reply and a rejected
+      // file never prevents it.
+      if (knowledgeFile instanceof File && knowledgeFile.size > 0) {
+        await uploadKnowledgeFile(knowledgeFile)
       }
     })
   }
@@ -70,7 +126,7 @@ export function KnowledgeRequestRow({
       // presses the button — submitting this sends mail to the prospect. No
       // `toolautosubmit` — see `@/types/webmcp`.
       toolname="answerKnowledgeRequest"
-      tooldescription="Answers a question the outreach agent is blocked on, saves it as knowledge for this company, and replies to the prospect. Submitting sends an email."
+      tooldescription="Answers a question the outreach agent is blocked on, saves it as knowledge for this company, and replies to the prospect. Files from the resource library may be attached to that reply, and a file may be supplied for the agent to learn from. Submitting sends an email."
       className="bg-surface rounded-lg border"
       // Open questions block the agent mid-conversation, so this row carries a
       // warmer edge than a draft: it is the thing to deal with first.
@@ -125,6 +181,25 @@ export function KnowledgeRequestRow({
           />
           <p className="text-faint text-[11px]">
             Saved as case knowledge, so the agent can reuse it on this company later.
+          </p>
+        </div>
+
+        <ResourcePicker resources={resources} name="resourceIds" />
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`knowledge-file-${knowledgeRequestId}`} className="text-xs">
+            Add knowledge — teaches the agent
+          </Label>
+          <Input
+            id={`knowledge-file-${knowledgeRequestId}`}
+            name="knowledgeFile"
+            type="file"
+            accept="application/pdf,text/plain,text/markdown,.md"
+            className="max-w-[45ch]"
+            toolparamdescription="Optional. A file the agent should learn from. Not sent to the lead."
+          />
+          <p className="text-faint text-[11px]">
+            Read, chunked and embedded for future answers. Never sent to the lead.
           </p>
         </div>
       </div>

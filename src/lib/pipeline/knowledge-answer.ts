@@ -9,6 +9,8 @@ import { generateText, type LlmCallContext } from '@/lib/llm/client'
 import { sendOrDraftReply, replyDisposition } from '@/lib/pipeline/reply'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { getActiveResourcesByIds, type ClientResourceRow } from '@/lib/db/client-resources'
+import { applyAttachmentBudget } from '@/lib/resources/menu'
 
 const ACTOR = 'reply_agent'
 const MAX_OUTPUT_TOKENS = 1_000
@@ -22,7 +24,12 @@ const SYSTEM_PROMPT = [
 ].join(' ')
 
 function buildAnswerPrompt(args: {
-  thread: EmailRow[]; knowledge: KnowledgeRow[]; humanAnswer: string; valueProp: string | null; clientKnowledge: string
+  thread: EmailRow[]
+  knowledge: KnowledgeRow[]
+  humanAnswer: string
+  valueProp: string | null
+  clientKnowledge: string
+  attachedFiles: string[]
 }): string {
   const dossier = args.knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   const lastInbound = [...args.thread].reverse().find((e) => e.direction === 'inbound')
@@ -32,6 +39,9 @@ function buildAnswerPrompt(args: {
     args.clientKnowledge ? `About our company:\n${args.clientKnowledge}` : '',
     `Dossier:\n${dossier}`,
     `The prospect's question:\n${lastInbound?.body ?? ''}`,
+    args.attachedFiles.length > 0
+      ? `These files are attached to this email — reference them naturally, do not describe their contents: ${args.attachedFiles.join(', ')}`
+      : '',
     'Write only the reply body (no subject line).',
   ]
     .filter(Boolean)
@@ -49,7 +59,7 @@ function replySubject(thread: EmailRow[]): string {
 // Idempotent via sendOrDraftReply's one-reply-per-inbound claim.
 export async function runKnowledgeAnswer(
   supabase: SupabaseClient<Database>,
-  input: { knowledgeRequestId: string },
+  input: { knowledgeRequestId: string; resourceIds?: readonly string[] },
 ): Promise<{ knowledgeRequestId: string; action: 'sent' | 'drafted' | 'skipped' }> {
   const kr = await getKnowledgeRequestById(supabase, input.knowledgeRequestId)
   if (!kr || kr.status !== 'answered' || !kr.email_id || !kr.human_answer) {
@@ -70,6 +80,23 @@ export async function runKnowledgeAnswer(
     listKnowledgeForCase(supabase, inbound.case_id),
   ])
 
+  // The operator chose these in /inbox — no LLM selection here. Re-resolved
+  // against the client so a tampered form value cannot attach another client's
+  // file, then budget-trimmed rather than rejected: the caller already validated
+  // the selection, so anything left to trim here is a race (a resource deleted
+  // mid-flight) and the prospect's reply must still go out.
+  const pickedResourceIds = input.resourceIds ?? []
+  const resolvedResources = pickedResourceIds.length > 0
+    ? await getActiveResourcesByIds(supabase, inbound.client_id, pickedResourceIds)
+    : []
+  const { resources: attachResources, droppedResourceIds } = applyAttachmentBudget(
+    // getActiveResourcesByIds gives no ordering guarantee; the operator's pick
+    // order decides which files survive a trim.
+    pickedResourceIds
+      .map((id) => resolvedResources.find((resource) => resource.id === id))
+      .filter((resource): resource is ClientResourceRow => resource !== undefined),
+  )
+
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
   const clientKnowledge = await retrieveClientKnowledge(
@@ -79,6 +106,7 @@ export async function runKnowledgeAnswer(
     instructions: SYSTEM_PROMPT,
     prompt: buildAnswerPrompt({
       thread, knowledge, humanAnswer: kr.human_answer, valueProp: campaign.value_prop, clientKnowledge,
+      attachedFiles: attachResources.map((r) => r.title),
     }),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })
@@ -87,11 +115,17 @@ export async function runKnowledgeAnswer(
   const disposition = replyDisposition(campaign.reply_mode, 1)
   await sendOrDraftReply(supabase, {
     inbound, lead, mailboxIds: campaign.mailbox_ids, subject: replySubject(thread), body, disposition,
+    resourceIds: attachResources.map((r) => r.id),
   })
 
   await logEventSafe({
     clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
-    type: 'reply.knowledge_answered', payload: { knowledgeRequestId: kr.id, emailId: inbound.id, disposition },
+    type: 'reply.knowledge_answered',
+    payload: {
+      knowledgeRequestId: kr.id, emailId: inbound.id, disposition,
+      resourceIds: attachResources.map((r) => r.id),
+      droppedResourceIds,
+    },
   })
 
   return { knowledgeRequestId: kr.id, action: disposition === 'send' ? 'sent' : 'drafted' }

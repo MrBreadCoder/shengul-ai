@@ -1,4 +1,8 @@
 import { AppError } from '@/lib/errors/app-error'
+import type { EmailAttachment } from './attachments'
+
+// Re-exported so every consumer has one import site for the send surface.
+export type { EmailAttachment } from './attachments'
 
 export interface OAuthCredentials {
   kind: 'oauth'
@@ -36,6 +40,10 @@ export interface SendEmailInput {
   threadId?: string | null
   inReplyToMessageId?: string | null
   references?: string | null
+  // Replies only. Callers are responsible for having run
+  // assertWithinAttachmentLimits before reaching a provider — providers do not
+  // re-validate, they serialize.
+  attachments?: readonly EmailAttachment[]
 }
 
 export interface SendEmailResult {

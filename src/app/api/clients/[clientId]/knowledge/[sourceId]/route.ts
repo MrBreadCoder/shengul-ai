@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth/require-user'
+import { canManageOwnRow } from '@/lib/auth/can-manage-client'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSourceById, deleteSource } from '@/lib/db/client-knowledge'
-import { deleteClientKnowledgePdfObject } from '@/lib/storage/client-knowledge-pdfs'
+import { deleteClientKnowledgeFileObject } from '@/lib/storage/client-knowledge-files'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -13,10 +14,6 @@ export async function DELETE(
   context: { params: Promise<{ clientId: string; sourceId: string }> },
 ) {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
-  }
-
   const { clientId, sourceId } = await context.params
   const admin = createAdminClient()
   const source = await getSourceById(admin, sourceId)
@@ -24,11 +21,17 @@ export async function DELETE(
   if (!source || source.client_id !== clientId) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
+  // Operators may remove anything; a client user may only remove what they
+  // uploaded. Checked after the 404 so a non-owner learns nothing about
+  // existence beyond what the 404 already tells them.
+  if (!canManageOwnRow(appUser, source)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
 
   try {
     await deleteSource(admin, sourceId)
-    if (source.source_type === 'pdf' && source.storage_path) {
-      await deleteClientKnowledgePdfObject(admin, source.storage_path)
+    if (source.storage_path) {
+      await deleteClientKnowledgeFileObject(admin, source.storage_path)
     }
     await logEventSafe({
       clientId, actor: `human:${appUser.id}`, type: 'knowledge.source_deleted',

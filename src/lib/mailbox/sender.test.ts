@@ -264,3 +264,35 @@ describe('rotation and health', () => {
     expect(setMailboxHealthMock).toHaveBeenCalledWith(expect.anything(), 'm1', 'blocked', 'auth_failure')
   })
 })
+
+describe('sendViaMailbox attachments', () => {
+  it('should forward attachments to the provider unchanged', async () => {
+    const attachments = [
+      { fileName: 'deck.pdf', mimeType: 'application/pdf', content: Buffer.from('X') },
+    ]
+    listMailboxesByIdsMock.mockResolvedValue([mailbox])
+    claimMailboxSendMock.mockResolvedValue({ ...mailbox, sent_today: 1 })
+    const provider = okProvider()
+    getMailboxProviderMock.mockReturnValue(provider)
+
+    await sendViaMailbox({} as never, { ...baseInput, purpose: 'reply', attachments })
+
+    expect(provider.sendEmail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ attachments }),
+    )
+  })
+
+  it('should omit the attachments key when the caller passes none', async () => {
+    listMailboxesByIdsMock.mockResolvedValue([mailbox])
+    claimMailboxSendMock.mockResolvedValue({ ...mailbox, sent_today: 1 })
+    const provider = okProvider()
+    getMailboxProviderMock.mockReturnValue(provider)
+
+    await sendViaMailbox({} as never, baseInput)
+
+    // safe: the send above resolved, so exactly one call is recorded
+    const sent = provider.sendEmail.mock.calls[0]![1] as Record<string, unknown>
+    expect(sent).not.toHaveProperty('attachments')
+  })
+})

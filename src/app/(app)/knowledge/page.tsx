@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { KnowledgeItem } from '@/components/knowledge-item'
 import { FilterChips, type FilterOption } from '@/components/filter-chips'
+import { KnowledgeTabs } from './knowledge-tabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,6 +79,8 @@ export default async function KnowledgePage({
           </span>
         }
       />
+
+      <KnowledgeTabs />
 
       <div className="border-hairline flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border p-3">
         <FilterChips

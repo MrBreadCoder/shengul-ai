@@ -5,11 +5,14 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { ArrowClockwise, Trash } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
+import type { Database } from '@/types/database'
 
 interface KnowledgeSourceActionsProps {
   clientId: string
   sourceId: string
-  sourceType: 'website_page' | 'pdf'
+  // Taken from the enum rather than spelled out, so adding a source type is a
+  // typecheck failure here instead of a silently unhandled branch below.
+  sourceType: Database['public']['Enums']['knowledge_source_type']
 }
 
 type ActionState = { status: 'idle' } | { status: 'submitting' }

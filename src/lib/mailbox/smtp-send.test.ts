@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { SmtpCredentials } from './provider'
+import type { SendEmailInput, SmtpCredentials } from './provider'
 
 const sendMailMock = vi.hoisted(() => vi.fn())
 const closeMock = vi.hoisted(() => vi.fn())
@@ -126,5 +126,42 @@ describe('sendSmtpEmail', () => {
     await expect(
       sendSmtpEmail(credentials, { to: 'lead@target.com', subject: 'Hi', body: 'b' }),
     ).rejects.toMatchObject({ code: 'EXTERNAL_ERROR' })
+  })
+})
+
+describe('sendSmtpEmail with attachments', () => {
+  async function captureMailOptions(input: SendEmailInput): Promise<Record<string, unknown>> {
+    await sendSmtpEmail(credentials, input)
+    return sentOptions()
+  }
+
+  it('should omit the attachments key when there are none', async () => {
+    const options = await captureMailOptions({ to: 'a@b.com', subject: 'Hi', body: 'Hello' })
+    expect(options).not.toHaveProperty('attachments')
+  })
+
+  it('should pass each attachment through to nodemailer when attachments exist', async () => {
+    const content = Buffer.from('PDFBYTES')
+    const options = await captureMailOptions({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'Hello',
+      attachments: [{ fileName: 'deck.pdf', mimeType: 'application/pdf', content }],
+    })
+    expect(options.attachments).toEqual([
+      { filename: 'deck.pdf', content, contentType: 'application/pdf' },
+    ])
+  })
+
+  it('should reject a filename carrying a line break before opening a connection', async () => {
+    await expect(
+      captureMailOptions({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'Hello',
+        attachments: [{ fileName: 'a\nb.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }],
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(createSmtpTransportMock).not.toHaveBeenCalled()
   })
 })

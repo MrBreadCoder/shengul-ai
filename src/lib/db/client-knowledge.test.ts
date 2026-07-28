@@ -7,12 +7,13 @@ vi.mock('@/lib/llm/client', () => ({ embedTexts: (...a: unknown[]) => embedTexts
 import {
   insertPendingWebsiteSources,
   listSourcesForClient,
+  listSourcesForVisibleClients,
   getSourceById,
   markSourceReady,
   markSourceFailed,
   resetSourceToPending,
   deleteSource,
-  insertPdfSourceReady,
+  insertFileSourceReady,
   embedAndStoreChunks,
   deleteChunksForSource,
   matchClientKnowledgeChunks,
@@ -77,6 +78,26 @@ describe('listSourcesForClient', () => {
   })
 })
 
+describe('listSourcesForVisibleClients', () => {
+  it('should return every source RLS exposes, newest first', async () => {
+    const rows = [{ id: 's2' }, { id: 's1' }]
+    const orderMock = vi.fn().mockResolvedValue({ data: rows, error: null })
+    const supabase = { from: () => ({ select: () => ({ order: orderMock }) }) } as never
+
+    const result = await listSourcesForVisibleClients(supabase)
+
+    expect(result).toEqual(rows)
+    expect(orderMock).toHaveBeenCalledWith('created_at', { ascending: false })
+  })
+
+  it('should throw DB_ERROR when the query fails', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(listSourcesForVisibleClients(supabase)).rejects.toMatchObject({ code: 'DB_ERROR' })
+  })
+})
+
 describe('getSourceById', () => {
   it('should return null when not found', async () => {
     const supabase = {
@@ -123,19 +144,34 @@ describe('deleteSource', () => {
   })
 })
 
-describe('insertPdfSourceReady', () => {
+describe('insertFileSourceReady', () => {
   it('should insert an already-ready pdf source row', async () => {
     const insertMock = vi.fn().mockReturnValue({
       select: () => ({ single: () => Promise.resolve({ data: { id: 's1' }, error: null }) }),
     })
     const supabase = { from: () => ({ insert: insertMock }) } as never
-    const result = await insertPdfSourceReady(supabase, {
+    const result = await insertFileSourceReady(supabase, {
       clientId: 'c1', createdBy: 'op1', title: 'doc.pdf', storagePath: 'c1/x.pdf', content: 'text', charCount: 4,
+      sourceType: 'pdf',
     })
     expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({
       client_id: 'c1', source_type: 'pdf', status: 'ready', storage_path: 'c1/x.pdf',
     }))
     expect(result).toEqual({ id: 's1' })
+  })
+
+  it('should write source_type file when the upload is a text file', async () => {
+    const insertMock = vi.fn().mockReturnValue({
+      select: () => ({ single: () => Promise.resolve({ data: { id: 's1' }, error: null }) }),
+    })
+    const supabase = { from: () => ({ insert: insertMock }) } as never
+
+    await insertFileSourceReady(supabase, {
+      clientId: 'c1', createdBy: 'u1', title: 'notes.md', storagePath: 'p',
+      content: 'x', charCount: 1, sourceType: 'file',
+    })
+
+    expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({ source_type: 'file' }))
   })
 })
 

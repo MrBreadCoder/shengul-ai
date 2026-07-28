@@ -11,9 +11,15 @@ vi.mock('@/lib/env', () => ({
 }))
 
 import { outlookProvider } from './outlook-provider'
+import type { SendEmailInput } from './provider'
 
 describe('outlookProvider', () => {
-  beforeEach(() => mockFetchJson.mockReset())
+  // Braced body on purpose: `() => mockFetchJson.mockReset()` returns the mock,
+  // and vitest treats a function returned from beforeEach as a cleanup hook —
+  // it would then call the mock with zero arguments after every test.
+  beforeEach(() => {
+    mockFetchJson.mockReset()
+  })
 
   it('should build an auth url with Mail.Send and offline_access', () => {
     const url = outlookProvider.buildAuthUrl('st')
@@ -88,6 +94,65 @@ describe('outlookProvider', () => {
     const sendCall = mockFetchJson.mock.calls[0]!
     const body = JSON.parse((sendCall[1] as { body: string }).body)
     expect(body.message.internetMessageHeaders).toBeUndefined()
+  })
+})
+
+describe('outlook sendEmail with attachments', () => {
+  const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  }
+
+  beforeEach(() => {
+    mockFetchJson.mockReset()
+  })
+
+  async function captureSentMessage(input: SendEmailInput): Promise<Record<string, unknown>> {
+    let captured: Record<string, unknown> = {}
+    mockFetchJson.mockImplementation((_url: string, init: { body: string }) => {
+      const payload = JSON.parse(init.body) as { message?: Record<string, unknown> }
+      if (payload.message) captured = payload.message
+      return Promise.resolve({})
+    })
+    await outlookProvider.sendEmail(tokens, input)
+    return captured
+  }
+
+  it('should omit the attachments key entirely when there are none', async () => {
+    const message = await captureSentMessage({ to: 'a@b.com', subject: 'Hi', body: 'Hello' })
+    expect(message).not.toHaveProperty('attachments')
+  })
+
+  it('should serialize each attachment as a graph fileAttachment when attachments exist', async () => {
+    const message = await captureSentMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'Hello',
+      attachments: [
+        { fileName: 'deck.pdf', mimeType: 'application/pdf', content: Buffer.from('PDFBYTES') },
+      ],
+    })
+    expect(message.attachments).toEqual([
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'deck.pdf',
+        contentType: 'application/pdf',
+        contentBytes: Buffer.from('PDFBYTES').toString('base64'),
+      },
+    ])
+  })
+
+  it('should reject a filename carrying a line break', async () => {
+    await expect(
+      captureSentMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'Hello',
+        attachments: [{ fileName: 'a\r\nb.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }],
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 })
 

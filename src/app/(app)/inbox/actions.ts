@@ -20,6 +20,10 @@ import { logEventSafe } from '@/lib/events/log-event'
 import { claimKnowledgeRequestAnswer, getKnowledgeRequestById } from '@/lib/db/knowledge-requests'
 import { insertKnowledge } from '@/lib/db/case-knowledge'
 import { runKnowledgeAnswer } from '@/lib/pipeline/knowledge-answer'
+import { listAttachmentsForEmail, replaceEmailAttachments } from '@/lib/db/email-attachments'
+import { loadResourceAttachments } from '@/lib/resources/load-attachments'
+import { resolveSelectedResources } from '@/lib/resources/select'
+import { MAX_ATTACHMENTS_PER_EMAIL } from '@/lib/mailbox/attachments'
 
 const approveSchema = z.object({ emailId: z.string().uuid() })
 
@@ -51,6 +55,20 @@ export async function approveDraft(formData: FormData): Promise<void> {
   const campaign = await getCampaignForCase(supabase, email.case_id)
   if (!campaign) throw new AppError('NOT_FOUND', 'Campaign not found for case', { emailId })
 
+  // Read the set from the database rather than from any form state: the AI's
+  // picks and the operator's edits both live there, and it is what an audit of
+  // this email will show.
+  //
+  // Resolved BEFORE the claim on purpose. loadResourceAttachments throws when a
+  // resource was deleted after being attached, and the claim is the point of no
+  // return — after it, the only way to report the problem is markEmailFailed,
+  // which destroys a draft the operator could otherwise have fixed by editing
+  // the attachments.
+  const recorded = await listAttachmentsForEmail(supabase, email.id)
+  const attachments = await loadResourceAttachments(
+    supabase, email.client_id, recorded.map((attachment) => attachment.resourceId),
+  )
+
   // Atomic claim BEFORE sending: draft -> queued. A concurrent invocation
   // (double-click, two tabs, a Server Action retry) that loses the race gets
   // null here and returns without sending a second real email.
@@ -68,6 +86,7 @@ export async function approveDraft(formData: FormData): Promise<void> {
       subject: email.subject,
       body: email.body,
       purpose: email.in_reply_to_email_id ? 'reply' : 'outreach',
+      attachments,
     })
     await markEmailSent(supabase, email.id, {
       providerMessageId: sent.providerMessageId,
@@ -112,7 +131,45 @@ export async function approveDraft(formData: FormData): Promise<void> {
 const answerSchema = z.object({
   knowledgeRequestId: z.string().uuid(),
   answer: z.string().min(1),
+  // The operator's picks. Shape only — resolveSelectedResources is what proves
+  // they exist, belong to this client, and fit the per-email budget.
+  resourceIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_EMAIL).default([]),
 })
+
+const updateAttachmentsSchema = z.object({
+  emailId: z.string().uuid(),
+  resourceIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_EMAIL).default([]),
+})
+
+// Lets an operator correct what the agent chose before approving. Only ever
+// touches a draft — once queued or sent, the set is history.
+export async function updateDraftAttachments(formData: FormData): Promise<void> {
+  const { appUser } = await requireUser()
+  if (appUser.role !== 'operator') {
+    throw new AppError('UNAUTHORIZED', 'Only operators can edit draft attachments', { userId: appUser.id })
+  }
+  const { emailId, resourceIds } = updateAttachmentsSchema.parse({
+    emailId: formData.get('emailId'),
+    resourceIds: formData.getAll('resourceIds'),
+  })
+
+  const supabase = createAdminClient()
+  const email = await getEmailById(supabase, emailId)
+  if (!email || email.status !== 'draft' || email.direction !== 'outbound') {
+    throw new AppError('VALIDATION_ERROR', 'Email is not an editable draft', { emailId })
+  }
+
+  // Validated against the email's own client before anything is written. An
+  // unresolvable or over-budget pick must fail here, where the operator is
+  // looking at the form, rather than at approve time where the only outcome
+  // left is a failed send.
+  await resolveSelectedResources(supabase, email.client_id, resourceIds)
+
+  await replaceEmailAttachments(supabase, {
+    clientId: email.client_id, emailId: email.id, resourceIds,
+  })
+  revalidatePath('/inbox')
+}
 
 // Operator supplies the previously-missing fact. We atomically claim the open
 // request (open -> answered), store the fact as case_knowledge (kind 'answer',
@@ -122,12 +179,22 @@ export async function answerKnowledgeRequest(formData: FormData): Promise<void> 
   if (appUser.role !== 'operator') {
     throw new AppError('UNAUTHORIZED', 'Only operators can answer knowledge requests', { userId: appUser.id })
   }
-  const { knowledgeRequestId, answer } = answerSchema.parse({
+  const { knowledgeRequestId, answer, resourceIds } = answerSchema.parse({
     knowledgeRequestId: formData.get('knowledgeRequestId'),
     answer: formData.get('answer'),
+    resourceIds: formData.getAll('resourceIds'),
   })
 
   const supabase = createAdminClient()
+
+  // Resolved before the claim so a bad selection mutates nothing: claiming is
+  // what flips the request open -> answered, and a rejected form has to leave it
+  // open for a corrected resubmit. A request that no longer exists needs no
+  // validation — the claim below handles it.
+  const pending = await getKnowledgeRequestById(supabase, knowledgeRequestId)
+  if (pending) {
+    await resolveSelectedResources(supabase, pending.client_id, resourceIds)
+  }
 
   const claimed = await claimKnowledgeRequestAnswer(supabase, {
     id: knowledgeRequestId,
@@ -164,6 +231,11 @@ export async function answerKnowledgeRequest(formData: FormData): Promise<void> 
     },
   ])
 
-  await runKnowledgeAnswer(supabase, { knowledgeRequestId: kr.id })
+  // An optional knowledge file does NOT arrive here. Server Actions cap request
+  // bodies at 1MB by default, which almost every real PDF exceeds, so the file
+  // is uploaded separately to /api/clients/[clientId]/knowledge/file — a Route
+  // Handler under no such cap — before this action is invoked. See
+  // knowledge-request-row.tsx.
+  await runKnowledgeAnswer(supabase, { knowledgeRequestId: kr.id, resourceIds })
   revalidatePath('/inbox')
 }

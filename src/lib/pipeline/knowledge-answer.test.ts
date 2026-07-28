@@ -9,6 +9,7 @@ const listKnowledgeMock = vi.fn()
 const generateTextMock = vi.fn()
 const sendOrDraftReplyMock = vi.fn()
 const logEventMock = vi.fn()
+const getActiveResourcesByIdsMock = vi.fn()
 
 vi.mock('@/lib/db/knowledge-requests', () => ({ getKnowledgeRequestById: (...a: unknown[]) => getKrMock(...a) }))
 vi.mock('@/lib/db/emails', () => ({
@@ -25,11 +26,15 @@ vi.mock('@/lib/pipeline/reply', () => ({
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
+vi.mock('@/lib/db/client-resources', () => ({
+  getActiveResourcesByIds: (...a: unknown[]) => getActiveResourcesByIdsMock(...a),
+}))
 
 import { runKnowledgeAnswer } from './knowledge-answer'
 
 beforeEach(() => {
-  for (const m of [getKrMock, getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, listThreadEmailsMock, listKnowledgeMock, generateTextMock, sendOrDraftReplyMock, logEventMock]) m.mockReset()
+  for (const m of [getKrMock, getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, listThreadEmailsMock, listKnowledgeMock, generateTextMock, sendOrDraftReplyMock, logEventMock, getActiveResourcesByIdsMock]) m.mockReset()
+  getActiveResourcesByIdsMock.mockResolvedValue([])
   getKrMock.mockResolvedValue({ id: 'kr1', status: 'answered', email_id: 'in1', human_answer: 'Our SLA is 99.9%', client_id: 'c1', case_id: 'case1' })
   getEmailByIdMock.mockResolvedValue({ id: 'in1', client_id: 'c1', case_id: 'case1', lead_id: 'lead1', direction: 'inbound', thread_id: 't1', provider_message_id: 'g1' })
   getLeadByIdMock.mockResolvedValue({ id: 'lead1', email: 'jane@acme.com' })
@@ -52,5 +57,96 @@ describe('runKnowledgeAnswer', () => {
     const result = await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
     expect(sendOrDraftReplyMock).not.toHaveBeenCalled()
     expect(result.action).toBe('skipped')
+  })
+})
+
+describe('runKnowledgeAnswer attachments', () => {
+  it('should pass the operator-selected resources through to the reply', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([
+      { id: 'r1', title: 'Concept A', description: 'homepage concept' },
+      { id: 'r2', title: 'Concept B', description: 'homepage concept' },
+    ])
+
+    await runKnowledgeAnswer({} as never, {
+      knowledgeRequestId: 'kr1',
+      resourceIds: ['r1', 'r2'],
+    })
+
+    expect(sendOrDraftReplyMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ resourceIds: ['r1', 'r2'] }),
+    )
+  })
+
+  it('should tell the prompt which files are attached so the body can reference them', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([
+      { id: 'r1', title: 'Concept A', description: 'homepage concept' },
+    ])
+
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1', resourceIds: ['r1'] })
+
+    const promptArg = generateTextMock.mock.calls[0]![1] as { prompt: string }
+    expect(promptArg.prompt).toContain('Concept A')
+    expect(promptArg.prompt).toContain('attached')
+  })
+
+  it('should send no attachments and mention none when the operator picked none', async () => {
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
+
+    expect(getActiveResourcesByIdsMock).not.toHaveBeenCalled()
+    expect(sendOrDraftReplyMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ resourceIds: [] }),
+    )
+    const promptArg = generateTextMock.mock.calls[0]![1] as { prompt: string }
+    expect(promptArg.prompt).not.toContain('attached to this email')
+  })
+
+  // The action validated this selection already, so anything left to trim here
+  // is a race. The prospect's reply still has to go out.
+  it('should trim rather than fail when a selection no longer fits the budget', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([
+      { id: 'r1', title: 'A', description: 'd', byte_size: 2 * 1024 * 1024 },
+      { id: 'r2', title: 'B', description: 'd', byte_size: 2 * 1024 * 1024 },
+    ])
+
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1', resourceIds: ['r1', 'r2'] })
+
+    expect(sendOrDraftReplyMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ resourceIds: ['r1'] }),
+    )
+    expect(logEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ droppedResourceIds: ['r2'] }) }),
+    )
+  })
+
+  it('should keep the operator pick order when trimming', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([
+      { id: 'r1', title: 'A', description: 'd', byte_size: 2 * 1024 * 1024 },
+      { id: 'r2', title: 'B', description: 'd', byte_size: 2 * 1024 * 1024 },
+    ])
+
+    // Reversed relative to the row order the database happened to return.
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1', resourceIds: ['r2', 'r1'] })
+
+    expect(sendOrDraftReplyMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ resourceIds: ['r2'] }),
+    )
+  })
+
+  it('should drop an id that does not belong to this client', async () => {
+    getActiveResourcesByIdsMock.mockResolvedValue([])
+
+    await runKnowledgeAnswer({} as never, {
+      knowledgeRequestId: 'kr1',
+      resourceIds: ['r-foreign'],
+    })
+
+    expect(sendOrDraftReplyMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ resourceIds: [] }),
+    )
   })
 })

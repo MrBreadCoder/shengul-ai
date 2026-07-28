@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { env } from '@/lib/env'
 import { fetchJson } from '@/lib/http/fetch-json'
@@ -33,23 +34,72 @@ function expiresAtFrom(expiresIn: number): string {
   return new Date(Date.now() + expiresIn * 1000).toISOString()
 }
 
-// RFC 2822 message, base64url-encoded per Gmail API.
+// Base64 payload lines must not exceed 76 columns per RFC 2045.
+const BASE64_LINE_LENGTH = 76
+const BASE64_LINE_RE = new RegExp(`.{1,${BASE64_LINE_LENGTH}}`, 'g')
+
+function wrapBase64(value: string): string {
+  return (value.match(BASE64_LINE_RE) ?? []).join('\r\n')
+}
+
+// Dashes stripped from the uuid so the full `Content-Type: multipart/mixed;
+// boundary="…"` header fits inside BASE64_LINE_LENGTH — with them it is 80
+// columns. Entropy is unchanged; only the hyphens are dropped.
+function newBoundary(): string {
+  return `b_${randomUUID().replace(/-/g, '')}`
+}
+
+// RFC 2822 message, base64url-encoded per Gmail API. Flat text/plain when there
+// is nothing to attach; multipart/mixed otherwise.
 function encodeMessage(from: string, input: SendEmailInput): string {
   const to = assertNoHeaderInjection(input.to, 'to')
   const subject = assertNoHeaderInjection(input.subject, 'subject')
-  const headers = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-  ]
+  const attachments = input.attachments ?? []
+  const headers = [`From: ${from}`, `To: ${to}`, `Subject: ${subject}`]
   if (input.inReplyToMessageId) {
     headers.push(`In-Reply-To: ${assertNoHeaderInjection(input.inReplyToMessageId, 'inReplyToMessageId')}`)
   }
   if (input.references) {
     headers.push(`References: ${assertNoHeaderInjection(input.references, 'references')}`)
   }
-  const raw = [...headers, '', input.body].join('\r\n')
+
+  if (attachments.length === 0) {
+    headers.push('Content-Type: text/plain; charset="UTF-8"')
+    const raw = [...headers, '', input.body].join('\r\n')
+    return Buffer.from(raw, 'utf-8').toString('base64url')
+  }
+
+  const boundary = newBoundary()
+  headers.push('MIME-Version: 1.0', `Content-Type: multipart/mixed; boundary="${boundary}"`)
+
+  // base64, not 7bit: replies are model-written and routinely contain em dashes
+  // and curly quotes, which are 8-bit octets a 7bit declaration would be lying
+  // about. Encoding sidesteps the question entirely.
+  const parts: string[] = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapBase64(Buffer.from(input.body, 'utf-8').toString('base64')),
+  ]
+  for (const attachment of attachments) {
+    // file_name is sanitized at upload time, but In-Reply-To/References already
+    // taught us not to trust anything reaching a header — re-assert here so a
+    // row written before the sanitizer existed cannot inject.
+    const fileName = assertNoHeaderInjection(attachment.fileName, 'attachmentFileName')
+    const mimeType = assertNoHeaderInjection(attachment.mimeType, 'attachmentMimeType')
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${mimeType}; name="${fileName}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${fileName}"`,
+      '',
+      wrapBase64(attachment.content.toString('base64')),
+    )
+  }
+  parts.push(`--${boundary}--`)
+
+  const raw = [...headers, '', ...parts].join('\r\n')
   return Buffer.from(raw, 'utf-8').toString('base64url')
 }
 

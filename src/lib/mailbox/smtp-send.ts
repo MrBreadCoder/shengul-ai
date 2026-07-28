@@ -26,6 +26,11 @@ export async function sendSmtpEmail(
   const references = input.references
     ? assertNoHeaderInjection(input.references, 'references')
     : undefined
+  const attachments = (input.attachments ?? []).map((attachment) => ({
+    filename: assertNoHeaderInjection(attachment.fileName, 'attachmentFileName'),
+    content: attachment.content,
+    contentType: assertNoHeaderInjection(attachment.mimeType, 'attachmentMimeType'),
+  }))
 
   const transport = createSmtpTransport(credentials)
   try {
@@ -37,6 +42,7 @@ export async function sendSmtpEmail(
         text: input.body,
         ...(inReplyTo ? { inReplyTo } : {}),
         ...(references ? { references } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       }),
     )
 

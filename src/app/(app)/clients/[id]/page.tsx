@@ -31,9 +31,10 @@ import { ClientLifecycleActions } from './client-lifecycle-actions'
 import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
-import { KnowledgePdfUpload } from './knowledge-pdf-upload'
+import { KnowledgeFileUpload } from './knowledge-file-upload'
 import { KnowledgeSourcesList } from './knowledge-sources-list'
 import { KnowledgeRealtimeRefresher } from './knowledge-realtime-refresher'
+import { ResourcesSection } from './resources-section'
 
 export const dynamic = 'force-dynamic'
 
@@ -258,14 +259,15 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             <KnowledgeRealtimeRefresher clientId={client.id} />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-muted-foreground max-w-[60ch] text-[13px]">
-                Scraped website pages and uploaded PDFs the AI grounds its emails and
-                replies in for this client. Operator-only — never visible to this
-                client&apos;s own logins.
+                Scraped website pages and uploaded files the AI grounds its emails and
+                replies in for this client. This client&apos;s own logins can see these
+                and curate their own on /knowledge.
               </p>
-              <KnowledgePdfUpload clientId={client.id} />
+              <KnowledgeFileUpload clientId={client.id} />
             </div>
             <KnowledgeSitemapPicker clientId={client.id} />
             <KnowledgeSourcesList clientId={client.id} sources={knowledgeSources} now={now} />
+            <ResourcesSection clientId={client.id} />
           </div>
         </TabsContent>
 

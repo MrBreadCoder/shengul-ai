@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/mailboxes'
 import { getSuppression } from '@/lib/db/suppressions'
 import { getMailboxProvider } from '@/lib/mailbox/registry'
+import type { EmailAttachment } from '@/lib/mailbox/attachments'
 import { parseMailboxTokens, encryptMailboxTokens } from '@/lib/mailbox/tokens'
 import { effectiveDailyCap } from '@/lib/mailbox/warmup'
 import { HEALTH_REASON } from '@/lib/mailbox/health'
@@ -36,6 +37,9 @@ export interface SendViaMailboxInput {
   threadId?: string | null
   inReplyToMessageId?: string | null
   references?: string | null
+  // Replies only — see src/lib/pipeline/reply.ts. Rotation, cap-claiming and
+  // jitter are unaffected; this is a pure passthrough to the provider.
+  attachments?: readonly EmailAttachment[]
   maxJitterMs?: number
 }
 
@@ -140,6 +144,9 @@ export async function sendViaMailbox(
               threadId: input.threadId ?? null,
               inReplyToMessageId: input.inReplyToMessageId ?? null,
               references: input.references ?? null,
+              ...(input.attachments && input.attachments.length > 0
+                ? { attachments: input.attachments }
+                : {}),
             }),
           ),
       )

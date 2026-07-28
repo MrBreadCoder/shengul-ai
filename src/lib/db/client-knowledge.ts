@@ -76,6 +76,20 @@ export async function listSourcesForClient(
   return data ?? []
 }
 
+// No client filter: RLS decides what the caller sees. Pass a session-bound
+// server client — an operator gets every client's sources, a client-role
+// session only its own.
+export async function listSourcesForVisibleClients(
+  supabase: SupabaseClient<Database>,
+): Promise<KnowledgeSourceRow[]> {
+  const { data, error } = await supabase
+    .from('client_knowledge_sources')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw new AppError('DB_ERROR', 'Failed to list knowledge sources', { cause: error.message })
+  return data ?? []
+}
+
 export async function getSourceById(
   supabase: SupabaseClient<Database>,
   id: string,
@@ -134,26 +148,29 @@ export async function deleteSource(
   return data
 }
 
-export interface InsertPdfSourceInput {
+export interface InsertFileSourceInput {
   clientId: string
   createdBy: string
   title: string
   storagePath: string
   content: string
   charCount: number
+  // 'pdf' predates .txt/.md support and is kept for existing rows; every other
+  // uploaded format is written as 'file'.
+  sourceType: 'pdf' | 'file'
 }
 
-// PDFs are extracted inline (no network dependency, unlike a website scrape),
-// so the row is created already 'ready' — there's no pending window to show.
-export async function insertPdfSourceReady(
+// Uploaded files are extracted inline (no network dependency, unlike a website
+// scrape), so the row is created already 'ready' — no pending window to show.
+export async function insertFileSourceReady(
   supabase: SupabaseClient<Database>,
-  input: InsertPdfSourceInput,
+  input: InsertFileSourceInput,
 ): Promise<KnowledgeSourceRow> {
   const { data, error } = await supabase
     .from('client_knowledge_sources')
     .insert({
       client_id: input.clientId,
-      source_type: 'pdf',
+      source_type: input.sourceType,
       title: input.title,
       storage_path: input.storagePath,
       content: input.content,
@@ -165,7 +182,7 @@ export async function insertPdfSourceReady(
     .select('*')
     .single()
   if (error || !data) {
-    throw new AppError('DB_ERROR', 'Failed to insert PDF knowledge source', { clientId: input.clientId, cause: error?.message })
+    throw new AppError('DB_ERROR', 'Failed to insert file knowledge source', { clientId: input.clientId, cause: error?.message })
   }
   return data
 }

@@ -1,4 +1,5 @@
 import { Files } from '@phosphor-icons/react/dist/ssr'
+import type { Database } from '@/types/database'
 import type { KnowledgeSourceRow } from '@/lib/db/client-knowledge'
 import { KNOWLEDGE_SOURCE_STATUS } from '@/lib/ui/status'
 import { StatusPill } from '@/components/status-dot'
@@ -6,6 +7,14 @@ import { EmptyState } from '@/components/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatRelative } from '@/lib/format'
 import { KnowledgeSourceActions } from './knowledge-source-actions'
+
+// Keyed by the enum so a new source type cannot reach the table as a blank or
+// mislabelled cell. 'pdf' is the legacy value; 'file' covers pdf/txt/md uploads.
+const SOURCE_TYPE_LABEL: Record<Database['public']['Enums']['knowledge_source_type'], string> = {
+  website_page: 'Web page',
+  pdf: 'PDF',
+  file: 'File',
+}
 
 interface KnowledgeSourcesListProps {
   clientId: string
@@ -43,7 +52,7 @@ export function KnowledgeSourcesList({ clientId, sources, now }: KnowledgeSource
                 {source.title}
               </TableCell>
               <TableCell className="text-muted-foreground text-[13px]">
-                {source.source_type === 'pdf' ? 'PDF' : 'Web page'}
+                {SOURCE_TYPE_LABEL[source.source_type]}
               </TableCell>
               <TableCell>
                 <StatusPill meta={KNOWLEDGE_SOURCE_STATUS[source.status]} />

@@ -5,15 +5,22 @@ import { requireUser } from '@/lib/auth/require-user'
 import { listDraftEmailsForClient } from '@/lib/db/emails'
 import { listOpenKnowledgeRequestsForClient } from '@/lib/db/knowledge-requests'
 import { listCaseCompanyNames } from '@/lib/db/crm'
+import { listActiveResourcesForClients } from '@/lib/db/client-resources'
+import { listAttachmentsForEmails } from '@/lib/db/email-attachments'
 import { formatRelative } from '@/lib/format'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
-import { DraftRow } from './draft-row'
+import type { ResourceSummary } from '@/components/resource-list'
+import { DraftRow, type DraftAttachment } from './draft-row'
 import { KnowledgeRequestRow } from './knowledge-request-row'
 
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = { title: 'Inbox' }
+
+// Per client, not per page — see listActiveResourcesForClients. Generous
+// enough that a picker is never silently short.
+const RESOURCES_PER_CLIENT = 200
 
 export default async function InboxPage(): Promise<React.ReactElement> {
   await requireUser()
@@ -23,6 +30,48 @@ export default async function InboxPage(): Promise<React.ReactElement> {
     listOpenKnowledgeRequestsForClient(supabase),
     listCaseCompanyNames(supabase),
   ])
+
+  // Only the clients that actually have a row on this page, so no client's
+  // library can be crowded out by another's.
+  const pageClientIds = [
+    ...drafts.map((draft) => draft.client_id),
+    ...knowledgeRequests.map((request) => request.client_id),
+  ]
+  const [resourcesByClient, attachmentsByEmailId] = await Promise.all([
+    listActiveResourcesForClients(supabase, pageClientIds, RESOURCES_PER_CLIENT),
+    // One query for every draft on the page rather than one per row.
+    listAttachmentsForEmails(supabase, drafts.map((draft) => draft.id)),
+  ])
+
+  // Each row sees only its own client's library, so an operator viewing several
+  // clients cannot attach one client's collateral to another's email.
+  const resourcesByClientId = new Map<string, ResourceSummary[]>()
+  for (const [clientId, resources] of resourcesByClient) {
+    resourcesByClientId.set(
+      clientId,
+      resources.map((resource) => ({
+        id: resource.id,
+        clientId: resource.client_id,
+        title: resource.title,
+        description: resource.description,
+        fileName: resource.file_name,
+        mimeType: resource.mime_type,
+        byteSize: resource.byte_size,
+        // /inbox never deletes; the picker ignores this flag.
+        canManage: false,
+      })),
+    )
+  }
+
+  // Narrowed to the three fields the row renders. The stored row also carries
+  // storage_path, and every prop of a Client Component is serialized into the
+  // payload the browser receives — internal storage keys do not belong there.
+  const draftAttachments = (emailId: string): DraftAttachment[] =>
+    (attachmentsByEmailId.get(emailId) ?? []).map((attachment) => ({
+      resourceId: attachment.resourceId,
+      title: attachment.title,
+      byteSize: attachment.byteSize,
+    }))
 
   const companyByCaseId = new Map(cases.map((kase) => [kase.id, kase.companyName]))
   const now = new Date()
@@ -63,9 +112,11 @@ export default async function InboxPage(): Promise<React.ReactElement> {
                     key={request.id}
                     knowledgeRequestId={request.id}
                     caseId={request.case_id}
+                    clientId={request.client_id}
                     question={request.question}
                     companyName={companyByCaseId.get(request.case_id) ?? 'Unknown company'}
                     age={formatRelative(request.created_at, now)}
+                    resources={resourcesByClientId.get(request.client_id) ?? []}
                   />
                 ))}
               </div>
@@ -86,6 +137,8 @@ export default async function InboxPage(): Promise<React.ReactElement> {
                       (draft.case_id && companyByCaseId.get(draft.case_id)) || 'Unknown company'
                     }
                     age={formatRelative(draft.created_at, now)}
+                    attachments={draftAttachments(draft.id)}
+                    resources={resourcesByClientId.get(draft.client_id) ?? []}
                   />
                 ))}
               </div>

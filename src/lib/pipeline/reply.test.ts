@@ -17,6 +17,9 @@ const sendViaMailboxMock = vi.fn()
 const generateJsonMock = vi.fn()
 const logEventMock = vi.fn()
 const triggerCollisionNoticeMock = vi.fn()
+const listActiveResourcesForClientMock = vi.fn()
+const insertEmailAttachmentsMock = vi.fn()
+const loadResourceAttachmentsMock = vi.fn()
 
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
@@ -39,6 +42,15 @@ vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.f
 vi.mock('@/lib/pipeline/collision-notify', () => ({
   triggerCollisionNotice: (...a: unknown[]) => triggerCollisionNoticeMock(...a),
 }))
+vi.mock('@/lib/db/client-resources', () => ({
+  listActiveResourcesForClient: (...a: unknown[]) => listActiveResourcesForClientMock(...a),
+}))
+vi.mock('@/lib/db/email-attachments', () => ({
+  insertEmailAttachments: (...a: unknown[]) => insertEmailAttachmentsMock(...a),
+}))
+vi.mock('@/lib/resources/load-attachments', () => ({
+  loadResourceAttachments: (...a: unknown[]) => loadResourceAttachmentsMock(...a),
+}))
 
 import { runReplyForInbound, replyDisposition, sendOrDraftReply } from './reply'
 
@@ -49,11 +61,20 @@ const inbound = {
 const lead = { id: 'lead1', email: 'jane@acme.com' }
 const campaign = { mailbox_ids: ['m1'], value_prop: 'v', booking_link: 'https://cal.com/x', reply_mode: 'auto_send' }
 
+function resource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'r1', client_id: 'c1', title: 'Deck', description: 'examples', file_name: 'd.pdf',
+    mime_type: 'application/pdf', byte_size: 100, storage_path: 'p', is_active: true,
+    created_by: 'u1', created_at: '2026-07-26T00:00:00Z', ...overrides,
+  }
+}
+
 beforeEach(() => {
   for (const m of [getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, listThreadEmailsMock, listKnowledgeMock,
     claimReplyEmailMock, markEmailSentMock, markEmailFailedMock, addSuppressionMock, stopSequenceForLeadMock,
     updateCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
-    triggerCollisionNoticeMock]) m.mockReset()
+    triggerCollisionNoticeMock, listActiveResourcesForClientMock, insertEmailAttachmentsMock,
+    loadResourceAttachmentsMock]) m.mockReset()
   getEmailByIdMock.mockResolvedValue(inbound)
   getLeadByIdMock.mockResolvedValue(lead)
   getCampaignForCaseMock.mockResolvedValue(campaign)
@@ -61,6 +82,9 @@ beforeEach(() => {
   listKnowledgeMock.mockResolvedValue([])
   claimReplyEmailMock.mockResolvedValue({ id: 'reply1' })
   sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'p2', threadId: 't1' })
+  listActiveResourcesForClientMock.mockResolvedValue([])
+  insertEmailAttachmentsMock.mockResolvedValue(undefined)
+  loadResourceAttachmentsMock.mockResolvedValue([])
 })
 
 describe('replyDisposition', () => {
@@ -75,7 +99,7 @@ describe('replyDisposition', () => {
 
 describe('runReplyForInbound', () => {
   it('should answer and send when the reply is answerable (auto_send)', async () => {
-    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.' })
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.', attachResourceIds: [] })
     const result = await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(sendViaMailboxMock).toHaveBeenCalled()
     expect(updateCaseStatusMock).toHaveBeenCalledWith({}, 'case1', 'in_conversation')
@@ -83,7 +107,7 @@ describe('runReplyForInbound', () => {
   })
 
   it('should classify the reply with medium thinking', async () => {
-    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.' })
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.', attachResourceIds: [] })
     await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.objectContaining({ actor: 'reply_agent' }),
@@ -121,7 +145,7 @@ describe('runReplyForInbound', () => {
   })
 
   it('should draft (not send) when the reply slot is already claimed', async () => {
-    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Answer' })
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Answer', attachResourceIds: [] })
     claimReplyEmailMock.mockResolvedValue(null) // already handled by a prior delivery
     const result = await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
@@ -135,9 +159,117 @@ describe('runReplyForInbound', () => {
   })
 })
 
+describe('runReplyForInbound resource selection', () => {
+  it('should attach the resources the model picked when it answered', async () => {
+    listActiveResourcesForClientMock.mockResolvedValue([resource()])
+    generateJsonMock.mockResolvedValue({
+      intent: 'question', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'Attached are the examples.', attachResourceIds: [1],
+    })
+
+    const result = await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(result.action).toBe('answered')
+    expect(insertEmailAttachmentsMock).toHaveBeenCalledWith({}, {
+      clientId: 'c1', emailId: 'reply1', resourceIds: ['r1'],
+    })
+  })
+
+  it('should attach nothing when the client has no resources', async () => {
+    listActiveResourcesForClientMock.mockResolvedValue([])
+    generateJsonMock.mockResolvedValue({
+      intent: 'question', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'Sure.', attachResourceIds: [1, 2],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(insertEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should attach nothing on a price handoff even if the model picked files', async () => {
+    listActiveResourcesForClientMock.mockResolvedValue([resource({ title: 'Rates', description: 'pricing' })])
+    generateJsonMock.mockResolvedValue({
+      intent: 'price', confidence: 0.9, canAnswer: false,
+      missingQuestion: null, replyBody: null, attachResourceIds: [1],
+    })
+
+    const result = await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(result.action).toBe('handoff')
+    expect(insertEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should include the resource menu in the prompt when the client has resources', async () => {
+    listActiveResourcesForClientMock.mockResolvedValue([resource()])
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    const promptArg = generateJsonMock.mock.calls[0]![1] as { prompt: string }
+    expect(promptArg.prompt).toContain('1 — Deck — examples')
+  })
+})
+
+describe('sendOrDraftReply attachments', () => {
+  const baseInput = {
+    inbound, lead, mailboxIds: ['m1'], subject: 'Re: x', body: 'Here you go',
+  }
+
+  it('should record attachments on a draft without sending', async () => {
+    await sendOrDraftReply({} as never, {
+      ...baseInput, disposition: 'draft', resourceIds: ['r1'],
+    } as never)
+
+    expect(insertEmailAttachmentsMock).toHaveBeenCalledWith({}, {
+      clientId: 'c1', emailId: 'reply1', resourceIds: ['r1'],
+    })
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should forward loaded attachments to the sender when sending', async () => {
+    const attachments = [{ fileName: 'a.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }]
+    loadResourceAttachmentsMock.mockResolvedValue(attachments)
+
+    await sendOrDraftReply({} as never, {
+      ...baseInput, disposition: 'send', resourceIds: ['r1'],
+    } as never)
+
+    expect(loadResourceAttachmentsMock).toHaveBeenCalledWith({}, 'c1', ['r1'])
+    expect(sendViaMailboxMock).toHaveBeenCalledWith({}, expect.objectContaining({ attachments }))
+  })
+
+  it('should mark the email failed when loading an attachment fails', async () => {
+    loadResourceAttachmentsMock.mockRejectedValue(new Error('storage gone'))
+
+    await expect(
+      sendOrDraftReply({} as never, {
+        ...baseInput, disposition: 'send', resourceIds: ['r1'],
+      } as never),
+    ).rejects.toThrow('storage gone')
+
+    expect(markEmailFailedMock).toHaveBeenCalledWith({}, 'reply1')
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should not attach anything when the claim was lost to a prior delivery', async () => {
+    claimReplyEmailMock.mockResolvedValue(null)
+
+    await sendOrDraftReply({} as never, {
+      ...baseInput, disposition: 'send', resourceIds: ['r1'],
+    } as never)
+
+    expect(insertEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('sendOrDraftReply', () => {
   const sendInput = {
     inbound, lead, mailboxIds: ['m1'], subject: 'Re: x', body: 'hi', disposition: 'send' as const,
+    resourceIds: [],
   } as never
 
   beforeEach(() => {

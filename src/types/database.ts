@@ -327,6 +327,70 @@ export interface Database {
           },
         ]
       }
+      client_resources: {
+        Row: {
+          id: string
+          client_id: string
+          title: string
+          description: string
+          file_name: string
+          mime_type: string
+          byte_size: number
+          storage_path: string
+          is_active: boolean
+          created_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          title: string
+          description: string
+          file_name: string
+          mime_type: string
+          byte_size: number
+          storage_path: string
+          is_active?: boolean
+          created_by: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['client_resources']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'client_resources_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      email_attachments: {
+        Row: {
+          id: string
+          client_id: string
+          email_id: string
+          resource_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          email_id: string
+          resource_id: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['email_attachments']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'email_attachments_resource_id_fkey'
+            columns: ['resource_id']
+            isOneToOne: false
+            referencedRelation: 'client_resources'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       emails: {
         Row: {
           id: string
@@ -796,7 +860,7 @@ export interface Database {
       warmup_profile: 'standard' | 'slow' | 'none'
       suppression_reason: 'replied' | 'bounced' | 'manual' | 'price_handoff'
       author_kind: 'agent' | 'human'
-      knowledge_source_type: 'website_page' | 'pdf'
+      knowledge_source_type: 'website_page' | 'pdf' | 'file'
       knowledge_source_status: 'pending' | 'ready' | 'failed'
     }
     CompositeTypes: Record<string, never>

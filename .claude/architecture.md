@@ -73,7 +73,7 @@ The operator (agency) sets up each client campaign manually. Clients get a read-
 
 ## 4. Component Inventory
 
-The system is **3 LLM agents + 4 deterministic systems + orchestration + frontend**.
+The system is **3 LLM agents + 5 deterministic systems + orchestration + frontend**.
 
 | # | Component | Type | Responsibility |
 |---|-----------|------|----------------|
@@ -85,6 +85,7 @@ The system is **3 LLM agents + 4 deterministic systems + orchestration + fronten
 | 6 | Reply Agent | LLM agent | Classify + respond to inbound; escalate or hand off |
 | 7 | Mailbox Sender | System (code) | Send via Gmail/Graph with caps, throttle, warmup, rotation |
 | 8 | Orchestrator | QStash + route handlers | Schedule, fan out, delay follow-ups, retry |
+| 9 | Client Resources | System (code, no LLM) | Sendable client collateral (`client_resources`), attached to a reply as real MIME. Explicitly **outside** the knowledge/embedding path: never chunked, never embedded, never retrieved. The Reply Agent sees only `title — description` as a numbered menu and returns ordinals. `src/lib/db/client-resources.ts`, `src/lib/resources/menu.ts` |
 
 > **Changed from v1:** the old "Lead-Gen Agent" (Brightdata + Gemini) is replaced by the Apollo People-Search + Enrich system. Emailable, dropped in v2, returned in v3 (2026-07-21) in a narrower role: it is no longer an email *acquisition* system, only a deliverability guard layered on top of Apollo's `verified` status. Brightdata + Gemini remain in the stack for the P2 **Research Agent only** (§6 Stage 3).
 
@@ -93,6 +94,8 @@ The system is **3 LLM agents + 4 deterministic systems + orchestration + fronten
 ## 5. Data Model (Supabase Postgres)
 
 All tables carry `client_id` and are protected by Row-Level Security so a client can only ever read its own rows. Timestamps (`created_at`, `updated_at`) are on every table.
+
+Client-role sessions are read-only on every table **except two**, as of `0018_client_resources.sql`: they may insert `client_knowledge_sources` and `client_resources` for their own `client_id`, and may update or delete only rows whose `created_by` matches their own user id. See §11 for why the policy is not the enforcement point on those paths.
 
 ### clients
 The agency's customers.
@@ -299,8 +302,11 @@ The **Reply Agent** loads the full thread + `case_knowledge` and classifies inte
 - **/inbox** — human action queue: approval drafts (`human_approve`/`hybrid`), open **knowledge requests** (the answer box), and hot handoffs.
 - **/campaigns** — operator setup: client, name, value prop, booking link, Apollo ICP filters (`personTitles`, `organizationLocations`, employee range, `keywords`), daily Apollo quota (default 50). Reply/handoff modes and mailbox assignment stay at their schema defaults until P2 needs them in the UI.
 - **/settings** — mailbox OAuth (Gmail/Outlook), per-mailbox caps, warmup, kill-switch.
+- **/knowledge** — three tabs. *Facts* is the case-knowledge feed. *Sources* lists the pages and files the agent reads to answer from. *Resources* lists the files the agent may send to a lead who asks to see something. A client-role user curates their own rows on the latter two; an operator sees every client's, read-only, and uploads from `/clients/[id]` instead — `app_users.client_id` is null for operators, so there is no single client to scope an upload to.
 
 Auth via Supabase Auth. RLS enforces per-client isolation on every query. Operators have an elevated role that spans clients.
+
+**Client-role writes are not enforced by RLS.** The four routes that accept them — resource upload and delete, knowledge file upload and source delete — use `createAdminClient()`, which bypasses RLS entirely, as every other write path in the app does. `src/lib/auth/can-manage-client.ts` (`canManageClient`, `canManageOwnRow`) is therefore the whole authorization boundary on those paths; the policies added in `0018` only cover a hypothetical session-bound client. Never add a client-writable route without that guard.
 
 ---
 

@@ -17,6 +17,12 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext } from '@/lib/llm/client'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { listActiveResourcesForClient } from '@/lib/db/client-resources'
+import { insertEmailAttachments } from '@/lib/db/email-attachments'
+import {
+  MAX_RESOURCE_MENU, buildResourceMenu, formatResourceMenu, resolveAttachments,
+} from '@/lib/resources/menu'
+import { loadResourceAttachments } from '@/lib/resources/load-attachments'
 
 const ACTOR = 'reply_agent'
 // Bumped alongside the 'medium' thinking level below so extra reasoning tokens
@@ -36,6 +42,9 @@ const classificationSchema = z.object({
   canAnswer: z.boolean(),
   missingQuestion: z.string().nullable(),
   replyBody: z.string().nullable(),
+  // Ordinals from the resource menu, not ids. Everything here is untrusted —
+  // resolveAttachments drops hallucinated ordinals and enforces the budget.
+  attachResourceIds: z.array(z.number().int()).default([]),
 })
 export type ReplyClassification = z.infer<typeof classificationSchema>
 
@@ -57,12 +66,23 @@ const SYSTEM_PROMPT = [
   'If a real business fact is missing, set canAnswer=false and put the exact',
   'question to ask a human in missingQuestion. For price/not_interested, leave',
   'replyBody null. confidence is your 0..1 certainty in the classification+answer.',
+  'You may be given a numbered list of resources (files) you can attach. Attach',
+  'one only when the prospect explicitly asked for something that resource',
+  'provides — never as a bonus. Put the numbers in attachResourceIds, or leave',
+  'it empty. When you do attach, say so naturally in replyBody.',
   'Replies are short, human, no bulk markers, no unsubscribe footer.',
 ].join(' ')
 
-function buildClassifyPrompt(args: {
-  thread: EmailRow[]; knowledge: KnowledgeRow[]; valueProp: string | null; inboundBody: string; clientKnowledge: string
-}): string {
+interface ClassifyPromptArgs {
+  thread: EmailRow[]
+  knowledge: KnowledgeRow[]
+  valueProp: string | null
+  inboundBody: string
+  clientKnowledge: string
+  resourceMenu: string
+}
+
+function buildClassifyPrompt(args: ClassifyPromptArgs): string {
   const dossier = args.knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   const transcript = args.thread
     .map((e) => `[${e.direction}] ${e.subject ?? ''}\n${e.body ?? ''}`)
@@ -72,6 +92,7 @@ function buildClassifyPrompt(args: {
     args.clientKnowledge ? `About our company:\n${args.clientKnowledge}` : '',
     `Dossier:\n${dossier}`,
     `Thread so far:\n${transcript}`,
+    args.resourceMenu ? `Resources you may attach:\n${args.resourceMenu}` : '',
     `Latest inbound reply to triage:\n${args.inboundBody}`,
   ]
     .filter(Boolean)
@@ -80,7 +101,7 @@ function buildClassifyPrompt(args: {
 
 export async function classifyReply(
   context: LlmCallContext,
-  args: { thread: EmailRow[]; knowledge: KnowledgeRow[]; valueProp: string | null; inboundBody: string; clientKnowledge: string },
+  args: ClassifyPromptArgs,
 ): Promise<ReplyClassification> {
   return generateJson(context, {
     instructions: SYSTEM_PROMPT,
@@ -115,6 +136,9 @@ interface SendOrDraftInput {
   subject: string
   body: string
   disposition: 'send' | 'draft'
+  // Resolved and budget-checked by the caller. Recorded against the email even
+  // when drafting, so /inbox can show and edit what the AI picked.
+  resourceIds: readonly string[]
 }
 
 // Claims the one-reply-per-inbound slot, then sends or leaves a draft. Idempotent
@@ -136,10 +160,26 @@ export async function sendOrDraftReply(
     in_reply_to_email_id: input.inbound.id,
   })
   if (!claimed) return // already handled by a prior delivery
+
+  // Recorded before the draft branch so a draft carries the AI's picks and
+  // /inbox can render them. Skipped when empty — there is nothing to write.
+  if (input.resourceIds.length > 0) {
+    await insertEmailAttachments(supabase, {
+      clientId: input.inbound.client_id,
+      emailId: claimed.id,
+      resourceIds: input.resourceIds,
+    })
+  }
   if (input.disposition === 'draft') return // sits in /inbox for a human
 
   let sent: SendViaMailboxResult
   try {
+    // Inside the try so a storage failure lands in the same markEmailFailed
+    // path as a send failure: an email promising an attachment must not go out
+    // without one.
+    const attachments = await loadResourceAttachments(
+      supabase, input.inbound.client_id, input.resourceIds,
+    )
     sent = await sendViaMailbox(supabase, {
       clientId: input.inbound.client_id,
       mailboxIds: input.mailboxIds,
@@ -150,6 +190,7 @@ export async function sendOrDraftReply(
       threadId: input.inbound.thread_id,
       inReplyToMessageId: input.inbound.provider_message_id,
       references: input.inbound.provider_message_id,
+      attachments,
     })
   } catch (error) {
     // RATE_LIMITED is transient: leave the claimed row 'queued' (skip
@@ -201,10 +242,12 @@ export async function runReplyForInbound(
   const campaign = await getCampaignForCase(supabase, inbound.case_id)
   if (!campaign) return { emailId: input.emailId, action: 'skipped' }
 
-  const [thread, knowledge] = await Promise.all([
+  const [thread, knowledge, resources] = await Promise.all([
     listThreadEmails(supabase, inbound.lead_id),
     listKnowledgeForCase(supabase, inbound.case_id),
+    listActiveResourcesForClient(supabase, inbound.client_id, MAX_RESOURCE_MENU),
   ])
+  const resourceMenu = buildResourceMenu(resources)
 
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
@@ -213,6 +256,7 @@ export async function runReplyForInbound(
   )
   const classification = await classifyReply(context, {
     thread, knowledge, valueProp: campaign.value_prop, inboundBody: inbound.body ?? '', clientKnowledge,
+    resourceMenu: formatResourceMenu(resourceMenu),
   })
 
   // A reply always means we are in a conversation now.
@@ -224,6 +268,8 @@ export async function runReplyForInbound(
         inbound, lead, mailboxIds: campaign.mailbox_ids,
         subject: replySubject(thread), body: buildBookingReply(campaign.booking_link),
         disposition: replyDisposition(campaign.reply_mode, 1),
+        // A pricing handoff is a booking link, never a file.
+        resourceIds: [],
       })
       await addSuppression(supabase, { clientId: inbound.client_id, email: lead.email, reason: 'price_handoff' })
       await stopSequenceForLead(supabase, inbound.lead_id, 'stopped')
@@ -264,11 +310,26 @@ export async function runReplyForInbound(
         })
         return { emailId: inbound.id, action: 'escalated' }
       }
+      const { resources: attachResources, droppedResourceIds } = resolveAttachments(
+        resourceMenu, classification.attachResourceIds,
+      )
       await sendOrDraftReply(supabase, {
         inbound, lead, mailboxIds: campaign.mailbox_ids,
         subject: replySubject(thread), body: classification.replyBody,
         disposition: replyDisposition(campaign.reply_mode, classification.confidence),
+        resourceIds: attachResources.map((r) => r.id),
       })
+      if (attachResources.length > 0 || droppedResourceIds.length > 0) {
+        await logEventSafe({
+          clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
+          type: 'reply.resources_attached',
+          payload: {
+            emailId: inbound.id,
+            resourceIds: attachResources.map((r) => r.id),
+            droppedResourceIds,
+          },
+        })
+      }
       await logEventSafe({
         clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
         type: 'reply.answered', payload: { emailId: inbound.id, intent: classification.intent },

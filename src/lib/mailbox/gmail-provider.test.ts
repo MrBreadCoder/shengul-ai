@@ -13,9 +13,15 @@ vi.mock('@/lib/env', () => ({
 }))
 
 import { gmailProvider } from './gmail-provider'
+import type { SendEmailInput } from './provider'
 
 describe('gmailProvider', () => {
-  beforeEach(() => mockFetchJson.mockReset())
+  // Braced body on purpose: `() => mockFetchJson.mockReset()` returns the mock,
+  // and vitest treats a function returned from beforeEach as a cleanup hook —
+  // it would then call the mock with zero arguments after every test.
+  beforeEach(() => {
+    mockFetchJson.mockReset()
+  })
 
   it('should build an auth url with the send scope and state', () => {
     const url = gmailProvider.buildAuthUrl('state123')
@@ -143,6 +149,122 @@ describe('gmailProvider', () => {
         to: 'x@y.com', subject: 'Hi', body: 'b', inReplyToMessageId: '<abc@mail>\r\nX-Injected: 1',
       }),
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+})
+
+describe('gmail sendEmail with attachments', () => {
+  const tokens = {
+    kind: 'oauth' as const,
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  }
+
+  beforeEach(() => {
+    mockFetchJson.mockReset()
+  })
+
+  // Sends through the provider and decodes the `raw` field it posted, so these
+  // tests assert on the real wire format rather than an internal helper.
+  async function captureRawMessage(input: SendEmailInput): Promise<string> {
+    let captured = ''
+    mockFetchJson.mockImplementation((_url: string, init: { body: string }) => {
+      const payload = JSON.parse(init.body) as { raw?: string }
+      if (payload.raw) captured = Buffer.from(payload.raw, 'base64url').toString('utf-8')
+      return Promise.resolve({ id: 'm1', threadId: 't1' })
+    })
+    await gmailProvider.sendEmail(tokens, input)
+    return captured
+  }
+
+  it('should still emit a flat text/plain message when there are no attachments', async () => {
+    const raw = await captureRawMessage({ to: 'a@b.com', subject: 'Hi', body: 'Hello' })
+    expect(raw).toContain('Content-Type: text/plain; charset="UTF-8"')
+    expect(raw).not.toContain('multipart/mixed')
+    expect(raw).toContain('Hello')
+  })
+
+  it('should emit multipart/mixed with one part per attachment when attachments exist', async () => {
+    const raw = await captureRawMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'Hello',
+      attachments: [
+        { fileName: 'deck.pdf', mimeType: 'application/pdf', content: Buffer.from('PDFBYTES') },
+        { fileName: 'hero.png', mimeType: 'image/png', content: Buffer.from('PNGBYTES') },
+      ],
+    })
+
+    const boundaryMatch = /boundary="([^"]+)"/.exec(raw)
+    expect(boundaryMatch).not.toBeNull()
+    // safe: asserted non-null on the line above
+    const boundary = boundaryMatch![1]!
+
+    expect(raw).toContain('MIME-Version: 1.0')
+    expect(raw).toContain(`Content-Type: multipart/mixed; boundary="${boundary}"`)
+    expect(raw).toContain('Content-Type: application/pdf; name="deck.pdf"')
+    expect(raw).toContain('Content-Disposition: attachment; filename="deck.pdf"')
+    expect(raw).toContain('Content-Type: image/png; name="hero.png"')
+    expect(raw).toContain(Buffer.from('PDFBYTES').toString('base64'))
+    expect(raw).toContain(Buffer.from('PNGBYTES').toString('base64'))
+    // Terminal boundary closes the message.
+    expect(raw.trimEnd().endsWith(`--${boundary}--`)).toBe(true)
+    // The body survives as its own base64 part.
+    expect(raw).toContain(Buffer.from('Hello').toString('base64'))
+  })
+
+  it('should base64 the text part rather than claim 7bit for a non-ascii body', async () => {
+    const body = 'Happy to help — here’s the deck.'
+    const raw = await captureRawMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body,
+      attachments: [{ fileName: 'a.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }],
+    })
+
+    expect(raw).not.toContain('Content-Transfer-Encoding: 7bit')
+    expect(raw).toContain(Buffer.from(body, 'utf-8').toString('base64'))
+    // Every octet on the wire stays inside ASCII, which is what the encoding is for.
+    expect(/^[\x00-\x7f]*$/.test(raw)).toBe(true)
+  })
+
+  it('should preserve threading headers when the message has attachments', async () => {
+    const raw = await captureRawMessage({
+      to: 'a@b.com',
+      subject: 'Re: Hi',
+      body: 'Hello',
+      inReplyToMessageId: '<m1@x>',
+      references: '<m1@x>',
+      attachments: [{ fileName: 'a.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }],
+    })
+    expect(raw).toContain('In-Reply-To: <m1@x>')
+    expect(raw).toContain('References: <m1@x>')
+  })
+
+  it('should reject a filename carrying a line break', async () => {
+    await expect(
+      captureRawMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'Hello',
+        attachments: [
+          { fileName: 'a.pdf\r\nX-Evil: 1', mimeType: 'application/pdf', content: Buffer.from('X') },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('should wrap base64 payload lines at 76 columns', async () => {
+    const raw = await captureRawMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'Hello',
+      attachments: [
+        { fileName: 'big.pdf', mimeType: 'application/pdf', content: Buffer.alloc(1000, 0x41) },
+      ],
+    })
+    const longestLine = Math.max(...raw.split('\r\n').map((line) => line.length))
+    expect(longestLine).toBeLessThanOrEqual(76)
   })
 })
 

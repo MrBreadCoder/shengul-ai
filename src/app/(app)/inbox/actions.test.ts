@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { AppError } from '@/lib/errors/app-error'
 
 const requireUserMock = vi.fn()
 const createAdminClientMock = vi.fn()
@@ -17,6 +18,10 @@ const getKnowledgeRequestByIdMock = vi.fn()
 const hasReplyForInboundMock = vi.fn()
 const insertKnowledgeMock = vi.fn()
 const runKnowledgeAnswerMock = vi.fn()
+const listAttachmentsForEmailMock = vi.fn()
+const replaceEmailAttachmentsMock = vi.fn()
+const loadResourceAttachmentsMock = vi.fn()
+const resolveSelectedResourcesMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
@@ -42,8 +47,18 @@ vi.mock('@/lib/db/knowledge-requests', () => ({
 }))
 vi.mock('@/lib/db/case-knowledge', () => ({ insertKnowledge: (...a: unknown[]) => insertKnowledgeMock(...a) }))
 vi.mock('@/lib/pipeline/knowledge-answer', () => ({ runKnowledgeAnswer: (...a: unknown[]) => runKnowledgeAnswerMock(...a) }))
+vi.mock('@/lib/db/email-attachments', () => ({
+  listAttachmentsForEmail: (...a: unknown[]) => listAttachmentsForEmailMock(...a),
+  replaceEmailAttachments: (...a: unknown[]) => replaceEmailAttachmentsMock(...a),
+}))
+vi.mock('@/lib/resources/load-attachments', () => ({
+  loadResourceAttachments: (...a: unknown[]) => loadResourceAttachmentsMock(...a),
+}))
+vi.mock('@/lib/resources/select', () => ({
+  resolveSelectedResources: (...a: unknown[]) => resolveSelectedResourcesMock(...a),
+}))
 
-import { approveDraft, answerKnowledgeRequest } from './actions'
+import { approveDraft, answerKnowledgeRequest, updateDraftAttachments } from './actions'
 
 const EMAIL_ID = '11111111-1111-4111-8111-111111111111'
 
@@ -73,8 +88,15 @@ beforeEach(() => {
     markEmailSentMock, markEmailFailedMock, scheduleFirstFollowupMock,
     getCampaignForCaseMock, getLeadByIdMock, sendViaMailboxMock,
     revalidatePathMock, logEventSafeMock, claimAnswerMock, getKnowledgeRequestByIdMock,
-    hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock]) m.mockReset()
-  requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator' } })
+    hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock,
+    listAttachmentsForEmailMock, replaceEmailAttachmentsMock, loadResourceAttachmentsMock,
+    resolveSelectedResourcesMock]) m.mockReset()
+  requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator', client_id: null } })
+  listAttachmentsForEmailMock.mockResolvedValue([])
+  replaceEmailAttachmentsMock.mockResolvedValue(undefined)
+  loadResourceAttachmentsMock.mockResolvedValue([])
+  resolveSelectedResourcesMock.mockResolvedValue([])
+  getKnowledgeRequestByIdMock.mockResolvedValue({ id: KR_ID, client_id: 'c1', case_id: 'case1' })
   createAdminClientMock.mockReturnValue({})
   getLeadByIdMock.mockResolvedValue({ id: 'lead1', email: 'jane@acme.com' })
   getCampaignForCaseMock.mockResolvedValue({ mailbox_ids: ['m1'] })
@@ -190,7 +212,7 @@ describe('answerKnowledgeRequest', () => {
     await answerKnowledgeRequest(krForm({ knowledgeRequestId: KR_ID, answer: 'Our SLA is 99.9%' }))
     expect(claimAnswerMock).toHaveBeenCalledWith({}, expect.objectContaining({ id: KR_ID, answeredBy: 'user1' }))
     expect(insertKnowledgeMock).toHaveBeenCalledWith({}, [expect.objectContaining({ kind: 'answer', created_by: 'human', case_id: 'case1' })])
-    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, { knowledgeRequestId: KR_ID })
+    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, { knowledgeRequestId: KR_ID, resourceIds: [] })
   })
 
   it('should no-op when the request was already claimed and already replied to', async () => {
@@ -223,6 +245,170 @@ describe('answerKnowledgeRequest', () => {
     hasReplyForInboundMock.mockResolvedValue(false)
     await answerKnowledgeRequest(krForm({ knowledgeRequestId: KR_ID, answer: 'Our SLA is 99.9%' }))
     expect(insertKnowledgeMock).toHaveBeenCalledWith({}, [expect.objectContaining({ kind: 'answer', case_id: 'case1' })])
-    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, { knowledgeRequestId: KR_ID })
+    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, { knowledgeRequestId: KR_ID, resourceIds: [] })
+  })
+})
+
+const R1 = '33333333-3333-4333-8333-333333333333'
+const R2 = '44444444-4444-4444-8444-444444444444'
+
+describe('answerKnowledgeRequest with attachments', () => {
+  it('should pass the selected resource ids to the answer pipeline', async () => {
+    const formData = krForm({ knowledgeRequestId: KR_ID, answer: 'Yes, here they are.' })
+    formData.append('resourceIds', R1)
+    formData.append('resourceIds', R2)
+
+    await answerKnowledgeRequest(formData)
+
+    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, {
+      knowledgeRequestId: KR_ID, resourceIds: [R1, R2],
+    })
+  })
+
+  it('should validate the picks against the request own client before claiming it', async () => {
+    const formData = krForm({ knowledgeRequestId: KR_ID, answer: 'Yes, here they are.' })
+    formData.append('resourceIds', R1)
+
+    await answerKnowledgeRequest(formData)
+
+    expect(resolveSelectedResourcesMock).toHaveBeenCalledWith({}, 'c1', [R1])
+    expect(resolveSelectedResourcesMock.mock.invocationCallOrder[0]!)
+      .toBeLessThan(claimAnswerMock.mock.invocationCallOrder[0]!)
+  })
+
+  it('should leave the request untouched when a pick cannot be resolved', async () => {
+    resolveSelectedResourcesMock.mockRejectedValue(
+      new AppError('VALIDATION_ERROR', 'One of the selected files is no longer available'),
+    )
+    const formData = krForm({ knowledgeRequestId: KR_ID, answer: 'Yes, here they are.' })
+    formData.append('resourceIds', R1)
+
+    await expect(answerKnowledgeRequest(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+
+    // Nothing was mutated, so the operator can fix the selection and resubmit.
+    expect(claimAnswerMock).not.toHaveBeenCalled()
+    expect(insertKnowledgeMock).not.toHaveBeenCalled()
+    expect(runKnowledgeAnswerMock).not.toHaveBeenCalled()
+  })
+
+  // The file is uploaded to the knowledge route by the client before this action
+  // runs, because a Server Action body is capped at 1MB. Any File still present
+  // in the payload must be ignored rather than acted on.
+  it('should not treat a stray file field as part of the answer', async () => {
+    const formData = krForm({ knowledgeRequestId: KR_ID, answer: 'See attached notes.' })
+    formData.set('knowledgeFile', new File(['notes'], 'notes.md', { type: 'text/markdown' }))
+
+    await answerKnowledgeRequest(formData)
+
+    expect(runKnowledgeAnswerMock).toHaveBeenCalledWith({}, {
+      knowledgeRequestId: KR_ID, resourceIds: [],
+    })
+  })
+})
+
+describe('updateDraftAttachments', () => {
+  it('should replace the attachment set on a draft', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.append('resourceIds', R1)
+
+    await updateDraftAttachments(formData)
+
+    expect(resolveSelectedResourcesMock).toHaveBeenCalledWith({}, 'c1', [R1])
+    expect(replaceEmailAttachmentsMock).toHaveBeenCalledWith({}, {
+      clientId: 'c1', emailId: EMAIL_ID, resourceIds: [R1],
+    })
+    expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+  })
+
+  it('should reject a pick that does not belong to the email own client', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    resolveSelectedResourcesMock.mockRejectedValue(
+      new AppError('VALIDATION_ERROR', 'One of the selected files is no longer available'),
+    )
+
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.append('resourceIds', R1)
+
+    await expect(updateDraftAttachments(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject a selection over the byte budget instead of writing it', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    resolveSelectedResourcesMock.mockRejectedValue(
+      new AppError('VALIDATION_ERROR', 'Attachments exceed the 3MB per-email limit'),
+    )
+
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.append('resourceIds', R1)
+    formData.append('resourceIds', R2)
+
+    await expect(updateDraftAttachments(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject more ids than the per-email limit before touching the database', async () => {
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    for (const id of [R1, R2, R1, R2]) formData.append('resourceIds', id)
+
+    await expect(updateDraftAttachments(formData)).rejects.toBeTruthy()
+    expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject a non-operator', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    await expect(updateDraftAttachments(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject an email that is no longer a draft', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail({ status: 'sent' }))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    await expect(updateDraftAttachments(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('approveDraft attachments', () => {
+  it('should send the attachment set recorded against the draft', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail({ in_reply_to_email_id: 'inb1' }))
+    listAttachmentsForEmailMock.mockResolvedValue([{ resourceId: R1 }])
+    const attachments = [{ fileName: 'a.pdf', mimeType: 'application/pdf', content: Buffer.from('X') }]
+    loadResourceAttachmentsMock.mockResolvedValue(attachments)
+
+    await approveDraft(fd(EMAIL_ID))
+
+    expect(loadResourceAttachmentsMock).toHaveBeenCalledWith({}, 'c1', [R1])
+    expect(sendViaMailboxMock).toHaveBeenCalledWith({}, expect.objectContaining({ attachments }))
+  })
+
+  // The draft survives on purpose: a deleted resource is something the operator
+  // can fix by editing the attachments, so it must not be burned to 'failed'.
+  it('should leave the draft approvable when an attachment cannot be loaded', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail({ in_reply_to_email_id: 'inb1' }))
+    listAttachmentsForEmailMock.mockResolvedValue([{ resourceId: R1 }])
+    loadResourceAttachmentsMock.mockRejectedValue(new Error('storage gone'))
+
+    await expect(approveDraft(fd(EMAIL_ID))).rejects.toThrow('storage gone')
+    expect(claimDraftForSendMock).not.toHaveBeenCalled()
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should still mark the draft failed when the send itself fails', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail({ in_reply_to_email_id: 'inb1' }))
+    sendViaMailboxMock.mockRejectedValue(new Error('smtp down'))
+
+    await expect(approveDraft(fd(EMAIL_ID))).rejects.toThrow('smtp down')
+    expect(markEmailFailedMock).toHaveBeenCalledWith({}, EMAIL_ID)
   })
 })

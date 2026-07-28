@@ -222,6 +222,15 @@ export const outlookProvider: OAuthMailboxProvider = {
     if (input.references) {
       internetMessageHeaders.push({ name: 'References', value: assertNoHeaderInjection(input.references, 'references') })
     }
+    // Under the 3MB per-email ceiling Graph accepts inline fileAttachments on
+    // the sendMail call itself. Anything larger would need a draft plus
+    // createUploadSession, which is deliberately out of scope.
+    const attachments = (input.attachments ?? []).map((attachment) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: assertNoHeaderInjection(attachment.fileName, 'attachmentFileName'),
+      contentType: assertNoHeaderInjection(attachment.mimeType, 'attachmentMimeType'),
+      contentBytes: attachment.content.toString('base64'),
+    }))
     await fetchJson(
       'https://graph.microsoft.com/v1.0/me/sendMail',
       {
@@ -233,6 +242,7 @@ export const outlookProvider: OAuthMailboxProvider = {
             body: { contentType: 'Text', content: input.body },
             toRecipients: [{ emailAddress: { address: assertNoHeaderInjection(input.to, 'to') } }],
             ...(internetMessageHeaders.length > 0 ? { internetMessageHeaders } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
           },
           saveToSentItems: true,
         }),
