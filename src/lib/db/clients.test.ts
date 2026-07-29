@@ -13,6 +13,7 @@ import {
   updateClientWarmupProfile,
   updateClientDomain,
   updateClientLogoUrl,
+  updateClientMailreachEnabled,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -272,5 +273,22 @@ describe('updateClientWarmupProfile', () => {
     await expect(
       updateClientWarmupProfile({ from: () => ({ update }) } as never, 'c1', 'slow'),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientMailreachEnabled', () => {
+  it('should persist the flag and return the updated row', async () => {
+    const row = { id: 'c1', mailreach_enabled: true }
+    const supabase = {
+      from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }) }) }),
+    } as never
+    await expect(updateClientMailreachEnabled(supabase, 'c1', true)).resolves.toEqual(row)
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    const supabase = {
+      from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }) }),
+    } as never
+    await expect(updateClientMailreachEnabled(supabase, 'c1', true)).rejects.toBeInstanceOf(AppError)
   })
 })

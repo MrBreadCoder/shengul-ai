@@ -24,6 +24,7 @@ const envSchema = publicEnvSchema.extend({
   GEMINI_API_KEY: nonEmpty,
   APOLLO_API_KEY: nonEmpty,
   EMAILABLE_API_KEY: nonEmpty,
+  MAILREACH_API_KEY: nonEmpty,
 })
 
 export type Env = z.infer<typeof envSchema>

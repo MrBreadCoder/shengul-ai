@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button'
 import { StatusPill } from '@/components/status-dot'
 import { MAILBOX_HEALTH } from '@/lib/ui/status'
 import { effectiveDailyCap, type WarmupProfile } from '@/lib/mailbox/warmup'
+import { mailreachElapsedDays, MAILREACH_CAMPAIGN_GATE_DAYS } from '@/lib/mailbox/mailreach-gate'
 import type { Database } from '@/types/database'
 import { MailboxControls } from './mailbox-controls'
+import { MailreachControls } from './mailreach-controls'
 
 type UserRole = Database['public']['Enums']['user_role']
+type MailreachStatus = Database['public']['Enums']['mailreach_status']
 
 interface MailboxRowProps {
   id: string
@@ -23,6 +26,25 @@ interface MailboxRowProps {
   dailyCap: number
   sentToday: number
   viewerRole: UserRole
+  mailreachEnabled: boolean
+  mailreachStartedAt: string | null
+  mailreachStatus: MailreachStatus
+  mailreachReputationScore: number | null
+}
+
+function mailreachStatusText(props: {
+  enabled: boolean
+  startedAt: string | null
+  status: MailreachStatus
+  reputationScore: number | null
+}): string | null {
+  if (!props.enabled || props.startedAt === null) return null
+  if (props.status !== 'connected') return 'Mailreach: needs reconnect'
+  const elapsed = mailreachElapsedDays(props.startedAt, new Date())
+  if (elapsed < MAILREACH_CAMPAIGN_GATE_DAYS) {
+    return `Mailreach: day ${elapsed}/${MAILREACH_CAMPAIGN_GATE_DAYS} · warming`
+  }
+  return props.reputationScore !== null ? `Mailreach: warm · reputation ${props.reputationScore}` : 'Mailreach: warm'
 }
 
 type SendState =
@@ -47,6 +69,12 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
     now: new Date(),
   })
   const isRamping = capToday < props.dailyCap
+  const mailreachText = mailreachStatusText({
+    enabled: props.mailreachEnabled,
+    startedAt: props.mailreachStartedAt,
+    status: props.mailreachStatus,
+    reputationScore: props.mailreachReputationScore,
+  })
 
   async function sendTest(): Promise<void> {
     setState({ status: 'sending' })
@@ -86,13 +114,17 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
           </span>
           {isRamping ? ` · warming up (cap ${props.dailyCap})` : null}
           {props.healthReason ? ` · ${props.healthReason.replaceAll('_', ' ')}` : null}
+          {mailreachText ? ` · ${mailreachText}` : null}
         </p>
       </div>
 
       <StatusPill meta={MAILBOX_HEALTH[props.health]} />
 
       {props.viewerRole === 'operator' ? (
-        <MailboxControls id={props.id} isBlocked={props.health === 'blocked'} warmupProfile={props.warmupProfile} />
+        <>
+          <MailboxControls id={props.id} isBlocked={props.health === 'blocked'} warmupProfile={props.warmupProfile} />
+          <MailreachControls id={props.id} provider={props.provider} enabled={props.mailreachEnabled} />
+        </>
       ) : null}
 
       <div className="flex items-center gap-2.5">

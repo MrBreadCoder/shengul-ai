@@ -121,6 +121,24 @@ export async function claimReplyEmail(
   return data && data.length > 0 ? data[0]! : null
 }
 
+// A human-written email that is not a cadence step. sequence_step is null, so
+// the (lead_id, sequence_step, direction) unique index cannot claim it — and
+// should not: many manual messages per lead are legitimate, and Postgres allows
+// unlimited nulls in a unique index. Used only when claimOutboundEmail found the
+// step-0 slot already taken.
+export async function insertManualEmail(
+  supabase: SupabaseClient<Database>,
+  row: EmailInsert,
+): Promise<EmailRow> {
+  const { data, error } = await supabase.from('emails').insert(row).select('*').single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to insert manual email', {
+      leadId: row.lead_id, cause: error?.message ?? 'no row returned',
+    })
+  }
+  return data
+}
+
 // Atomically transitions a single draft to 'queued'. The `.eq('status','draft')`
 // guard makes this a claim: only the first concurrent caller (double-click, two
 // tabs, a Server Action retry) matches a row and gets it back — everyone else

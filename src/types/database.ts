@@ -16,6 +16,7 @@ export interface Database {
           status: Database['public']['Enums']['client_status']
           settings: Json
           warmup_profile: Database['public']['Enums']['warmup_profile']
+          mailreach_enabled: boolean
           domain: string | null
           logo_url: string | null
           created_at: string
@@ -27,6 +28,7 @@ export interface Database {
           status?: Database['public']['Enums']['client_status']
           settings?: Json
           warmup_profile?: Database['public']['Enums']['warmup_profile']
+          mailreach_enabled?: boolean
           domain?: string | null
           logo_url?: string | null
           created_at?: string
@@ -377,6 +379,52 @@ export interface Database {
           },
         ]
       }
+      notes: {
+        Row: {
+          id: string
+          client_id: string
+          case_id: string
+          lead_id: string | null
+          body: string
+          created_by: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          case_id: string
+          lead_id?: string | null
+          body: string
+          created_by: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['notes']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'notes_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'notes_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: false
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'notes_lead_id_fkey'
+            columns: ['lead_id']
+            isOneToOne: false
+            referencedRelation: 'leads'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       email_attachments: {
         Row: {
           id: string
@@ -419,6 +467,7 @@ export interface Database {
           mailbox_id: string | null
           sent_at: string | null
           in_reply_to_email_id: string | null
+          sent_by: string | null
           created_at: string
         }
         Insert: {
@@ -436,6 +485,7 @@ export interface Database {
           mailbox_id?: string | null
           sent_at?: string | null
           in_reply_to_email_id?: string | null
+          sent_by?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['emails']['Insert']>
@@ -473,6 +523,7 @@ export interface Database {
           current_step: number
           next_action_at: string | null
           qstash_message_id: string | null
+          skip_next_step: boolean
           created_at: string
           updated_at: string
         }
@@ -485,6 +536,7 @@ export interface Database {
           current_step?: number
           next_action_at?: string | null
           qstash_message_id?: string | null
+          skip_next_step?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -622,6 +674,12 @@ export interface Database {
           health: Database['public']['Enums']['mailbox_health']
           health_reason: string | null
           health_changed_at: string | null
+          mailreach_enabled: boolean
+          mailreach_started_at: string | null
+          mailreach_account_id: string | null
+          mailreach_status: Database['public']['Enums']['mailreach_status']
+          mailreach_reputation_score: number | null
+          mailreach_stats_synced_at: string | null
           inbound_cursor: string | null
           created_at: string
           updated_at: string
@@ -640,6 +698,12 @@ export interface Database {
           health?: Database['public']['Enums']['mailbox_health']
           health_reason?: string | null
           health_changed_at?: string | null
+          mailreach_enabled?: boolean
+          mailreach_started_at?: string | null
+          mailreach_account_id?: string | null
+          mailreach_status?: Database['public']['Enums']['mailreach_status']
+          mailreach_reputation_score?: number | null
+          mailreach_stats_synced_at?: string | null
           inbound_cursor?: string | null
           created_at?: string
           updated_at?: string
@@ -743,6 +807,10 @@ export interface Database {
       }
       claim_mailbox_send: {
         Args: { p_mailbox_id: string; p_effective_cap: number }
+        Returns: Database['public']['Tables']['mailboxes']['Row'][]
+      }
+      claim_mailbox_send_uncapped: {
+        Args: { p_mailbox_id: string }
         Returns: Database['public']['Tables']['mailboxes']['Row'][]
       }
       mailbox_send_stats: {
@@ -871,6 +939,7 @@ export interface Database {
       mailbox_provider: 'gmail' | 'outlook' | 'smtp'
       mailbox_health: 'ok' | 'warning' | 'blocked'
       warmup_profile: 'standard' | 'slow' | 'none'
+      mailreach_status: 'disconnected' | 'pending' | 'connected' | 'error'
       suppression_reason: 'replied' | 'bounced' | 'manual' | 'price_handoff'
       author_kind: 'agent' | 'human'
       knowledge_source_type: 'website_page' | 'pdf' | 'file' | 'resource'

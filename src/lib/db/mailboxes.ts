@@ -78,6 +78,27 @@ export async function claimMailboxSend(
   return data && data.length > 0 ? data[0]! : null
 }
 
+// Cap-free counterpart to claimMailboxSend, for human-written mail only
+// (migration 0020). A separate RPC rather than an argument, so the agent's
+// capped path cannot accidentally become uncapped. sent_today still increments,
+// so the health monitor keeps seeing real volume; a 'blocked' mailbox still
+// returns null, because a blocked mailbox is not a cap problem.
+export async function claimMailboxSendUncapped(
+  supabase: SupabaseClient<Database>,
+  mailboxId: string,
+): Promise<MailboxRow | null> {
+  const { data, error } = await supabase.rpc('claim_mailbox_send_uncapped', {
+    p_mailbox_id: mailboxId,
+  })
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to claim uncapped mailbox send', {
+      mailboxId, cause: error.message,
+    })
+  }
+  // length check guarantees index 0 exists.
+  return data && data.length > 0 ? data[0]! : null
+}
+
 // Sets health plus the machine-readable reason and the moment it changed, so the
 // operator can tell an auto-pause from a manual one without reading the audit log.
 export async function setMailboxHealth(
@@ -128,6 +149,87 @@ export async function updateMailboxWarmup(
   }
 }
 
+export async function updateMailboxMailreachPending(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase.from('mailboxes').update({ mailreach_status: 'pending' }).eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to set mailbox mailreach status pending', { id, cause: error.message })
+}
+
+export async function updateMailboxMailreachConnected(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  fields: {
+    mailreach_account_id: string
+    mailreach_status: Database['public']['Enums']['mailreach_status']
+    mailreach_started_at: string
+    mailreach_enabled: boolean
+  },
+): Promise<void> {
+  const { error } = await supabase.from('mailboxes').update(fields).eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to persist mailbox mailreach connection', { id, cause: error.message })
+}
+
+// Operator-initiated disconnect: clears the live connection AND the
+// enrollment intent. mailreach_started_at is left untouched — a later
+// re-enable resumes the day count instead of restarting it.
+export async function updateMailboxMailreachDisconnected(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('mailboxes')
+    .update({ mailreach_account_id: null, mailreach_status: 'disconnected', mailreach_enabled: false })
+    .eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to disconnect mailbox from mailreach', { id, cause: error.message })
+}
+
+// Client-master-switch-initiated pause: clears the live connection but
+// preserves the mailbox's own mailreach_enabled intent, so turning the client
+// switch back on knows which mailboxes to reconnect.
+export async function clearMailboxMailreachConnection(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('mailboxes')
+    .update({ mailreach_account_id: null, mailreach_status: 'disconnected' })
+    .eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to clear mailbox mailreach connection', { id, cause: error.message })
+}
+
+export async function updateMailboxMailreachStats(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  fields: { reputationScore: number | null; syncedAt: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('mailboxes')
+    .update({ mailreach_reputation_score: fields.reputationScore, mailreach_stats_synced_at: fields.syncedAt })
+    .eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to update mailbox mailreach stats', { id, cause: error.message })
+}
+
+export async function listMailboxesForClient(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+): Promise<MailboxRow[]> {
+  const { data, error } = await supabase.from('mailboxes').select('*').eq('client_id', clientId)
+  if (error) throw new AppError('DB_ERROR', 'Failed to list mailboxes for client', { clientId, cause: error.message })
+  return data ?? []
+}
+
+// The stats-sync sweep's candidate set — every mailbox currently live on
+// Mailreach's side, across every client.
+export async function listMailreachConnectedMailboxes(
+  supabase: SupabaseClient<Database>,
+): Promise<MailboxRow[]> {
+  const { data, error } = await supabase.from('mailboxes').select('*').eq('mailreach_status', 'connected')
+  if (error) throw new AppError('DB_ERROR', 'Failed to list mailreach-connected mailboxes', { cause: error.message })
+  return data ?? []
+}
+
 export async function resetDailyCounters(supabase: SupabaseClient<Database>): Promise<void> {
   const { error } = await supabase.rpc('reset_mailbox_daily_counters')
   if (error) {
@@ -165,6 +267,7 @@ export type MailboxSummary = Pick<
   MailboxRow,
   | 'id' | 'provider' | 'email_address' | 'display_name' | 'health' | 'created_at'
   | 'health_reason' | 'warmup_profile' | 'warmup_started_at' | 'daily_cap' | 'sent_today'
+  | 'mailreach_enabled' | 'mailreach_started_at' | 'mailreach_status' | 'mailreach_reputation_score'
 >
 
 /**
@@ -179,7 +282,7 @@ export async function listMailboxesForViewer(
   const { data, error } = await supabase
     .from('mailboxes')
     .select(
-      'id, provider, email_address, display_name, health, created_at, health_reason, warmup_profile, warmup_started_at, daily_cap, sent_today',
+      'id, provider, email_address, display_name, health, created_at, health_reason, warmup_profile, warmup_started_at, daily_cap, sent_today, mailreach_enabled, mailreach_started_at, mailreach_status, mailreach_reputation_score',
     )
     .order('created_at', { ascending: false })
   if (error) {

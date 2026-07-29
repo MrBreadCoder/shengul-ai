@@ -19,6 +19,8 @@ import { listKnowledgeForCase } from '@/lib/db/case-knowledge'
 import { listKnowledgeRequestsForCase } from '@/lib/db/knowledge-requests'
 import { listEventsForCase } from '@/lib/db/events'
 import { getCampaignById } from '@/lib/db/campaigns'
+import { listNotesForCase } from '@/lib/db/notes'
+import { listActiveResourcesForClient } from '@/lib/db/client-resources'
 import { CASE_STATUS, KNOWLEDGE_REQ_STATUS, LEAD_EMAIL_STATUS } from '@/lib/ui/status'
 import { formatAbsolute, formatRelative, humanizeEnum } from '@/lib/format'
 import { CompanyMark } from '@/components/company-mark'
@@ -28,15 +30,19 @@ import { KnowledgeItem } from '@/components/knowledge-item'
 import { EmptyState } from '@/components/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StopLeadButton } from './stop-lead-button'
+import { NotesPanel, type NotePanelItem } from './notes-panel'
+import { ComposeForm } from './compose-form'
 
 export const dynamic = 'force-dynamic'
 
 const EVENT_LIMIT = 60
+const RESOURCE_LIMIT = 50
 
 const paramsSchema = z.object({ id: z.string().uuid() })
 
 interface CasePageProps {
   params: Promise<{ id: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
 export async function generateMetadata({ params }: CasePageProps): Promise<Metadata> {
@@ -47,13 +53,20 @@ export async function generateMetadata({ params }: CasePageProps): Promise<Metad
   return { title: kase?.company_name ?? 'Case' }
 }
 
-export default async function CasePage({ params }: CasePageProps): Promise<React.ReactElement> {
-  await requireUser()
+export default async function CasePage({
+  params,
+  searchParams,
+}: CasePageProps): Promise<React.ReactElement> {
+  const { appUser } = await requireUser()
 
   // A non-uuid path segment would otherwise reach Postgres and throw a 500.
   const parsed = paramsSchema.safeParse(await params)
   if (!parsed.success) notFound()
   const caseId = parsed.data.id
+
+  // Untrusted: parsed as a uuid here and checked against this case's own leads
+  // below, so a foreign or malformed id simply preselects nothing.
+  const noteParam = z.string().uuid().safeParse((await searchParams).note)
 
   const supabase = await createServerClient()
   const kase = await getCaseById(supabase, caseId)
@@ -61,17 +74,68 @@ export default async function CasePage({ params }: CasePageProps): Promise<React
   // is the behaviour we want: no existence leak across clients.
   if (!kase) notFound()
 
-  const [leads, emails, knowledge, requests, events, campaign] = await Promise.all([
+  const [leads, emails, knowledge, requests, events, campaign, notes, resources] = await Promise.all([
     listLeadsForCase(supabase, caseId),
     listEmailsForCase(supabase, caseId),
     listKnowledgeForCase(supabase, caseId),
     listKnowledgeRequestsForCase(supabase, caseId),
     listEventsForCase(supabase, caseId, EVENT_LIMIT),
     getCampaignById(supabase, kase.campaign_id),
+    listNotesForCase(supabase, caseId),
+    listActiveResourcesForClient(supabase, kase.client_id, RESOURCE_LIMIT),
   ])
 
   const now = new Date()
   const openRequests = requests.filter((request) => request.status === 'open').length
+
+  // "You" or "Teammate", never a name: app_users carries only id/role/client_id
+  // (no email — that lives in auth.users, reachable only through the admin
+  // client). Resolving names would mean an auth-admin lookup on a page a
+  // client-role user loads, to show one teammate another teammate's address.
+  const noteItems: NotePanelItem[] = notes.map((note) => ({
+    id: note.id,
+    body: note.body,
+    leadId: note.lead_id,
+    authorLabel: note.created_by === appUser.id ? 'You' : 'Teammate',
+    canManage: appUser.role === 'operator' || note.created_by === appUser.id,
+    createdAt: note.created_at,
+  }))
+  const noteCountByLeadId = new Map<string, number>()
+  for (const note of notes) {
+    if (note.lead_id) noteCountByLeadId.set(note.lead_id, (noteCountByLeadId.get(note.lead_id) ?? 0) + 1)
+  }
+  const initialNoteLeadId =
+    noteParam.success && leads.some((lead) => lead.id === noteParam.data) ? noteParam.data : null
+
+  // Parked leads are excluded: outreach to them was deliberately stopped, and a
+  // send would be refused by the suppression check anyway.
+  const composeContacts = leads
+    .filter((lead) => lead.status !== 'parked' && lead.email !== null)
+    // safe: filtered on lead.email !== null immediately above
+    .map((lead) => ({ id: lead.id, fullName: lead.full_name, email: lead.email! }))
+
+  const lastOutboundSubject = [...emails]
+    .reverse()
+    .find((email) => email.direction === 'outbound')?.subject ?? null
+  const defaultSubject = lastOutboundSubject
+    ? (lastOutboundSubject.startsWith('Re: ') ? lastOutboundSubject : `Re: ${lastOutboundSubject}`)
+    : ''
+
+  // Mapped inline, matching /inbox, /knowledge/resources and the client detail
+  // page. Extracting a shared mapper is a cross-cutting change those three
+  // surfaces would have to adopt too — out of scope here.
+  const composeResources = resources.map((resource) => ({
+    id: resource.id,
+    clientId: resource.client_id,
+    title: resource.title,
+    description: resource.description,
+    fileName: resource.file_name,
+    mimeType: resource.mime_type,
+    byteSize: resource.byte_size,
+    contentStatus: resource.content_status,
+    contentSummary: resource.content_summary,
+    canManage: false,
+  }))
 
   return (
     <div className="flex flex-col gap-8">
@@ -115,6 +179,17 @@ export default async function CasePage({ params }: CasePageProps): Promise<React
         ) : null}
       </header>
 
+      <NotesPanel
+        // Remount when the target changes: the composer seeds its About selector
+        // from initialLeadId in useState, which only reads on mount, so a second
+        // "Add note" click would otherwise change the URL and nothing else.
+        key={initialNoteLeadId ?? 'company'}
+        caseId={kase.id}
+        contacts={leads.map((lead) => ({ id: lead.id, fullName: lead.full_name }))}
+        notes={noteItems}
+        initialLeadId={initialNoteLeadId}
+      />
+
       <section aria-label="Contacts" className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">
           Contacts <span className="text-faint tnum font-normal">{leads.length}</span>
@@ -151,6 +226,17 @@ export default async function CasePage({ params }: CasePageProps): Promise<React
                         <LinkedinLogo size={14} weight="light" />
                       </a>
                     ) : null}
+                    {/* A contact with no notes still shows the control, so the
+                        first note on a person is as easy to write as the tenth. */}
+                    <Link
+                      href={`/cases/${kase.id}?note=${lead.id}#notes`}
+                      scroll
+                      className="text-faint hover:text-foreground text-[11px] underline underline-offset-2 transition-colors duration-200"
+                    >
+                      {(noteCountByLeadId.get(lead.id) ?? 0) > 0
+                        ? `${noteCountByLeadId.get(lead.id)} note${noteCountByLeadId.get(lead.id) === 1 ? '' : 's'}`
+                        : 'Add note'}
+                    </Link>
                   </div>
                 </div>
                 {lead.status === 'parked' ? (
@@ -188,28 +274,37 @@ export default async function CasePage({ params }: CasePageProps): Promise<React
         </TabsList>
 
         <TabsContent value="mail">
-          {emails.length === 0 ? (
-            <EmptyState
-              icon={Envelope}
-              title="No mail on this case"
-              description="Outbound drafts appear here once the writer agent runs, and replies land automatically when the inbound poller picks them up."
+          <div className="flex max-w-[80ch] flex-col gap-4">
+            {emails.length === 0 ? (
+              <EmptyState
+                icon={Envelope}
+                title="No mail on this case"
+                description="Outbound drafts appear here once the writer agent runs, and replies land automatically when the inbound poller picks them up."
+              />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {emails.map((email) => (
+                  <EmailMessage
+                    key={email.id}
+                    direction={email.direction}
+                    status={email.status}
+                    subject={email.subject}
+                    body={email.body}
+                    sequenceStep={email.sequence_step}
+                    timestamp={email.sent_at ?? email.created_at}
+                    now={now}
+                    sentByHuman={email.sent_by !== null}
+                  />
+                ))}
+              </div>
+            )}
+            <ComposeForm
+              caseId={kase.id}
+              contacts={composeContacts}
+              resources={composeResources}
+              defaultSubject={defaultSubject}
             />
-          ) : (
-            <div className="flex max-w-[80ch] flex-col gap-3">
-              {emails.map((email) => (
-                <EmailMessage
-                  key={email.id}
-                  direction={email.direction}
-                  status={email.status}
-                  subject={email.subject}
-                  body={email.body}
-                  sequenceStep={email.sequence_step}
-                  timestamp={email.sent_at ?? email.created_at}
-                  now={now}
-                />
-              ))}
-            </div>
-          )}
+          </div>
         </TabsContent>
 
         <TabsContent value="knowledge">

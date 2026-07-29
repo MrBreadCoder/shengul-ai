@@ -1269,23 +1269,202 @@ and mark rows failed.
 
 ---
 
-## Client notes + client-written email — designed (2026-07-28)
+## Client notes + client-written email (shipped 2026-07-28)
 
-Design agreed and written to
-`docs/superpowers/specs/2026-07-28-client-notes-and-manual-send-design.md`. Not
-implemented yet.
+Spec: `docs/superpowers/specs/2026-07-28-client-notes-and-manual-send-design.md`.
+Plan: `docs/superpowers/plans/2026-07-28-client-notes-and-manual-send.md` — all
+10 tasks done. Migration `0020` — additive, no backfill, no deploy ordering
+constraint. **`0020` still has to be applied per environment** (no `supabase`
+CLI in this tree; apply it the way `0019` was applied). Until it is, the case
+page throws on `listNotesForCase` and every manual send fails on `sent_by`.
 
-Two client-facing features sharing migration `0020`:
+- **Notes** (`notes` table, RLS mirroring `client_resources`): case-anchored,
+  `lead_id` set when the note is about one person. The whole client reads; only
+  the author edits. Written through the *session-scoped* client — the policies
+  are the boundary, unlike `emails`, where clients have no write policy and an
+  explicit `canManageClient` check does the work. No prompt reads a note, so a
+  client can record something unflattering without it reaching outbound copy.
+  Panel sits above Contacts on the case page; a person note can be started from
+  the About selector or from that contact's card (`?note=<leadId>#notes`, with
+  the panel keyed on the target so a second click re-seeds the selector).
+  `case_id` is not null even on a person note: `leads.case_id` is nullable
+  (`on delete set null`, 0001), so anchoring on the lead alone would leave notes
+  attached to no visible surface. Author labels are "You"/"Teammate" —
+  `app_users` holds no email, and resolving one would mean an auth-admin lookup
+  on a page a client-role user loads.
+- **Manual send** (`sendManualEmail`): a client writes to a lead on their own
+  case, through the campaign's mailboxes, with resource attachments. Three
+  decisions carry the weight:
+  - A manual email with no step-0 outbound **claims that slot**. Otherwise the
+    write cron cold-emails the same person days later, and `find_stuck_cases`
+    (0006) drags the case back to `ready` precisely because it has no step-0
+    email. Claiming it also starts the 3/7/14 cadence off the client's own
+    message and moves a pre-contact case to `contacted`.
+  - An interjection sets `sequences.skip_next_step`, consumed at fire time by
+    `runFollowupStep`, which sends nothing and enqueues the step after — the
+    cadence continues rather than dying. A reply still beats a pending skip; a
+    paused campaign postpones it; two manual sends consume one skip; skipping the
+    final step stops the sequence without marking the case `dead`.
+    `consumeFollowupSkip` deliberately does not advance `current_step` — on a
+    publish failure the retry sends a real nudge, and losing a skip is strictly
+    better than a silently dead cadence.
+  - The cap bypass is a **separate** `claim_mailbox_send_uncapped` RPC, never a
+    parameter on the capped one, so the agent's path cannot accidentally become
+    uncapped. `sent_today` still increments and `health <> 'blocked'` still
+    applies.
 
-- **Notes** — a `notes` table (case-anchored, optional `lead_id`), RLS mirroring
-  `client_resources`: the whole client reads, only the author edits. No prompt
-  ever reads a note, so a client can record something unflattering without it
-  reaching outbound copy. Panel sits at the top of the case page, above Contacts
-  — not a tab.
-- **Manual send** — a client writes and sends inside a case, through the
-  campaign's mailboxes. Three decisions carry the weight: a manual email with no
-  step-0 outbound *claims* that slot (otherwise the write cron cold-emails the
-  same person and `find_stuck_cases` drags the case back to `ready`); an
-  interjection sets `sequences.skip_next_step`, consumed at fire time so the
-  cadence continues rather than dying; and the cap bypass is a separate
-  `claim_mailbox_send_uncapped` RPC, never a parameter on the capped one.
+  Attachments resolve **before** the row is claimed (matching `approveDraft`): a
+  correctable selection must fail while the form is on screen, not after the
+  point of no return. A send failure marks the row `failed` and rethrows;
+  post-send bookkeeping is best-effort and logged, because the mail is already
+  out and a QStash outage must not read as a failed send.
+- `emails.sent_by` records who typed a message; the case thread and `/mail` show
+  "Sent by a person" against it.
+
+60 new tests (1461 → 1521), `pnpm typecheck`, `pnpm lint` and `pnpm build` all
+clean. Per the plan's global constraints there are no component tests: the notes
+panel and the composer are covered by typecheck, lint and a production build, and
+need a manual pass in `pnpm dev` once `0020` is applied. The spec's RLS
+integration cases for `notes` are still outstanding — that suite runs against
+live credentials via `pnpm test:integration`, outside the per-task cycle.
+
+---
+
+## Mailreach warmup integration — Tasks 1-5 DONE
+
+**Plan:** `docs/superpowers/plans/2026-07-29-mailreach-warmup.md`
+**Spec:** `docs/superpowers/specs/2026-07-29-mailreach-warmup-design.md`
+
+Executed tasks 1-5 of the plan (schema/env through enrollment orchestration),
+inline, no commits per instruction:
+
+- **Task 1** — `supabase/migrations/0021_mailreach_warmup.sql` adds the
+  `mailreach_status` enum, `clients.mailreach_enabled`, and 6 new `mailboxes`
+  columns. `src/types/database.ts` updated to match. `MAILREACH_API_KEY` added
+  to `src/lib/env.ts`/`.test.ts`, plus the test-only stub in `vitest.config.ts`
+  and placeholders in `.env.example`/`.env.local` (not in the plan, but
+  required for the existing module-scope `loadEnv(process.env)` import not to
+  crash every other test file).
+- **Task 2** — `src/lib/mailbox/mailreach-gate.ts`: pure
+  `isEligibleForCampaignSend`/`mailreachElapsedDays`, `MAILREACH_CAMPAIGN_GATE_DAYS
+  = 14`. Not yet wired into `sender.ts` — that's Task 8.
+- **Task 3** — `src/lib/mailreach/client.ts`: REST wrapper (connect-account,
+  OAuth authorize/callback, disconnect, stats) over `fetchJson`. Field names
+  are per the plan's documented-but-unverified Mailreach API guess (Step 1 of
+  this task — confirming against a live account — was not done; still needs a
+  real `MAILREACH_API_KEY` before Task 3 is trusted end-to-end).
+- **Task 4** — DB helpers added to `src/lib/db/mailboxes.ts` (pending/connected/
+  disconnected/clear/enabled/stats updates, `listMailboxesForClient`,
+  `listMailreachConnectedMailboxes`; `MailboxSummary` extended) and
+  `src/lib/db/clients.ts` (`updateClientMailreachEnabled`).
+- **Task 5** — `src/lib/mailreach/enrollment.ts`: orchestrates connect/disconnect
+  + bulk client-level reconnect/disconnect on top of Tasks 3-4.
+  `mailreach_started_at` is stamped once and preserved across
+  disconnect/reconnect so the 14-day gate never restarts.
+
+`pnpm tsc --noEmit` clean, full suite 153 files / 1558 tests passing (was 1521
+before this batch). Remaining: Tasks 6-13 (routes, OAuth callback, UI toggles,
+stats-sync cron, wiring the gate into `sender.ts`) are not started.
+
+### Tasks 6-8 DONE (same session, inline, no commits)
+
+- **Task 6** — `src/app/api/mailboxes/[id]/mailreach/{connect,disconnect}/route.ts`
+  + `src/app/api/mailboxes/mailreach/state-cookie.ts`. SMTP connects
+  synchronously; gmail/outlook returns an `authorizeUrl` and sets an httpOnly
+  CSRF-nonce cookie (`mailreach_oauth_state`, scoped to `/api/mailboxes`) for
+  Task 7 to validate.
+- **Task 7** — `src/app/api/mailboxes/mailreach/callback/route.ts`: validates
+  the state cookie with `timingSafeEqualString`, completes the OAuth connect,
+  and redirects to `/settings?mailreach=connected` or `?error=...`.
+- **Task 8** — wired `isEligibleForCampaignSend` into `sender.ts`'s
+  `rotationOrder` (now `(mailboxes, purpose, now)`), gating `'outreach'` sends
+  only — a `'reply'` still uses a warming mailbox. `mailbox.none_healthy`'s log
+  payload gained `warmupGatedCount`. The plan's test additions assumed
+  `sender.test.ts` helpers named `mockMailbox`/`buildSupabase` inside a
+  `describe('rotation and health', ...)` block; the real file uses
+  `mailboxWith`/`listMailboxesByIdsMock`/`claimMailboxSendMock` fixtures with no
+  such describe block, so the two new tests were adapted to those existing
+  fixtures instead (same behavior asserted, different helper names) and added
+  to a new `describe('mailreach gate', ...)` block. The shared `mailbox`
+  fixture gained `mailreach_enabled: false, mailreach_started_at: null`
+  defaults so `mailboxWith(...)` overrides work.
+
+`pnpm tsc --noEmit` clean, `pnpm lint` clean (only 6 pre-existing unrelated
+warnings), full suite 156 files / 1572 tests passing (was 1558). Checkboxes for
+completed steps in the plan file are ticked; commit steps are deliberately left
+unchecked (skipped per instruction). Remaining: Tasks 9-13 (client-level master
+switch PATCH route, `/settings` UI, stats-sync cron + QStash registration, final
+roadmap pass) are not started.
+
+### Tasks 9-12 DONE (same session, inline, no commits)
+
+- **Task 9** — `PATCH /api/clients/[clientId]` accepts `{ mailreachEnabled }`;
+  flips `clients.mailreach_enabled` and fires `bulkReconnectSmtpForClient` (on)
+  or `bulkDisconnectForClient` (off), logging `client.mailreach_enabled_changed`.
+  Hit a real type error the plan didn't anticipate: nesting the `BulkResult`
+  interface directly as a `logEvent` payload field doesn't type-check against
+  the `Record<string, Json>` payload type (no index signature on a named
+  interface) — fixed by spreading/flattening `attempted`/`succeeded`/`failed`
+  as individual number fields instead. Confirmed via a scratch compile that
+  `{ ...namedInterfaceValue }` (used by the pre-existing `mailbox-health`
+  route and by Task 12 below) *does* type-check — only nesting the named value
+  directly as a property fails.
+- **Task 10** — `src/app/(app)/settings/mailreach-controls.tsx` (operator-only
+  checkbox; SMTP toggles synchronously, gmail/outlook navigates to the
+  Mailreach OAuth URL), wired into `mailbox-row.tsx` (new `mailreachStatusText`
+  helper renders day-count/reputation to both roles) and `page.tsx`.
+- **Task 11** — `src/app/(app)/clients/[id]/mailreach-toggle.tsx`, the
+  client-level master switch, mounted next to `WarmupProfileSelect`.
+- **Task 12** — `src/lib/pipeline/mailreach-sync.ts` (`runMailreachStatsSync`,
+  best-effort per mailbox), `src/app/api/pipeline/mailreach-sync/route.ts`
+  (QStash-signed cron entry), `scripts/schedule-mailreach-sync-cron.ts`
+  (6-hourly, mirrors `schedule-mailbox-health-cron.ts`).
+
+Verification: `pnpm tsc --noEmit` clean, `pnpm lint` clean (same 6 pre-existing
+unrelated warnings), full suite 158 files / 1580 tests passing (was 1572), and
+`pnpm build` succeeds with every new route (`/api/clients/[clientId]`,
+`/api/mailboxes/[id]/mailreach/*`, `/api/mailboxes/mailreach/callback`,
+`/api/pipeline/mailreach-sync`, `/clients/[id]`, `/settings`) compiling. Full
+interactive browser verification (Task 10 Step 6, Task 11 Step 4 — checking the
+box in a real session, completing a live Mailreach OAuth round-trip) was **not**
+done: it needs a real authenticated session plus a live `MAILREACH_API_KEY`/
+Mailreach account, neither available here. Those two steps are left unchecked
+in the plan file; everything else through Task 12 is checked, commit steps
+excepted. Remaining: Task 13 (full verification pass + final roadmap
+consolidation) — largely already covered above, but not yet formally closed out
+per the plan's own checklist.
+
+### Code-review fixes (2026-07-29, inline, no commits)
+
+`/code-review` flagged 10 findings on the working tree; all 10 fixed:
+
+- `runFollowupStep` skip race (`followup.ts`) — the human-interjection skip
+  read a stale `sequence.skip_next_step` snapshot instead of checking
+  `consumeFollowupSkip` atomically, letting a concurrent manual send lose the
+  race and get double-messaged. Now checks atomically, unconditionally.
+- `sendManualEmailUnsafe` missing `campaign.status` check (`send-actions.ts`)
+  — manual sends could go out through a paused/archived campaign.
+- `disconnectMailbox` (`enrollment.ts`) left a mailbox stuck "connected" when
+  the vendor call failed — now best-effort, like `bulkDisconnectForClient`.
+  Also extracted its 154-line body into 6 single-purpose helpers.
+- Mailreach connect route now rejects enrolling an individual mailbox while
+  the client-level master switch is off (`mailreach-gate.ts` otherwise
+  ungates it immediately, defeating warmup).
+- `sender.ts`'s `bypassDailyCap` silently also bypassed the mailreach warmup
+  gate; split into two independent flags (`bypassDailyCap`,
+  `bypassMailreachGate`) so a future cap-only caller can't accidentally skip
+  warmup too.
+- `note-actions.ts` `editNote`/`removeNote` now verify `note.case_id`
+  matches the submitted `caseId` before mutating.
+- `mailreach-sync.ts`'s per-mailbox stats sweep now runs concurrently
+  (`Promise.all`) instead of one mailbox at a time.
+- `MAX_SUBJECT_CHARS`/`MAX_BODY_CHARS`/`MAX_NOTE_CHARS` deduped into
+  `src/lib/validation/{email,note}-limits.ts`, imported by both the
+  `'use server'` schema and the client component's `maxLength`.
+- `MailreachToggle` moved off client-side `fetch` to the PATCH route onto a
+  new `setClientMailreachEnabled` Server Action
+  (`clients/[id]/mailreach-actions.ts`); the route's `mailreachEnabled` field
+  was removed since it was that toggle's only caller.
+
+`npx tsc --noEmit` clean, `npx eslint .` clean (same 6 pre-existing unrelated
+warnings), full suite 159 files / 1595 tests passing (was 1580).

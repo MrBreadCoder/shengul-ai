@@ -1,7 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
-import { getSequenceById, createSequence, advanceSequence, stopSequence } from '@/lib/db/sequences'
+import {
+  getSequenceById,
+  createSequence,
+  advanceSequence,
+  stopSequence,
+  consumeFollowupSkip,
+} from '@/lib/db/sequences'
 import {
   hasInboundReply,
   listThreadEmails,
@@ -157,6 +163,53 @@ export async function runFollowupStep(
       currentStep: sequence.current_step,
       nextActionAt: null,
       qstashMessageId: messageId,
+    })
+    return { sequenceId: sequence.id, action: 'skipped' }
+  }
+
+  // A human interjected into this cadence — a client wrote to this lead
+  // themselves from the case page. Skip exactly one step: send nothing, consume
+  // the flag, and schedule the step after it so the cadence survives instead of
+  // ending here.
+  //
+  // Placed below the campaign-active branch so a paused client still freezes
+  // everything, and above the LLM call so a skipped step costs no tokens. The
+  // reply and lead/suppression checks sit above too, deliberately: a prospect
+  // who answered ends the sequence outright, and a dead address still stops it.
+  //
+  // Checked atomically against the DB here rather than via the `sequence`
+  // snapshot loaded at the top of this function: a manual send can call
+  // requestFollowupSkip at any point while this run is awaiting the reply/lead/
+  // thread/campaign lookups above, so a stale in-memory flag would miss a skip
+  // requested mid-flight. consumeFollowupSkip's `skip_next_step = true` guard
+  // also makes this the race-loser check for duplicate QStash deliveries.
+  const consumedSkip = await consumeFollowupSkip(supabase, sequence.id)
+  if (consumedSkip) {
+    if (input.step >= MAX_FOLLOWUP_STEP) {
+      await stopSequence(supabase, sequence.id, 'stopped')
+      // Deliberately NOT updateCaseStatus('dead'), unlike the send path below:
+      // a human is in this thread, so the case is not a cold lead that ran out
+      // of nudges.
+      await logEventSafe({
+        clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR,
+        type: 'pipeline.followup.skipped_final', payload: { sequenceId: sequence.id, step: input.step },
+      })
+      return { sequenceId: sequence.id, action: 'skipped' }
+    }
+
+    const skipMessageId = await publishJsonWithDelay(
+      '/api/pipeline/followup',
+      { sequenceId: sequence.id, step: input.step + 1 },
+      FOLLOWUP_DELAYS_SECONDS[input.step]!, // same index rule as the send path; always in range for step < MAX
+    )
+    await advanceSequence(supabase, sequence.id, {
+      currentStep: input.step,
+      nextActionAt: null,
+      qstashMessageId: skipMessageId,
+    })
+    await logEventSafe({
+      clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR,
+      type: 'pipeline.followup.skipped_manual', payload: { sequenceId: sequence.id, step: input.step },
     })
     return { sequenceId: sequence.id, action: 'skipped' }
   }

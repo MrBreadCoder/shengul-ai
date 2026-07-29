@@ -118,6 +118,23 @@ export async function updateClientWarmupProfile(
   return data
 }
 
+export async function updateClientMailreachEnabled(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  enabled: boolean,
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ mailreach_enabled: enabled })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client mailreach_enabled', { id, cause: error?.message })
+  }
+  return data
+}
+
 // `null` clears the website — used both by the "Website" edit control and by
 // the domain-favicon fallback in CompanyMark, so leaving it unset just means
 // no auto-fetched logo is available yet.

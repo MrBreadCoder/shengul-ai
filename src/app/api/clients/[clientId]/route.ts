@@ -17,15 +17,19 @@ import { domainSchema } from '@/lib/validation/domain'
 
 export const runtime = 'nodejs'
 
+// mailreachEnabled is deliberately NOT a field here — that boolean-flag
+// mutation goes through the setClientMailreachEnabled Server Action
+// (mailreach-actions.ts) instead of a client-side fetch to this route.
 const patchSchema = z
   .object({
     name: z.string().min(1).optional(),
     warmupProfile: z.enum(['standard', 'slow', 'none']).optional(),
     domain: domainSchema.optional(),
   })
-  .refine((body) => body.name !== undefined || body.warmupProfile !== undefined || body.domain !== undefined, {
-    message: 'At least one field must be provided',
-  })
+  .refine(
+    (body) => body.name !== undefined || body.warmupProfile !== undefined || body.domain !== undefined,
+    { message: 'At least one field must be provided' },
+  )
 
 const deleteSchema = z.object({
   confirmName: z.string().min(1),

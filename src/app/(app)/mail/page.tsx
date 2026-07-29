@@ -127,6 +127,7 @@ export default async function MailPage({ searchParams }: MailPageProps): Promise
                   sequenceStep={email.sequence_step}
                   timestamp={email.sent_at ?? email.created_at}
                   now={now}
+                  sentByHuman={email.sent_by !== null}
                 />
               </li>
             )

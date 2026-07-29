@@ -29,6 +29,7 @@ export default defineConfig({
       GEMINI_API_KEY: 'test-gemini-api-key',
       APOLLO_API_KEY: 'test-apollo-api-key',
       EMAILABLE_API_KEY: 'test-emailable-api-key',
+      MAILREACH_API_KEY: 'test-mailreach-api-key',
     },
   },
   resolve: { alias: { '@': resolve(__dirname, 'src') } },

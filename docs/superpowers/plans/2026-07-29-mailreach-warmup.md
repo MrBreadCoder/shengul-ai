@@ -69,7 +69,7 @@
 **Interfaces:**
 - Produces: enum `mailreach_status` (`'disconnected' | 'pending' | 'connected' | 'error'`); `clients.mailreach_enabled: boolean`; `mailboxes.mailreach_enabled: boolean`, `mailreach_started_at: string | null`, `mailreach_account_id: string | null`, `mailreach_status: mailreach_status`, `mailreach_reputation_score: number | null`, `mailreach_stats_synced_at: string | null`; `env.MAILREACH_API_KEY: string`.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0021_mailreach_warmup.sql`:
 
@@ -92,7 +92,7 @@ alter table mailboxes add column mailreach_reputation_score numeric;
 alter table mailboxes add column mailreach_stats_synced_at  timestamptz;
 ```
 
-- [ ] **Step 2: Add the enum and columns to `src/types/database.ts`**
+- [x] **Step 2: Add the enum and columns to `src/types/database.ts`**
 
 In the `clients` table block (currently lines 12-37), add `mailreach_enabled: boolean` to `Row` (after `warmup_profile`) and `mailreach_enabled?: boolean` to `Insert`:
 
@@ -201,7 +201,7 @@ In the `Enums` block (currently around line 900), add the new enum next to `warm
       mailreach_status: 'disconnected' | 'pending' | 'connected' | 'error'
 ```
 
-- [ ] **Step 3: Add `MAILREACH_API_KEY` to the env schema**
+- [x] **Step 3: Add `MAILREACH_API_KEY` to the env schema**
 
 In `src/lib/env.ts`, add to `envSchema`:
 
@@ -215,12 +215,12 @@ In `src/lib/env.test.ts`, add to the `complete` fixture object:
   MAILREACH_API_KEY: 'mailreach-key',
 ```
 
-- [ ] **Step 4: Run the env test**
+- [x] **Step 4: Run the env test**
 
 Run: `pnpm vitest run src/lib/env.test.ts`
 Expected: PASS (the existing "missing var" test uses `QSTASH_TOKEN`, unaffected; the fixture now includes the new key so the happy-path test still passes).
 
-- [ ] **Step 5: Run the type checker**
+- [x] **Step 5: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS — no other file references the new columns yet, so this only validates the `database.ts` edit itself is syntactically consistent.
@@ -244,7 +244,7 @@ git commit -m "feat: add mailreach warmup schema and env var"
 - Consumes: nothing (pure).
 - Produces: `MAILREACH_CAMPAIGN_GATE_DAYS: number`; `mailreachElapsedDays(startedAt: string, now: Date): number`; `isEligibleForCampaignSend(input: { mailreachEnabled: boolean; mailreachStartedAt: string | null; now: Date }): boolean`. Consumed by Task 8 (`sender.ts`) and Task 10 (UI day-count display).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/lib/mailbox/mailreach-gate.test.ts`:
 
@@ -306,12 +306,12 @@ describe('isEligibleForCampaignSend', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/mailbox/mailreach-gate.test.ts`
 Expected: FAIL — `./mailreach-gate` does not exist yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/lib/mailbox/mailreach-gate.ts`:
 
@@ -355,7 +355,7 @@ export function isEligibleForCampaignSend(input: CampaignSendEligibilityInput): 
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/mailbox/mailreach-gate.test.ts`
 Expected: PASS, all 10 tests.
@@ -379,11 +379,11 @@ git commit -m "feat: add the mailreach campaign-send eligibility gate"
 - Consumes: `fetchJson` (`src/lib/http/fetch-json.ts`), `env.MAILREACH_API_KEY`.
 - Produces: `connectSmtpAccount(input: SmtpConnectInput): Promise<{ accountId: string }>`; `buildOAuthAuthorizeUrl(params: { provider: 'gmail' | 'outlook'; redirectUri: string; state: string }): string`; `completeOAuthConnect(params: { code: string; provider: 'gmail' | 'outlook' }): Promise<{ accountId: string }>`; `disconnectAccount(accountId: string): Promise<void>`; `getAccountStats(accountId: string): Promise<{ reputationScore: number | null }>`. Consumed by Task 4 (`enrollment.ts`) and Task 11 (`mailreach-sync.ts`).
 
-- [ ] **Step 1: Confirm the live API contract**
+- [ ] **Step 1: Confirm the live API contract** (not done — no live `MAILREACH_API_KEY`/account was available; client.ts was implemented against the plan's documented-but-unverified field names only)
 
 Before writing tests, confirm against `docs.mailreach.co` (with a real `MAILREACH_API_KEY` if available) that: the connect-account request/response field names below match, the OAuth authorize/callback mechanic is a redirect URL + code exchange as assumed, and the disconnect/stats endpoints exist at the paths below. If anything differs, adjust the schemas and paths in Step 3 before proceeding — the rest of this task assumes they're correct.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `src/lib/mailreach/client.test.ts`:
 
@@ -480,12 +480,12 @@ describe('getAccountStats', () => {
 })
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/mailreach/client.test.ts`
 Expected: FAIL — `./client` does not exist yet.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Create `src/lib/mailreach/client.ts`:
 
@@ -582,7 +582,7 @@ export async function getAccountStats(accountId: string): Promise<{ reputationSc
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/mailreach/client.test.ts`
 Expected: PASS, all 6 tests.
@@ -607,7 +607,7 @@ git commit -m "feat: add the mailreach API client"
 - Consumes: `MailboxRow`, `ClientRow` (existing).
 - Produces: `updateMailboxMailreachPending`, `updateMailboxMailreachConnected`, `updateMailboxMailreachDisconnected`, `clearMailboxMailreachConnection`, `updateMailboxMailreachEnabled`, `updateMailboxMailreachStats`, `listMailboxesForClient`, `listMailreachConnectedMailboxes` (all `src/lib/db/mailboxes.ts`); `updateClientMailreachEnabled` (`src/lib/db/clients.ts`); `MailboxSummary` gains the 6 mailreach fields. Consumed by Task 5 (`enrollment.ts`), Task 6-7 (routes), Task 9 (client PATCH), Task 11 (sync).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `src/lib/db/mailboxes.test.ts` (same file, new `describe` blocks — reuse the existing `mockUpdate`/`mockUpdateChain`/`mockIn` helpers already defined at the top of the file):
 
@@ -735,12 +735,12 @@ describe('updateClientMailreachEnabled', () => {
 
 (Add the matching `import { updateClientMailreachEnabled } from './clients'` to that test file's import block.)
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/db/mailboxes.test.ts src/lib/db/clients.test.ts`
 Expected: FAIL — the new exports don't exist yet.
 
-- [ ] **Step 3: Implement — `src/lib/db/mailboxes.ts`**
+- [x] **Step 3: Implement — `src/lib/db/mailboxes.ts`**
 
 Add near `updateMailboxWarmup`:
 
@@ -863,7 +863,7 @@ export async function listMailboxesForViewer(
 }
 ```
 
-- [ ] **Step 4: Implement — `src/lib/db/clients.ts`**
+- [x] **Step 4: Implement — `src/lib/db/clients.ts`**
 
 Add near `updateClientWarmupProfile`:
 
@@ -886,12 +886,12 @@ export async function updateClientMailreachEnabled(
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/db/mailboxes.test.ts src/lib/db/clients.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Run the type checker**
+- [x] **Step 6: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
@@ -915,7 +915,7 @@ git commit -m "feat: add mailreach db helpers"
 - Consumes: `MailboxRow` (`@/lib/db/mailboxes`), `parseMailboxTokens` (`@/lib/mailbox/tokens`), everything from Task 3's `client.ts`, everything from Task 4's new `mailboxes.ts`/`clients.ts` helpers.
 - Produces: `connectSmtpMailbox(supabase, mailbox, now): Promise<void>`; `oauthAuthorizeUrl(params): string`; `completeOAuthConnectForMailbox(supabase, mailbox, code, now): Promise<void>`; `disconnectMailbox(supabase, mailbox): Promise<void>`; `bulkDisconnectForClient(supabase, clientId): Promise<BulkResult>`; `bulkReconnectSmtpForClient(supabase, clientId, now): Promise<BulkResult>`; `interface BulkResult { attempted: number; succeeded: number; failed: number }`. Consumed by Task 6-7 (routes) and Task 9 (client PATCH bulk toggle).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/lib/mailreach/enrollment.test.ts`:
 
@@ -1069,12 +1069,12 @@ describe('bulkReconnectSmtpForClient', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/mailreach/enrollment.test.ts`
 Expected: FAIL — `./enrollment` does not exist yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/lib/mailreach/enrollment.ts`:
 
@@ -1233,12 +1233,12 @@ export async function bulkReconnectSmtpForClient(
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/mailreach/enrollment.test.ts`
 Expected: PASS, all 10 tests.
 
-- [ ] **Step 5: Run the type checker**
+- [x] **Step 5: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
@@ -1264,7 +1264,7 @@ git commit -m "feat: add mailreach connect/disconnect orchestration"
 - Consumes: `connectSmtpMailbox`, `oauthAuthorizeUrl`, `disconnectMailbox` (Task 5); `getMailboxById`, `updateMailboxMailreachPending` (Task 4/existing).
 - Produces: `POST /api/mailboxes/[id]/mailreach/connect` → `{ ok: true, redirect: false }` (smtp) or `{ ok: true, redirect: true, authorizeUrl }` (gmail/outlook, sets the state cookie); `POST /api/mailboxes/[id]/mailreach/disconnect` → `{ ok: true }`. Consumed by Task 10 (`mailreach-controls.tsx`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/app/api/mailboxes/[id]/mailreach/connect/route.test.ts` (mirrors `pause/route.test.ts`'s mocking style):
 
@@ -1394,12 +1394,12 @@ describe('POST /api/mailboxes/[id]/mailreach/disconnect', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/app/api/mailboxes/[id]/mailreach`
 Expected: FAIL — routes don't exist yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/app/api/mailboxes/mailreach/state-cookie.ts`:
 
@@ -1517,7 +1517,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/app/api/mailboxes/\[id\]/mailreach`
 Expected: PASS, all 8 tests.
@@ -1541,7 +1541,7 @@ git commit -m "feat: add per-mailbox mailreach connect/disconnect routes"
 - Consumes: `completeOAuthConnectForMailbox` (Task 5), `getMailboxById` (existing), `timingSafeEqualString` (`@/lib/auth/timing-safe-equal`, existing), `MAILREACH_OAUTH_STATE_COOKIE` (Task 6).
 - Produces: `GET /api/mailboxes/mailreach/callback` → redirect to `/settings?mailreach=connected` or `/settings?error=...`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/app/api/mailboxes/mailreach/callback/route.test.ts`. Neither `google/callback` nor `outlook/callback` has a test file today, so there's no prior art to match — the shape below (boundary-mocked, real `cookie` header string) is self-contained and consistent with the rest of this plan's route tests:
 
@@ -1606,12 +1606,12 @@ describe('GET /api/mailboxes/mailreach/callback', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/app/api/mailboxes/mailreach/callback/route.test.ts`
 Expected: FAIL — route doesn't exist yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/app/api/mailboxes/mailreach/callback/route.ts`:
 
@@ -1687,7 +1687,7 @@ export async function GET(request: Request) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/app/api/mailboxes/mailreach/callback/route.test.ts`
 Expected: PASS, all 4 tests.
@@ -1711,7 +1711,7 @@ git commit -m "feat: add the mailreach oauth callback route"
 - Consumes: `isEligibleForCampaignSend` (Task 2).
 - Produces: `rotationOrder` now takes `(mailboxes, purpose, now)`; the existing `mailbox.none_healthy` warn log gains a `warmupGatedCount` field.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `src/lib/mailbox/sender.test.ts`, inside `describe('rotation and health', ...)`:
 
@@ -1754,12 +1754,12 @@ Add to `src/lib/mailbox/sender.test.ts`, inside `describe('rotation and health',
 
 Check the top of `sender.test.ts` for the existing `mockMailbox`/`buildSupabase` (or equivalently-named) test helpers already used by the neighboring `rotation and health` tests, and reuse them exactly rather than inventing new ones — match whatever fixture shape `'should skip a blocked mailbox entirely'` already uses, extended with the two new `mailreach_*` fields (defaulting every other existing fixture call to `mailreach_enabled: false, mailreach_started_at: null` implicitly, since those are the fixture's defaults once Task 1's migration fields exist).
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/mailbox/sender.test.ts`
 Expected: FAIL — `rotationOrder` doesn't gate on mailreach yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/lib/mailbox/sender.ts`, add the import:
 
@@ -1825,12 +1825,12 @@ In `sendViaMailbox`, move the `const now = new Date()` declaration up so it's av
 
 Remove the now-duplicate `const now = new Date()` further down (the one that previously preceded the `for (const candidate of ordered)` loop) — there is only one `now` declaration after this change, reused by both `rotationOrder` and the `effectiveDailyCap` call inside the loop.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/mailbox/sender.test.ts`
 Expected: PASS, full file (existing tests plus the two new ones).
 
-- [ ] **Step 5: Run the type checker**
+- [x] **Step 5: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
@@ -1854,7 +1854,7 @@ git commit -m "feat: gate outreach sends on mailreach warmup eligibility"
 - Consumes: `updateClientMailreachEnabled` (Task 4), `bulkDisconnectForClient`, `bulkReconnectSmtpForClient` (Task 5).
 - Produces: `PATCH /api/clients/[clientId]` accepts `{ mailreachEnabled: boolean }`.
 
-- [ ] **Step 1: Extend the existing test file**
+- [x] **Step 1: Extend the existing test file**
 
 `src/app/api/clients/[clientId]/route.test.ts` already exists (137 lines: `PATCH`/`DELETE` describe blocks, mock-function-per-import convention with `xxxMock` names reset in `beforeEach`). Add two new mocks to the top-of-file `vi.fn()` declarations and the `vi.mock('@/lib/db/clients', ...)` factory, add a new `vi.mock('@/lib/mailreach/enrollment', ...)` block, reset the two new mocks in the existing `beforeEach`, and add a new `describe` block. Diff against the current file:
 
@@ -1935,12 +1935,12 @@ describe('PATCH /api/clients/[clientId] — mailreachEnabled', () => {
 
 This reuses the file's existing `req`/`ctx` helper functions — no new test-only helpers needed.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run "src/app/api/clients/[clientId]"`
 Expected: FAIL — `mailreachEnabled` isn't accepted by the schema yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/app/api/clients/[clientId]/route.ts`, add the imports:
 
@@ -1990,12 +1990,12 @@ Add a branch after the existing `if (body.domain !== undefined) { ... }` block, 
     }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run "src/app/api/clients/[clientId]"`
 Expected: PASS.
 
-- [ ] **Step 5: Run the type checker**
+- [x] **Step 5: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
@@ -2019,7 +2019,7 @@ git commit -m "feat: add the client-level mailreach master switch"
 - Consumes: `mailreachElapsedDays`, `MAILREACH_CAMPAIGN_GATE_DAYS` (Task 2); `POST /api/mailboxes/[id]/mailreach/connect` and `.../disconnect` (Task 6).
 - Produces: visible mailreach status text (both roles); operator-only checkbox.
 
-- [ ] **Step 1: Implement `MailreachControls`**
+- [x] **Step 1: Implement `MailreachControls`**
 
 Create `src/app/(app)/settings/mailreach-controls.tsx`:
 
@@ -2106,7 +2106,7 @@ export function MailreachControls({ id, provider, enabled }: MailreachControlsPr
 }
 ```
 
-- [ ] **Step 2: Extend `MailboxRow` to show the status and mount the controls**
+- [x] **Step 2: Extend `MailboxRow` to show the status and mount the controls**
 
 In `src/app/(app)/settings/mailbox-row.tsx`, add the import and props:
 
@@ -2191,7 +2191,7 @@ In the component body, compute it and render it next to the existing cap/ramp te
       ) : null}
 ```
 
-- [ ] **Step 3: Pass the new fields from `page.tsx`**
+- [x] **Step 3: Pass the new fields from `page.tsx`**
 
 In `src/app/(app)/settings/page.tsx`, extend the `<MailboxRow ... />` call:
 
@@ -2215,12 +2215,12 @@ In `src/app/(app)/settings/page.tsx`, extend the `<MailboxRow ... />` call:
                 />
 ```
 
-- [ ] **Step 4: Run the type checker**
+- [x] **Step 4: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full lint pass**
+- [x] **Step 5: Run the full lint pass**
 
 Run: `pnpm eslint src/app/\(app\)/settings`
 Expected: PASS.
@@ -2247,7 +2247,7 @@ git commit -m "feat: add per-mailbox mailreach controls to /settings"
 **Interfaces:**
 - Consumes: `PATCH /api/clients/[clientId]` with `{ mailreachEnabled }` (Task 9).
 
-- [ ] **Step 1: Implement `MailreachToggle`**
+- [x] **Step 1: Implement `MailreachToggle`**
 
 Create `src/app/(app)/clients/[id]/mailreach-toggle.tsx` (mirrors `warmup-profile-select.tsx`'s PATCH pattern exactly):
 
@@ -2306,7 +2306,7 @@ export function MailreachToggle({ clientId, enabled }: MailreachToggleProps): Re
 }
 ```
 
-- [ ] **Step 2: Mount it on the client detail page**
+- [x] **Step 2: Mount it on the client detail page**
 
 In `src/app/(app)/clients/[id]/page.tsx`, add the import next to `WarmupProfileSelect`:
 
@@ -2324,7 +2324,7 @@ Render it in the header controls row, next to the existing `WarmupProfileSelect`
           </div>
 ```
 
-- [ ] **Step 3: Run the type checker**
+- [x] **Step 3: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.
@@ -2354,7 +2354,7 @@ git commit -m "feat: add the client-level mailreach master switch to the client 
 - Consumes: `listMailreachConnectedMailboxes`, `updateMailboxMailreachStats` (Task 4); `getAccountStats` (Task 3).
 - Produces: `runMailreachStatsSync(supabase, { now }): Promise<{ evaluated: number; failed: number }>`; `POST /api/pipeline/mailreach-sync` (QStash-signed cron entry).
 
-- [ ] **Step 1: Write the failing pipeline test**
+- [x] **Step 1: Write the failing pipeline test**
 
 Create `src/lib/pipeline/mailreach-sync.test.ts` (mirrors `mailbox-health.test.ts`'s shape):
 
@@ -2415,12 +2415,12 @@ describe('runMailreachStatsSync', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/lib/pipeline/mailreach-sync.test.ts`
 Expected: FAIL — module doesn't exist yet.
 
-- [ ] **Step 3: Implement the sync sweep**
+- [x] **Step 3: Implement the sync sweep**
 
 Create `src/lib/pipeline/mailreach-sync.ts`:
 
@@ -2471,12 +2471,12 @@ export async function runMailreachStatsSync(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/lib/pipeline/mailreach-sync.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing route test**
+- [x] **Step 5: Write the failing route test**
 
 Create `src/app/api/pipeline/mailreach-sync/route.test.ts` (mirrors `mailbox-health/route.ts`'s pattern — check for an existing `.test.ts` next to it first and copy its shape if present):
 
@@ -2518,12 +2518,12 @@ describe('POST /api/pipeline/mailreach-sync', () => {
 })
 ```
 
-- [ ] **Step 6: Run the test to verify it fails**
+- [x] **Step 6: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/app/api/pipeline/mailreach-sync/route.test.ts`
 Expected: FAIL — route doesn't exist yet.
 
-- [ ] **Step 7: Implement the route**
+- [x] **Step 7: Implement the route**
 
 Create `src/app/api/pipeline/mailreach-sync/route.ts`:
 
@@ -2559,12 +2559,12 @@ export async function POST(request: Request) {
 }
 ```
 
-- [ ] **Step 8: Run the test to verify it passes**
+- [x] **Step 8: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/app/api/pipeline/mailreach-sync/route.test.ts`
 Expected: PASS.
 
-- [ ] **Step 9: Add the schedule script**
+- [x] **Step 9: Add the schedule script**
 
 Create `scripts/schedule-mailreach-sync-cron.ts`:
 
@@ -2589,7 +2589,7 @@ main().catch((err) => {
 })
 ```
 
-- [ ] **Step 10: Run the type checker**
+- [x] **Step 10: Run the type checker**
 
 Run: `pnpm tsc --noEmit`
 Expected: PASS.

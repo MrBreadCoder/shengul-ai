@@ -5,12 +5,20 @@ import {
   updateMailboxOauth,
   listMailboxesByIds,
   claimMailboxSend,
+  claimMailboxSendUncapped,
   resetDailyCounters,
   listAllMailboxes,
   updateInboundCursor,
   setMailboxHealth,
   mailboxSendStats,
   updateMailboxWarmup,
+  updateMailboxMailreachPending,
+  updateMailboxMailreachConnected,
+  updateMailboxMailreachDisconnected,
+  clearMailboxMailreachConnection,
+  updateMailboxMailreachStats,
+  listMailboxesForClient,
+  listMailreachConnectedMailboxes,
 } from './mailboxes'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -239,5 +247,111 @@ describe('updateInboundCursor', () => {
       from: () => ({ update: () => ({ eq: () => Promise.resolve({ error: { message: 'boom' } }) }) }),
     } as never
     await expect(updateInboundCursor(supabase, 'm1', 'cur')).rejects.toMatchObject({ code: 'DB_ERROR' })
+  })
+})
+
+describe('claimMailboxSendUncapped', () => {
+  it('should claim through the uncapped RPC and return the updated row', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: [{ id: 'm1', sent_today: 99 }], error: null })
+    const supabase = { rpc } as never
+
+    const result = await claimMailboxSendUncapped(supabase, 'm1')
+
+    expect(result).toEqual({ id: 'm1', sent_today: 99 })
+    expect(rpc).toHaveBeenCalledWith('claim_mailbox_send_uncapped', { p_mailbox_id: 'm1' })
+  })
+
+  it('should return null when the mailbox is blocked', async () => {
+    const supabase = { rpc: () => Promise.resolve({ data: [], error: null }) } as never
+    await expect(claimMailboxSendUncapped(supabase, 'm1')).resolves.toBeNull()
+  })
+
+  it('should throw DB_ERROR when the RPC fails', async () => {
+    const supabase = { rpc: () => Promise.resolve({ data: null, error: { message: 'boom' } }) } as never
+    await expect(claimMailboxSendUncapped(supabase, 'm1')).rejects.toMatchObject({ code: 'DB_ERROR' })
+  })
+})
+
+describe('updateMailboxMailreachPending', () => {
+  it('should set status to pending', async () => {
+    await expect(updateMailboxMailreachPending(mockUpdate({ error: null }), 'm1')).resolves.toBeUndefined()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(updateMailboxMailreachPending(mockUpdate({ error: { message: 'boom' } }), 'm1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateMailboxMailreachConnected', () => {
+  it('should persist the account id, status, and started-at', async () => {
+    await expect(
+      updateMailboxMailreachConnected(mockUpdate({ error: null }), 'm1', {
+        mailreach_account_id: 'acc_1',
+        mailreach_status: 'connected',
+        mailreach_started_at: '2026-07-29T00:00:00.000Z',
+        mailreach_enabled: true,
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(
+      updateMailboxMailreachConnected(mockUpdate({ error: { message: 'boom' } }), 'm1', {
+        mailreach_account_id: 'acc_1',
+        mailreach_status: 'connected',
+        mailreach_started_at: '2026-07-29T00:00:00.000Z',
+        mailreach_enabled: true,
+      }),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateMailboxMailreachDisconnected', () => {
+  it('should clear the connection and the enrollment intent', async () => {
+    await expect(updateMailboxMailreachDisconnected(mockUpdate({ error: null }), 'm1')).resolves.toBeUndefined()
+  })
+})
+
+describe('clearMailboxMailreachConnection', () => {
+  it('should clear the connection but leave enrollment intent untouched', async () => {
+    await expect(clearMailboxMailreachConnection(mockUpdate({ error: null }), 'm1')).resolves.toBeUndefined()
+  })
+})
+
+describe('updateMailboxMailreachStats', () => {
+  it('should persist the reputation score and sync timestamp', async () => {
+    await expect(
+      updateMailboxMailreachStats(mockUpdate({ error: null }), 'm1', {
+        reputationScore: 94,
+        syncedAt: '2026-07-29T00:00:00.000Z',
+      }),
+    ).resolves.toBeUndefined()
+  })
+})
+
+describe('listMailboxesForClient', () => {
+  it('should return every mailbox for the client', async () => {
+    const rows = [{ id: 'm1' }, { id: 'm2' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    await expect(listMailboxesForClient(supabase, 'c1')).resolves.toEqual(rows)
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(listMailboxesForClient(supabase, 'c1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listMailreachConnectedMailboxes', () => {
+  it('should return every connected mailbox', async () => {
+    const rows = [{ id: 'm1', mailreach_status: 'connected' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    await expect(listMailreachConnectedMailboxes(supabase)).resolves.toEqual(rows)
   })
 })

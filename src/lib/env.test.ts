@@ -19,6 +19,7 @@ const complete: Record<string, string> = {
   GEMINI_API_KEY: 'gem',
   APOLLO_API_KEY: 'apollo-key',
   EMAILABLE_API_KEY: 'emailable-key',
+  MAILREACH_API_KEY: 'mailreach-key',
 }
 
 describe('loadEnv', () => {

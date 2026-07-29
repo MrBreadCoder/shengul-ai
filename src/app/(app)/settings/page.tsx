@@ -90,6 +90,10 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
                   dailyCap={mailbox.daily_cap}
                   sentToday={mailbox.sent_today}
                   viewerRole={appUser.role}
+                  mailreachEnabled={mailbox.mailreach_enabled}
+                  mailreachStartedAt={mailbox.mailreach_started_at}
+                  mailreachStatus={mailbox.mailreach_status}
+                  mailreachReputationScore={mailbox.mailreach_reputation_score}
                 />
               </li>
             ))}

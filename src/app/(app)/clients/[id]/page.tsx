@@ -30,6 +30,7 @@ import { LogoUpload } from './logo-upload'
 import { ClientLifecycleActions } from './client-lifecycle-actions'
 import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
+import { MailreachToggle } from './mailreach-toggle'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
 import { KnowledgeSourcesList } from './knowledge-sources-list'
@@ -158,6 +159,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           <div className="flex flex-wrap items-center gap-3">
             <ClientLifecycleActions clientId={client.id} status={client.status} />
             <WarmupProfileSelect clientId={client.id} value={client.warmup_profile} />
+            <MailreachToggle clientId={client.id} enabled={client.mailreach_enabled} />
           </div>
           <DeleteClientDialog
             clientId={client.id}

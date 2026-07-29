@@ -131,3 +131,49 @@ export async function isSequenceActiveForLead(
   }
   return data !== null
 }
+
+// A human interjected into this lead's cadence: mark the next scheduled step to
+// be skipped when its QStash message fires. Guarded on 'active' — a stopped or
+// completed sequence has no next step to skip. Idempotent by construction: two
+// manual sends before the next firing still skip exactly one step, which is the
+// intended reading of "don't let the agent talk over me".
+export async function requestFollowupSkip(
+  supabase: SupabaseClient<Database>,
+  leadId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('sequences')
+    .update({ skip_next_step: true })
+    .eq('lead_id', leadId)
+    .eq('state', 'active')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to request follow-up skip', { leadId, cause: error.message })
+  }
+}
+
+// Claims the pending skip. The `.eq('skip_next_step', true)` guard is what makes
+// this a claim rather than a write: a duplicate QStash delivery that arrives
+// after the flag was consumed matches no row, gets false, and must not enqueue a
+// second copy of the next step.
+//
+// Deliberately does NOT advance current_step. The caller advances only after the
+// next step is successfully enqueued, so a publish failure leaves the sequence
+// at step N-1 with the flag gone — the QStash retry then sends a real nudge
+// instead of skipping. Losing a skip is strictly better than a cadence that
+// silently ends.
+export async function consumeFollowupSkip(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('sequences')
+    .update({ skip_next_step: false })
+    .eq('id', id)
+    .eq('state', 'active')
+    .eq('skip_next_step', true)
+    .select('id')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to consume follow-up skip', { id, cause: error.message })
+  }
+  return (data?.length ?? 0) > 0
+}

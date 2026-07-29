@@ -4,15 +4,18 @@ import { AppError, isAppError } from '@/lib/errors/app-error'
 import {
   listMailboxesByIds,
   claimMailboxSend,
+  claimMailboxSendUncapped,
   updateMailboxOauth,
   setMailboxHealth,
   type MailboxRow,
 } from '@/lib/db/mailboxes'
 import { getSuppression } from '@/lib/db/suppressions'
+import { getClientById } from '@/lib/db/clients'
 import { getMailboxProvider } from '@/lib/mailbox/registry'
 import type { EmailAttachment } from '@/lib/mailbox/attachments'
 import { parseMailboxTokens, encryptMailboxTokens } from '@/lib/mailbox/tokens'
 import { effectiveDailyCap } from '@/lib/mailbox/warmup'
+import { isEligibleForCampaignSend } from '@/lib/mailbox/mailreach-gate'
 import { HEALTH_REASON } from '@/lib/mailbox/health'
 import { logEventSafe, logWarn } from '@/lib/events/log-event'
 import { withExternalLogging } from '@/lib/events/with-external-logging'
@@ -40,6 +43,22 @@ export interface SendViaMailboxInput {
   // Replies only — see src/lib/pipeline/reply.ts. Rotation, cap-claiming and
   // jitter are unaffected; this is a pure passthrough to the provider.
   attachments?: readonly EmailAttachment[]
+  /**
+   * Claims a mailbox regardless of sent_today. Human-written mail sets this so
+   * a client can always answer or write to a prospect even when the agent used
+   * the day's quota that morning. Independent of bypassMailreachGate below —
+   * a caller that only needs to skip the daily cap (a retry/resend path, say)
+   * must not also silently exempt an unwarmed mailbox from the reputation
+   * gate. Health, rotation and suppression are unaffected.
+   */
+  bypassDailyCap?: boolean
+  /**
+   * Skips the mailreach warmup gate for an 'outreach' send. Human-written mail
+   * sets this alongside bypassDailyCap — that gate throttles the agent's own
+   * automated volume, not a one-off manual email — but the two are separate
+   * flags on purpose: bypassing one must never silently bypass the other.
+   */
+  bypassMailreachGate?: boolean
   maxJitterMs?: number
 }
 
@@ -55,10 +74,32 @@ function sleep(ms: number): Promise<void> {
 
 // Rotation: least-used-first, so sends spread evenly across a campaign's
 // mailboxes and warm them uniformly. 'warning' is a soft flag that still sends;
-// only 'blocked' takes a mailbox out of rotation.
-function rotationOrder(mailboxes: MailboxRow[]): MailboxRow[] {
+// only 'blocked' takes a mailbox out of rotation. The mailreach gate only
+// applies to automated 'outreach' — a reply is allowed regardless of warmup
+// state, same as it bypasses most suppression rules, and so is a human-written
+// manual send (bypassDailyCap): the gate exists to protect a mailbox's
+// reputation from the agent's own volume, not to stop a client answering one
+// prospect by hand.
+function rotationOrder(
+  mailboxes: MailboxRow[],
+  purpose: SendPurpose,
+  bypassGate: boolean,
+  clientMailreachEnabled: boolean,
+  now: Date,
+): MailboxRow[] {
   return [...mailboxes]
     .filter((m) => m.health !== 'blocked')
+    .filter(
+      (m) =>
+        purpose !== 'outreach' ||
+        bypassGate ||
+        isEligibleForCampaignSend({
+          mailreachEnabled: m.mailreach_enabled,
+          clientMailreachEnabled,
+          mailreachStartedAt: m.mailreach_started_at,
+          now,
+        }),
+    )
     .sort((a, b) => a.sent_today - b.sent_today)
 }
 
@@ -92,8 +133,25 @@ export async function sendViaMailbox(
   }
 
   const mailboxes = await listMailboxesByIds(supabase, input.mailboxIds)
-  const ordered = rotationOrder(mailboxes)
+  const client = await getClientById(supabase, input.clientId)
+  const clientMailreachEnabled = client?.mailreach_enabled ?? false
+  const now = new Date()
+  const bypassGate = input.bypassMailreachGate ?? false
+  const ordered = rotationOrder(mailboxes, input.purpose, bypassGate, clientMailreachEnabled, now)
   if (ordered.length === 0) {
+    const warmupGatedCount =
+      input.purpose === 'outreach' && !bypassGate
+        ? mailboxes.filter(
+            (m) =>
+              m.health !== 'blocked' &&
+              !isEligibleForCampaignSend({
+                mailreachEnabled: m.mailreach_enabled,
+                clientMailreachEnabled,
+                mailreachStartedAt: m.mailreach_started_at,
+                now,
+              }),
+          ).length
+        : 0
     const error = new AppError('RATE_LIMITED', 'No healthy mailbox available', { clientId: input.clientId })
     // A warning, not an error: this is an expected daily-cap/health condition
     // the pipeline handles, but the operator still needs to see that this
@@ -104,20 +162,24 @@ export async function sendViaMailbox(
       type: 'mailbox.none_healthy',
       source: 'mailbox',
       error,
-      payload: { mailboxCount: mailboxes.length },
+      payload: { mailboxCount: mailboxes.length, warmupGatedCount },
     })
     throw error
   }
 
-  const now = new Date()
   for (const candidate of ordered) {
-    const cap = effectiveDailyCap({
-      profile: candidate.warmup_profile,
-      warmupStartedAt: candidate.warmup_started_at,
-      dailyCap: candidate.daily_cap,
-      now,
-    })
-    const claimed = await claimMailboxSend(supabase, candidate.id, cap)
+    const claimed = input.bypassDailyCap
+      ? await claimMailboxSendUncapped(supabase, candidate.id)
+      : await claimMailboxSend(
+          supabase,
+          candidate.id,
+          effectiveDailyCap({
+            profile: candidate.warmup_profile,
+            warmupStartedAt: candidate.warmup_started_at,
+            dailyCap: candidate.daily_cap,
+            now,
+          }),
+        )
     if (!claimed) continue // at cap for today, or turned unhealthy — try the next
 
     const tokens = parseMailboxTokens(claimed.oauth, claimed.id)

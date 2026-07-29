@@ -19,7 +19,9 @@ vi.mock('@/lib/db/clients', () => ({
   listClientRoleAppUsers: (...a: unknown[]) => listClientRoleAppUsersMock(...a),
 }))
 vi.mock('@/lib/supabase/auth-admin', () => ({ deleteAuthUsers: (...a: unknown[]) => deleteAuthUsersMock(...a) }))
-vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
+vi.mock('@/lib/events/log-event', () => ({
+  logEvent: (...a: unknown[]) => logEventMock(...a),
+}))
 
 import { PATCH, DELETE } from './route'
 

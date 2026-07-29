@@ -20,6 +20,8 @@ interface EmailMessageProps {
   /** `sent_at` when the mail went out, otherwise `created_at`. */
   timestamp: string
   now: Date
+  /** Outbound only: true when a person wrote it, false/absent when the agent did. */
+  sentByHuman?: boolean
   className?: string
 }
 
@@ -31,6 +33,7 @@ export function EmailMessage({
   sequenceStep,
   timestamp,
   now,
+  sentByHuman = false,
   className,
 }: EmailMessageProps): React.ReactElement {
   const isInbound = direction === 'inbound'
@@ -64,7 +67,7 @@ export function EmailMessage({
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium">{subject ?? '(no subject)'}</p>
           <p className="text-faint text-[11px]">
-            {isInbound ? 'Reply received' : 'Sent by agent'}
+            {isInbound ? 'Reply received' : sentByHuman ? 'Sent by a person' : 'Sent by agent'}
             {sequenceStep !== null ? ` · step ${sequenceStep}` : ''}
           </p>
         </div>

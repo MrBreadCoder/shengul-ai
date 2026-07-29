@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const getSequenceByIdMock = vi.fn()
+const consumeFollowupSkipMock = vi.fn()
 const hasInboundReplyMock = vi.fn()
 const stopSequenceMock = vi.fn()
 const advanceSequenceMock = vi.fn()
@@ -21,6 +22,7 @@ vi.mock('@/lib/db/sequences', () => ({
   getSequenceById: (...a: unknown[]) => getSequenceByIdMock(...a),
   stopSequence: (...a: unknown[]) => stopSequenceMock(...a),
   advanceSequence: (...a: unknown[]) => advanceSequenceMock(...a),
+  consumeFollowupSkip: (...a: unknown[]) => consumeFollowupSkipMock(...a),
 }))
 vi.mock('@/lib/db/emails', () => ({
   hasInboundReply: (...a: unknown[]) => hasInboundReplyMock(...a),
@@ -39,7 +41,7 @@ vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) 
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 
-import { runFollowupStep } from './followup'
+import { runFollowupStep, FOLLOWUP_DELAYS_SECONDS } from './followup'
 
 const sequence = { id: 'seq1', client_id: 'c1', case_id: 'case1', lead_id: 'lead1', current_step: 0, state: 'active' }
 const lead = { id: 'lead1', email: 'jane@acme.com', full_name: 'Jane', title: 'CTO' }
@@ -48,8 +50,9 @@ beforeEach(() => {
   for (const m of [getSequenceByIdMock, hasInboundReplyMock, stopSequenceMock, advanceSequenceMock,
     getLeadByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock, markEmailFailedMock,
     isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock, updateCaseStatusMock,
-    publishDelayMock, logEventMock]) m.mockReset()
-  getSequenceByIdMock.mockResolvedValue(sequence)
+    publishDelayMock, logEventMock, consumeFollowupSkipMock]) m.mockReset()
+  getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
+  consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
   getLeadByIdMock.mockResolvedValue(lead)
   isSuppressedMock.mockResolvedValue(false)
@@ -130,5 +133,91 @@ describe('runFollowupStep', () => {
       { sequenceId: 'seq1', step: 1 },
       expect.any(Number),
     )
+  })
+})
+
+describe('runFollowupStep — manual-send skip', () => {
+  it('should send nothing, consume the flag and enqueue the next step', async () => {
+    consumeFollowupSkipMock.mockResolvedValue(true)
+    publishDelayMock.mockResolvedValue('qmsg-next')
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('skipped')
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(consumeFollowupSkipMock).toHaveBeenCalledWith(expect.anything(), 'seq1')
+    // Step 2 enqueued at the step-1 delay index (7 days).
+    expect(publishDelayMock).toHaveBeenCalledWith(
+      '/api/pipeline/followup',
+      { sequenceId: 'seq1', step: 2 },
+      FOLLOWUP_DELAYS_SECONDS[1],
+    )
+    expect(advanceSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', {
+      currentStep: 1, nextActionAt: null, qstashMessageId: 'qmsg-next',
+    })
+  })
+
+  it('should not enqueue twice when another delivery already consumed the flag', async () => {
+    consumeFollowupSkipMock.mockResolvedValue(false)
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('skipped')
+    expect(publishDelayMock).not.toHaveBeenCalled()
+    expect(advanceSequenceMock).not.toHaveBeenCalled()
+  })
+
+  it('should stop the sequence on a skipped final step without killing the case', async () => {
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2 })
+    consumeFollowupSkipMock.mockResolvedValue(true)
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
+
+    expect(result.action).toBe('skipped')
+    expect(stopSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', 'stopped')
+    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(publishDelayMock).not.toHaveBeenCalled()
+  })
+
+  it('should let an inbound reply win over a pending skip', async () => {
+    consumeFollowupSkipMock.mockResolvedValue(true)
+    hasInboundReplyMock.mockResolvedValue(true)
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('completed')
+    expect(consumeFollowupSkipMock).not.toHaveBeenCalled()
+  })
+
+  it('should postpone the skip while the campaign is paused', async () => {
+    consumeFollowupSkipMock.mockResolvedValue(true)
+    getCampaignForCaseMock.mockResolvedValue({ mailbox_ids: ['m1'], value_prop: 'v', status: 'paused' })
+    publishDelayMock.mockResolvedValue('qmsg-retry')
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('skipped')
+    expect(consumeFollowupSkipMock).not.toHaveBeenCalled()
+    // Same step re-queued, so the skip is still pending when the client resumes.
+    expect(publishDelayMock).toHaveBeenCalledWith(
+      '/api/pipeline/followup', { sequenceId: 'seq1', step: 1 }, expect.any(Number),
+    )
+  })
+
+  it('should honor a skip requested after this run already loaded a stale sequence snapshot', async () => {
+    // Regression test for the race this fix closes: the initial getSequenceById
+    // read has skip_next_step: false, but a concurrent manual send flips the DB
+    // flag before this run reaches the skip check. consumeFollowupSkip is the
+    // atomic, DB-level source of truth here, not the in-memory `sequence` object.
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
+    consumeFollowupSkipMock.mockResolvedValue(true)
+    publishDelayMock.mockResolvedValue('qmsg-race')
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('skipped')
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+    expect(generateTextMock).not.toHaveBeenCalled()
   })
 })

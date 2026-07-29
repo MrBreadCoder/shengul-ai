@@ -7,6 +7,8 @@ import {
   pauseActiveSequenceForLead,
   stopSequenceForLead,
   isSequenceActiveForLead,
+  requestFollowupSkip,
+  consumeFollowupSkip,
 } from './sequences'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -160,5 +162,71 @@ describe('isSequenceActiveForLead', () => {
     await expect(
       isSequenceActiveForLead(mockMaybeSingle({ data: null, error: { message: 'boom' } }), 'lead1'),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('requestFollowupSkip', () => {
+  it('should set the flag only on the lead\'s active sequence', async () => {
+    const stateEq = vi.fn().mockResolvedValue({ error: null })
+    const leadEq = vi.fn().mockReturnValue({ eq: stateEq })
+    const update = vi.fn().mockReturnValue({ eq: leadEq })
+    const supabase = { from: () => ({ update }) } as never
+
+    await requestFollowupSkip(supabase, 'lead1')
+
+    expect(update).toHaveBeenCalledWith({ skip_next_step: true })
+    expect(leadEq).toHaveBeenCalledWith('lead_id', 'lead1')
+    expect(stateEq).toHaveBeenCalledWith('state', 'active')
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const supabase = {
+      from: () => ({
+        update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: { message: 'boom' } }) }) }),
+      }),
+    } as never
+    await expect(requestFollowupSkip(supabase, 'lead1')).rejects.toMatchObject({ code: 'DB_ERROR' })
+  })
+})
+
+describe('consumeFollowupSkip', () => {
+  it('should clear the flag and report the win', async () => {
+    const select = vi.fn().mockResolvedValue({ data: [{ id: 'seq1' }], error: null })
+    const flagEq = vi.fn().mockReturnValue({ select })
+    const stateEq = vi.fn().mockReturnValue({ eq: flagEq })
+    const idEq = vi.fn().mockReturnValue({ eq: stateEq })
+    const update = vi.fn().mockReturnValue({ eq: idEq })
+    const supabase = { from: () => ({ update }) } as never
+
+    await expect(consumeFollowupSkip(supabase, 'seq1')).resolves.toBe(true)
+
+    expect(update).toHaveBeenCalledWith({ skip_next_step: false })
+    expect(idEq).toHaveBeenCalledWith('id', 'seq1')
+    expect(stateEq).toHaveBeenCalledWith('state', 'active')
+    expect(flagEq).toHaveBeenCalledWith('skip_next_step', true)
+  })
+
+  it('should report false when another delivery already consumed the flag', async () => {
+    const supabase = {
+      from: () => ({
+        update: () => ({
+          eq: () => ({ eq: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [], error: null }) }) }) }),
+        }),
+      }),
+    } as never
+    await expect(consumeFollowupSkip(supabase, 'seq1')).resolves.toBe(false)
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const supabase = {
+      from: () => ({
+        update: () => ({
+          eq: () => ({
+            eq: () => ({ eq: () => ({ select: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+          }),
+        }),
+      }),
+    } as never
+    await expect(consumeFollowupSkip(supabase, 'seq1')).rejects.toMatchObject({ code: 'DB_ERROR' })
   })
 })

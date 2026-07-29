@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   claimOutboundEmail,
+  insertManualEmail,
   claimDraftForSend,
   markEmailSent,
   markEmailFailed,
@@ -340,5 +341,35 @@ describe('markLatestOutboundBounced', () => {
     await expect(
       markLatestOutboundBounced(mockBounceTarget({ data: null, error: { message: 'boom' } }, { data: [], error: null }), 'l1'),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('insertManualEmail', () => {
+  it('should insert the row and return it', async () => {
+    const insert = vi.fn().mockReturnValue({
+      select: () => ({ single: () => Promise.resolve({ data: { id: 'e9' }, error: null }) }),
+    })
+    const supabase = { from: () => ({ insert }) } as never
+
+    const result = await insertManualEmail(supabase, {
+      client_id: 'c1', case_id: 'case1', lead_id: 'lead1', direction: 'outbound',
+      subject: 's', body: 'b', status: 'queued', sequence_step: null, sent_by: 'u1',
+    })
+
+    expect(result).toEqual({ id: 'e9' })
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ sequence_step: null, sent_by: 'u1' }))
+  })
+
+  it('should throw DB_ERROR when the insert fails', async () => {
+    const supabase = {
+      from: () => ({
+        insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+      }),
+    } as never
+    await expect(
+      insertManualEmail(supabase, {
+        client_id: 'c1', direction: 'outbound', status: 'queued',
+      }),
+    ).rejects.toMatchObject({ code: 'DB_ERROR' })
   })
 })
