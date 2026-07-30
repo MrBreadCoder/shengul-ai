@@ -1,5 +1,4 @@
 import type { LegalDocument } from '@/lib/legal/document'
-import { LEGAL_UPDATED_AT } from '@/lib/legal/document'
 import {
   CONTACT_ADDRESS_INLINE,
   CONTACT_EMAIL,
@@ -22,7 +21,7 @@ export const privacyPolicy: LegalDocument = {
   description:
     'How Shengul AI collects and uses personal information — both for the people who hold accounts and for the business contacts our outbound service reaches.',
   summary: `This notice explains what ${LEGAL_ENTITY} does with personal information when you use ${PRODUCT_NAME}, and what we do with the business-contact information we process on behalf of our clients when we run outbound campaigns for them.`,
-  updatedAt: LEGAL_UPDATED_AT,
+  updatedAt: '2026-07-29',
   sections: [
     {
       id: 'who-this-covers',
@@ -436,7 +435,7 @@ export const privacyPolicy: LegalDocument = {
       blocks: [
         {
           kind: 'paragraph',
-          text: 'The public site and the console set only the cookies strictly necessary to sign you in and keep you signed in. We do not use analytics cookies, advertising cookies, or any third-party tracking technology. The full list is at /legal/cookie-policy.',
+          text: 'The public site and the console always set the cookies strictly necessary to sign you in and keep you signed in. We also run Google Tag Manager, which can load analytics cookies — but only after you accept them in the on-site consent banner, and only for aggregate usage measurement. We do not use advertising cookies, we do not use analytics for advertising or ad personalization, and no third-party tracking runs before you have consented to it. The full list, and how to withdraw consent, is at /legal/cookie-policy.',
         },
         {
           kind: 'paragraph',

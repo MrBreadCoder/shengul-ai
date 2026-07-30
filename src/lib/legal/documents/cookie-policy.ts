@@ -1,23 +1,23 @@
 import type { LegalDocument } from '@/lib/legal/document'
-import { LEGAL_UPDATED_AT } from '@/lib/legal/document'
 import { CONTACT_EMAIL, PRODUCT_NAME } from '@/lib/legal/contact'
 
 /**
  * The cookie notice.
  *
- * Short because the truth is short: this site runs no analytics, no advertising
- * and no third-party tracking, so the only cookies it sets are the ones that
- * make signing in work. The previous version of this document described a
- * Google Analytics install, an advertising stack and a consent manager, none of
- * which exist — claiming tracking you do not do is its own privacy problem.
+ * Four cookies are strictly necessary and always set. A fifth category —
+ * analytics, run through Google Tag Manager — only ever activates after a
+ * visitor accepts it in the on-site banner, and never for advertising. The
+ * previous version of this document claimed no tracking of any kind; that
+ * stopped being true the day GTM was installed, so this version says exactly
+ * what runs and exactly what is gated behind consent.
  */
 export const cookiePolicy: LegalDocument = {
   slug: 'cookie-policy',
   title: 'Cookie Notice',
   description:
-    'Shengul AI sets only the cookies needed to sign you in and keep you signed in. No analytics, no advertising, no third-party tracking, no pixels in our email.',
-  summary: `This notice lists every cookie ${PRODUCT_NAME} sets and what each one does. There are four, they are all strictly necessary, and none of them tracks you across other websites.`,
-  updatedAt: LEGAL_UPDATED_AT,
+    'Shengul AI sets four sign-in cookies always, plus analytics cookies only if you accept them in the on-site banner. No advertising, ever.',
+  summary: `This notice lists every cookie ${PRODUCT_NAME} sets and what each one does. Four are strictly necessary and always on. Analytics cookies exist too, but only after you say yes.`,
+  updatedAt: '2026-07-29',
   sections: [
     {
       id: 'what-we-set',
@@ -25,11 +25,11 @@ export const cookiePolicy: LegalDocument = {
       blocks: [
         {
           kind: 'paragraph',
-          text: 'A cookie is a small file a website asks your browser to keep. We use them for one job: to know that a request to the console comes from someone who has already signed in, so you are not asked for your password on every page.',
+          text: 'A cookie is a small file a website asks your browser to keep. Four of ours exist for one job: to know that a request to the console comes from someone who has already signed in, so you are not asked for your password on every page. Those are set automatically and cannot be switched off without signing out.',
         },
         {
           kind: 'callout',
-          text: 'We run no analytics, no advertising, no A/B testing and no third-party tracking of any kind. No other company sets a cookie through this site. Because every cookie below is strictly necessary to a service you asked for, there is no consent banner — there is nothing to consent to, and nothing to switch off that would leave the service working.',
+          text: 'We also run Google Tag Manager (GTM), a tag-management container that can load analytics tools such as Google Analytics. GTM itself is not an advertising product and we do not use it for advertising, ad personalization, or selling data. Any tag it loads is blocked by default and only switches on after you click "Accept analytics" in the banner shown on your first visit — see the next section for how that works and how to change your mind later.',
         },
       ],
     },
@@ -37,6 +37,10 @@ export const cookiePolicy: LegalDocument = {
       id: 'the-list',
       heading: '2. The complete list',
       blocks: [
+        {
+          kind: 'paragraph',
+          text: 'Strictly necessary — always set, cannot be declined without signing out:',
+        },
         {
           kind: 'table',
           columns: ['Name', 'Purpose', 'Set by', 'Expires'],
@@ -73,7 +77,27 @@ export const cookiePolicy: LegalDocument = {
         },
         {
           kind: 'paragraph',
-          text: 'The public marketing page sets no cookies at all. You can read it without ever being identified.',
+          text: 'Analytics — only set once you accept them in the banner:',
+        },
+        {
+          kind: 'table',
+          columns: ['Name', 'Purpose', 'Set by', 'Expires'],
+          rows: [
+            [
+              '_ga, _ga_*, _gid (if enabled)',
+              'Google Analytics cookies that distinguish one visitor session from another, so we can see aggregate usage such as which pages get read. We do not configure Google Analytics or any other tag to build advertising profiles.',
+              'Google, via our GTM container, only after consent',
+              'Up to 13 months (Google\'s standard expiry — see Google\'s own cookie documentation for the current values)',
+            ],
+          ],
+        },
+        {
+          kind: 'paragraph',
+          text: 'This table lists what the consent banner is capable of switching on. Whether every row is active at any given time depends on what is currently configured inside our GTM container — clicking "Accept analytics" grants permission, it does not by itself guarantee every named cookie is present.',
+        },
+        {
+          kind: 'paragraph',
+          text: 'Alongside cookies, your browser also holds one item of local storage — a key named ai-b2b-consent that records whether you accepted or rejected analytics cookies, so we do not ask again on every visit. It stays in your browser; we never read or receive it.',
         },
       ],
     },
@@ -83,11 +107,11 @@ export const cookiePolicy: LegalDocument = {
       blocks: [
         {
           kind: 'paragraph',
-          text: 'We do not use web beacons, clear GIFs, tracking pixels, fingerprinting, local storage for tracking, or Flash local shared objects.',
+          text: 'We do not use web beacons, clear GIFs, fingerprinting, or Flash local shared objects. We do not run advertising pixels of any kind, on this site or anywhere else.',
         },
         {
           kind: 'callout',
-          text: 'This applies to the emails we send as well. Outbound emails carry no tracking pixel and no rewritten links, so we do not know whether a message was opened or a link was clicked. That is a deliberate product decision, not an oversight: tracking markup is one of the signals that makes cold email look like bulk mail.',
+          text: 'This applies to the emails we send. Outbound emails carry no tracking pixel and no rewritten links, so we do not know whether a message was opened or a link was clicked. That is a deliberate product decision, not an oversight: tracking markup is one of the signals that makes cold email look like bulk mail.',
         },
       ],
     },
@@ -97,11 +121,15 @@ export const cookiePolicy: LegalDocument = {
       blocks: [
         {
           kind: 'paragraph',
-          text: 'Every browser lets you see, block and delete cookies from its settings or privacy menu. Because ours exist only to hold your sign-in, blocking them means the console cannot keep you signed in and will return you to the sign-in page. The public marketing page will work normally.',
+          text: 'Analytics cookies are opt-in: nothing loads until you click "Accept analytics" in the banner. If you click "Reject" or close the banner, they stay off. You can change your mind at any time using the "Cookie preferences" link in the site footer, which withdraws consent as easily as it was given and clears the analytics cookies going forward.',
         },
         {
           kind: 'paragraph',
-          text: 'There is no advertising opt-out to give you, because there is no advertising. If a future change to the service required a cookie that was not strictly necessary, we would ask for your consent before setting it and update this notice first.',
+          text: 'Every browser also lets you see, block and delete cookies from its own settings or privacy menu. Blocking the four strictly-necessary cookies means the console cannot keep you signed in and will return you to the sign-in page; the public marketing page will still work normally either way.',
+        },
+        {
+          kind: 'paragraph',
+          text: 'There is no advertising opt-out to give you, because there is no advertising. If a future change added a cookie that is neither strictly necessary nor covered by the analytics consent above, we would ask first and update this notice before setting it.',
         },
       ],
     },

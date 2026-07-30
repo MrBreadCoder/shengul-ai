@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import { CookiePreferencesButton } from '@/components/cookie-preferences-button'
+import { publicEnv } from '@/lib/env-public'
 import { LEGAL_DOCUMENTS, legalDocumentPath } from '@/lib/legal/registry'
 import { BOOKING_URL } from './constants'
 
@@ -45,6 +47,9 @@ export function SiteFooter(): React.ReactElement {
               {document.title}
             </Link>
           ))}
+          {publicEnv.NEXT_PUBLIC_GTM_ID !== undefined && (
+            <CookiePreferencesButton className={LINK_CLASS} />
+          )}
         </nav>
 
         <p className="mt-8 text-[12px] text-[var(--l-faint)]">

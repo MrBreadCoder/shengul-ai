@@ -1468,3 +1468,73 @@ per the plan's own checklist.
 
 `npx tsc --noEmit` clean, `npx eslint .` clean (same 6 pre-existing unrelated
 warnings), full suite 159 files / 1595 tests passing (was 1580).
+
+---
+
+## Google Tag Manager + Consent Mode v2 (2026-07-29, inline, no commits)
+
+User asked to install GTM (`GTM-T8WVXHJQ`), then "what else should I add for
+page visibility." Before adding SEO extras, caught that
+`src/lib/legal/documents/cookie-policy.ts` and `privacy-policy.ts` §15
+explicitly claimed "no analytics, no third-party tracking, no consent
+banner — there is nothing to consent to." Installing GTM directly
+contradicted the site's own published legal notices, so this became a
+compliance fix, not just a tracking-snippet install. User chose: update the
+legal docs to match reality rather than pull GTM back out.
+
+- `src/lib/env-public.ts` — `NEXT_PUBLIC_GTM_ID` (regex `^GTM-[A-Z0-9]+$`),
+  `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION`, `NEXT_PUBLIC_BING_SITE_VERIFICATION`,
+  all optional so envs without them (tests, preview) don't break.
+- `src/app/layout.tsx` — GTM head script + noscript iframe, both skipped
+  entirely when the env var is unset. Google Consent Mode v2 default
+  (`ad_storage`/`ad_user_data`/`ad_personalization`/`analytics_storage` all
+  `denied`) is set via an inline `gtag` stub *before* GTM's container script,
+  so no tag can fire un-gated on first paint. Ads consent is never exposed
+  as grantable anywhere in this codebase — the product runs no advertising.
+  `metadata.verification` wired for the two search-console tokens, each
+  omitted independently if unset.
+- `src/lib/consent/consent-mode.ts` (new) — `applyConsentDecision`,
+  `readStoredConsent`/`storeConsentDecision` (localStorage key
+  `ai-b2b-consent`), `clearStoredConsent`. Every mutation fires
+  `CONSENT_CHANGE_EVENT` on `window`; nothing calls `setState` inside a
+  `useEffect` body directly (tripped the `react-hooks/set-state-in-effect`
+  lint rule) — `ConsentBanner` instead subscribes via `useSyncExternalStore`,
+  with a `getServerSnapshot` that always returns `'hidden'` so SSR/hydration
+  can never claim a decision the browser hasn't looked up yet.
+- `src/components/consent-banner.tsx` (new) — Accept/Reject bar, only
+  rendered by the root layout when GTM is configured. `src/components/
+  cookie-preferences-button.tsx` (new) — footer control that clears the
+  stored decision so consent can be withdrawn as easily as it was given
+  (GDPR requirement), wired into `site-footer.tsx` behind the same GTM
+  check.
+- `cookie-policy.ts` rewritten: four strictly-necessary cookies unchanged,
+  new conditional analytics-cookie table gated on the consent banner, the
+  `ai-b2b-consent` localStorage key disclosed, "no consent banner" language
+  removed. `privacy-policy.ts` §15 updated to match — still asserts no
+  advertising/no selling/no cross-context sharing, since none of that
+  changed. Both docs given their own literal `updatedAt: '2026-07-29'`
+  instead of the shared `LEGAL_UPDATED_AT` constant (per that constant's own
+  comment: bump per-document once docs start changing independently).
+  Caught and reverted one over-claim mid-edit: drafted a sentence saying GPC
+  is honoured for analytics opt-out specifically, which isn't implemented —
+  removed before landing, keeping the pre-existing GPC claim (sale/sharing
+  opt-out only) unchanged.
+- `.env.local` / `.env.example` — `NEXT_PUBLIC_GTM_ID` filled with the real
+  container id in `.env.local`; the two verification vars left blank
+  everywhere (no real tokens exist yet).
+
+Verified: full suite 160 files / 1611 tests passing (was 1595), `tsc
+--noEmit` clean, `eslint` clean on every touched file (same pre-existing
+unrelated warnings only). Confirmed via a local dev server + curl that the
+consent-default script and GTM tag render only when configured, and that the
+`ConsentBanner` renders nothing in the SSR payload (client-only reveal, by
+design). No component-level DOM test was added — this repo has no React
+Testing Library / jsdom setup for any component, matching `QUALITY.md`'s
+"React components: critical paths only" coverage target; the consent-mode
+logic itself (the part with real branching) is covered at the unit level.
+
+Not done, flagged for the user rather than assumed: no GA4 (or other) tag is
+actually configured inside the GTM container itself — that happens in the
+Google Tag Manager web UI, outside this repo, and nothing here can verify or
+change what tags exist there. The cookie-policy analytics table is written
+generically for that reason.
