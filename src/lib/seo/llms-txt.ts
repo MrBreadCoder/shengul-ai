@@ -1,3 +1,4 @@
+import { LEGAL_DOCUMENTS, legalDocumentPath } from '@/lib/legal/registry'
 import { LIMITS, PRODUCT_OVERVIEW, WHAT_IT_DOES } from '@/lib/seo/product-facts'
 import { absoluteUrl, SITE_NAME, SITE_SUMMARY } from '@/lib/seo/site'
 
@@ -26,6 +27,11 @@ export function buildLlmsTxt({
     .map(({ question, answer }) => `### ${question}\n\n${answer}`)
     .join('\n\n')
 
+  const legalSection = LEGAL_DOCUMENTS.map(
+    (document) =>
+      `- [${document.title}](${absoluteUrl(siteUrl, legalDocumentPath(document.slug))}): ${document.description}`
+  ).join('\n')
+
   return `# ${SITE_NAME}
 
 > ${SITE_SUMMARY}
@@ -45,6 +51,10 @@ ${LIMITS.map((line) => `- ${line}`).join('\n')}
 - [Home](${absoluteUrl(siteUrl, '/')}): what the service does, how it works, and how email reputation is protected.
 - [Book a meeting](${bookingUrl}): half an hour to describe your buyer and see what the first month would look like.
 - [Sign in](${absoluteUrl(siteUrl, '/login')}): the client console (requires an account).
+
+## Legal & policy
+
+${legalSection}
 
 ## Frequently asked questions
 

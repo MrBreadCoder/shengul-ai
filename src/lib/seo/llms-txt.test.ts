@@ -35,6 +35,14 @@ describe('buildLlmsTxt', () => {
     expect(buildLlmsTxt(INPUT)).toContain('https://cal.com/example')
   })
 
+  it('should link every legal document absolutely under a legal & policy heading', () => {
+    const output = buildLlmsTxt(INPUT)
+    expect(output).toContain('## Legal & policy')
+    expect(output).toContain('[Privacy Notice](https://example.com/legal/privacy-policy)')
+    expect(output).toContain('[Terms of Service](https://example.com/legal/terms-of-service)')
+    expect(output).toContain('[Cookie Notice](https://example.com/legal/cookie-policy)')
+  })
+
   it('should end with the freshness stamp', () => {
     expect(buildLlmsTxt(INPUT).trimEnd().endsWith(`Last updated: ${INPUT.updatedAt}`)).toBe(true)
   })
