@@ -67,6 +67,7 @@ What a case became on the other side.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid pk | |
+| `client_id` | uuid not null, FK `clients(id)` on delete cascade | denormalized so the table fits the flat RLS shape used by every table in `0002_rls_policies.sql`, exactly as `email_attachments.client_id` does in `0018` |
 | `case_id` | uuid not null, FK `cases(id)` on delete cascade, **unique** | |
 | `crm_connection_id` | uuid not null, FK `crm_connections(id)` on delete cascade | |
 | `external_contact_ids` | text[] not null default `'{}'` | one per synced lead |
@@ -87,7 +88,7 @@ Indexes: `idx_crm_connections_client on crm_connections(client_id)`, `idx_case_c
 
 Both tables follow the existing per-`client_id` isolation pattern from `0002_rls_policies.sql`:
 
-- **SELECT:** a client-role user sees rows where `client_id` matches their `app_users.client_id`; an operator sees all. `case_crm_links` derives `client_id` through its `case_id` join, consistent with how other case-scoped tables are policed.
+- **SELECT:** a client-role user sees rows where `client_id` matches their `app_users.client_id`; an operator sees all. Both tables carry `client_id` directly, so both use the flat `is_operator() or client_id = current_client_id()` shape without a join.
 - **INSERT/UPDATE/DELETE:** no policy — all writes go through `createAdminClient()` from server routes and Server Actions that have already checked the session and role.
 
 `oauth` is readable under the SELECT policy, which is exactly why it is encrypted: a direct PostgREST read yields ciphertext, not a live refresh token.
