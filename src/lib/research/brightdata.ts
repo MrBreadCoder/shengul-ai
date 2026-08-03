@@ -58,7 +58,7 @@ export const brightdataResearch: WebResearch = {
     }))
   },
 
-  async scrape(url: string): Promise<string> {
+  async scrape(url: string, maxChars: number = MAX_SCRAPE_CHARS): Promise<string> {
     try {
       // Web Unlocker returns the page as markdown when data_format=markdown,
       // which is far cheaper to feed to the model than raw HTML.
@@ -79,7 +79,7 @@ export const brightdataResearch: WebResearch = {
         },
         SCRAPE_TIMEOUT_MS,
       )
-      return body.slice(0, MAX_SCRAPE_CHARS)
+      return body.slice(0, maxChars)
     } catch (cause) {
       if (cause instanceof AppError) throw cause
       throw new AppError('EXTERNAL_ERROR', 'Brightdata scrape failed', {

@@ -11,6 +11,42 @@ const ACTOR = 'client_knowledge_retrieval'
 // has no threshold of its own, just an ORDER BY + LIMIT).
 const MIN_SIMILARITY = 0.5
 
+// A chunk whose content overlaps an already-kept chunk by more than this
+// fraction of tokens is dropped — targets exact/near-duplicate boilerplate
+// (e.g. the same footer surviving in two sources) occupying two of the
+// limited top-K slots.
+const DUPLICATE_TOKEN_OVERLAP = 0.9
+
+function tokenize(text: string): Set<string> {
+  return new Set(text.toLowerCase().trim().split(/\s+/).filter((token) => token.length > 0))
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1
+  let intersection = 0
+  for (const token of a) {
+    if (b.has(token)) intersection += 1
+  }
+  const union = a.size + b.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+function dedupeNearDuplicates(matches: MatchedChunk[]): MatchedChunk[] {
+  const kept: MatchedChunk[] = []
+  const keptTokenSets: Set<string>[] = []
+  for (const match of matches) {
+    const tokens = tokenize(match.content)
+    const isDuplicate = keptTokenSets.some(
+      (existing) => jaccardSimilarity(existing, tokens) > DUPLICATE_TOKEN_OVERLAP,
+    )
+    if (!isDuplicate) {
+      kept.push(match)
+      keptTokenSets.push(tokens)
+    }
+  }
+  return kept
+}
+
 export interface RetrieveClientKnowledgeArgs {
   clientId: string
   queryText: string
@@ -49,10 +85,11 @@ export async function retrieveClientKnowledge(
       { values: [queryText], taskType: 'RETRIEVAL_QUERY' },
     )
     if (!queryEmbedding) return ''
-    const matches = await matchClientKnowledgeChunks(supabase, clientId, queryEmbedding, limit)
+    const matches = await matchClientKnowledgeChunks(supabase, clientId, queryEmbedding, queryText, limit)
     const relevant = matches.filter((m) => m.similarity >= MIN_SIMILARITY)
-    if (relevant.length === 0) return ''
-    return relevant.map((m) => `- (${labelFor(m, resourceOrdinalById)}) ${m.content}`).join('\n')
+    const deduped = dedupeNearDuplicates(relevant)
+    if (deduped.length === 0) return ''
+    return deduped.map((m) => `- (${labelFor(m, resourceOrdinalById)}) ${m.content}`).join('\n')
   } catch {
     return ''
   }

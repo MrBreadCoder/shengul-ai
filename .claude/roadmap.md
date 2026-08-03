@@ -2070,3 +2070,103 @@ dev server / live Supabase session in this environment; only automated
 checks confirmed. The migration itself has also not been applied to any
 database — that requires the user's own `supabase db reset` or equivalent
 migration-apply step before the new columns exist anywhere.
+
+## Knowledge-base hybrid retrieval — Tasks 1-5 of 10 (2026-08-04, inline, no commits)
+
+Plan: `docs/superpowers/plans/2026-08-04-knowledge-hybrid-search.md`. Spec:
+`docs/superpowers/specs/2026-08-04-knowledge-hybrid-search-design.md`.
+Executed inline (no subagents, no commits) per explicit user request. Tasks
+6-10 (paragraph-aware chunker, boilerplate stripper, scrape-cap split,
+route wiring) remain.
+
+- **Task 1** — new `supabase/migrations/0025_knowledge_hybrid_search.sql`:
+  adds `client_knowledge_chunks.content_tsv` (generated `tsvector`,
+  `simple` config) + GIN index; drops and recreates
+  `match_client_knowledge_chunks` with a new `p_query_text` param, ranking
+  by Reciprocal Rank Fusion (constant 60) of vector-cosine rank and
+  full-text rank instead of vector-cosine alone. `src/types/database.ts`
+  function-args type widened to match. Not applied to any live DB — no
+  local Supabase CLI in this environment, matches the plan's documented
+  fallback.
+- **Task 2** — `src/lib/db/client-knowledge.ts`:
+  `matchClientKnowledgeChunks` gained a `queryText: string` parameter,
+  passed through as `p_query_text` to the RPC. `client-knowledge.test.ts`
+  updated (22/22 passing).
+- **Task 3** — `src/lib/knowledge/client-context.ts`: added
+  `dedupeNearDuplicates` (Jaccard token-overlap > 0.9 on whitespace-split
+  tokens, pure TS, no extra DB round-trip) and wired
+  `retrieveClientKnowledge` to pass `queryText` to the RPC and run
+  dedup after the `MIN_SIMILARITY` floor. `client-context.test.ts` +2
+  tests (14/14 passing).
+- **Task 4** — new `src/lib/knowledge/build-query.ts`:
+  `buildKnowledgeQueryText({ primary, secondary? })` — caps `secondary`
+  to `MAX_SECONDARY_CHARS` (500) whenever `primary` is non-empty, so a
+  long dossier fact-dump can't drown out the actual prospect signal; no
+  cap when `primary` itself is empty (the dossier-as-primary case).
+  `build-query.test.ts`, 6/6 passing.
+- **Task 5** — wired `buildKnowledgeQueryText` into all four pipeline
+  call sites: `write.ts` (primary = dossier), `reply.ts` (primary =
+  inbound body when present, else dossier), `followup.ts` (primary =
+  first outbound body), `knowledge-answer.ts` (primary = human answer).
+  No test changes needed — none of the four pipeline test files assert
+  the literal `queryText` string.
+
+Verified: `pnpm test` fully green (176 files / 1806 tests, up from
+175/1798), `pnpm typecheck` clean, `pnpm lint` clean (only 6 pre-existing
+unrelated warnings in unconnected test files, 0 errors).
+
+## Knowledge-base hybrid retrieval — Tasks 6-10 of 10, DONE (2026-08-04, inline, no commits)
+
+Same plan/spec as the Tasks 1-5 entry above. Executed inline, no
+subagents, no commits, per explicit user request. All 10 plan tasks now
+complete.
+
+- **Task 6** — `src/lib/knowledge/chunk-text.ts` rewritten from a raw
+  fixed-size char sliding window to a paragraph packer: splits on
+  blank-line boundaries, greedily packs paragraphs up to `chunkSize`,
+  carries a whitespace-snapped tail of the previous chunk forward as
+  overlap, and hard-splits an oversized single paragraph at the nearest
+  space (never mid-word — the direct fix for the audit's 55%
+  mid-word-cut-chunk finding). New `MIN_CHUNK_CHARS = 20` backstop drops
+  any resulting fragment below that length. Same exported signature —
+  `embedAndStoreChunks` (`src/lib/db/client-knowledge.ts`) needed no
+  changes. `chunk-text.test.ts` fully rewritten (7/7 passing);
+  `client-knowledge.test.ts` unaffected (22/22 still passing, traced by
+  hand per the plan: the oversized-paragraph fixture still yields exactly
+  2 chunks, only chunk 1's overlap prefix changed and that test never
+  asserts `content`).
+- **Task 7** — new `src/lib/knowledge/strip-boilerplate.ts`:
+  `stripBoilerplateParagraphs(content, siblingContents)` strips any
+  paragraph (whitespace-normalized) that recurs across
+  `max(2, min(3, ceil(siblingContents.length / 2)))` or more siblings —
+  the direct fix for the audit's 34% boilerplate-pollution finding. Pure,
+  no I/O, can't fail. `strip-boilerplate.test.ts`, 5/5 passing.
+- **Task 8** — `src/lib/db/client-knowledge.ts`: added
+  `listReadySiblingWebsiteContents(supabase, clientId, excludeSourceId)` —
+  fetches `content` from the client's other `ready` `website_page`
+  sources, filters out nulls. `client-knowledge.test.ts` +2 tests
+  (24/24 passing).
+- **Task 9** — `src/lib/research/brightdata.ts`: `scrape()` gained an
+  optional `maxChars` parameter (default `MAX_SCRAPE_CHARS = 6_000`,
+  unchanged for the research/dossier caller in `agent.ts`). Widened the
+  `WebResearch` interface's `scrape` signature in
+  `src/lib/research/provider.ts` to match (it declared the 1-arg shape
+  explicitly). `brightdata.test.ts` +1 test; full `src/lib/research` dir
+  17/17 passing.
+- **Task 10** — `src/app/api/pipeline/knowledge-scrape/route.ts`
+  rewritten: scrapes with the new `KNOWLEDGE_SCRAPE_MAX_CHARS = 40_000`
+  ceiling (was silently truncating at 6,000 — the audit's silent-
+  truncation finding), fetches sibling ready website-page content via
+  Task 8's helper (sibling-lookup failure is caught locally, logged as
+  `knowledge.sibling_lookup_failed`, and degrades to "no siblings" —
+  never fails the scrape), strips boilerplate via Task 7's function
+  before chunking, but still stores the **raw** unstripped content + true
+  char count on the source row (audit trail unchanged). `route.test.ts`
+  +3 tests (7/7 passing).
+
+Verified: `pnpm test` fully green (177 files / 1818 tests, up from
+176/1806), `pnpm typecheck` clean, `pnpm lint` clean (same 6 pre-existing
+unrelated warnings, 0 errors). Not verified: the 0025 migration has not
+been applied to any live database (no local Supabase CLI in this
+environment — matches the plan's documented fallback for Task 1/Step 3);
+no manual in-browser verification of the scrape pipeline.

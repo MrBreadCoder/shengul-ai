@@ -9,6 +9,8 @@ const markSourceReadyMock = vi.fn()
 const markSourceFailedMock = vi.fn()
 const scrapeMock = vi.fn()
 const logEventSafeMock = vi.fn()
+const listReadySiblingWebsiteContentsMock = vi.fn()
+const stripBoilerplateParagraphsMock = vi.fn()
 
 vi.mock('@/lib/qstash/verify', () => ({ verifyQstashSignature: (...a: unknown[]) => verifyQstashSignatureMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -18,8 +20,12 @@ vi.mock('@/lib/db/client-knowledge', () => ({
   embedAndStoreChunks: (...a: unknown[]) => embedAndStoreChunksMock(...a),
   markSourceReady: (...a: unknown[]) => markSourceReadyMock(...a),
   markSourceFailed: (...a: unknown[]) => markSourceFailedMock(...a),
+  listReadySiblingWebsiteContents: (...a: unknown[]) => listReadySiblingWebsiteContentsMock(...a),
 }))
 vi.mock('@/lib/research/brightdata', () => ({ brightdataResearch: { scrape: (...a: unknown[]) => scrapeMock(...a) } }))
+vi.mock('@/lib/knowledge/strip-boilerplate', () => ({
+  stripBoilerplateParagraphs: (...a: unknown[]) => stripBoilerplateParagraphsMock(...a),
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventSafeMock(...a) }))
 
 import { POST } from './route'
@@ -37,6 +43,8 @@ beforeEach(() => {
   markSourceFailedMock.mockReset().mockResolvedValue(undefined)
   scrapeMock.mockReset()
   logEventSafeMock.mockReset().mockResolvedValue(undefined)
+  listReadySiblingWebsiteContentsMock.mockReset().mockResolvedValue([])
+  stripBoilerplateParagraphsMock.mockReset().mockImplementation((content: string) => content)
 })
 
 describe('POST /api/pipeline/knowledge-scrape', () => {
@@ -76,5 +84,48 @@ describe('POST /api/pipeline/knowledge-scrape', () => {
     expect(json).toEqual({ ok: true })
     expect(markSourceFailedMock).toHaveBeenCalledWith(expect.anything(), 'f47ac10b-58cc-4372-a567-0e02b2c3d479', 'Brightdata scrape failed')
     expect(embedAndStoreChunksMock).not.toHaveBeenCalled()
+  })
+
+  it('should scrape with the knowledge-base max-chars ceiling, not the research default', async () => {
+    getSourceByIdMock.mockResolvedValue({ id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', client_id: 'c1', url: 'https://a.com/1', source_type: 'website_page' })
+    scrapeMock.mockResolvedValue('content')
+    await POST(req({ sourceId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' }))
+    expect(scrapeMock).toHaveBeenCalledWith('https://a.com/1', 40_000)
+  })
+
+  it('should strip boilerplate using sibling content before chunking, but store the raw content on the source', async () => {
+    getSourceByIdMock.mockResolvedValue({ id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', client_id: 'c1', url: 'https://a.com/1', source_type: 'website_page' })
+    scrapeMock.mockResolvedValue('Nav menu.\n\nReal content.')
+    listReadySiblingWebsiteContentsMock.mockResolvedValue(['Nav menu.\n\nOther.'])
+    stripBoilerplateParagraphsMock.mockReturnValue('Real content.')
+
+    const res = await POST(req({ sourceId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' }))
+
+    expect(res.status).toBe(200)
+    expect(listReadySiblingWebsiteContentsMock).toHaveBeenCalledWith(
+      expect.anything(), 'c1', 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    )
+    expect(stripBoilerplateParagraphsMock).toHaveBeenCalledWith('Nav menu.\n\nReal content.', ['Nav menu.\n\nOther.'])
+    expect(embedAndStoreChunksMock).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ content: 'Real content.' }),
+    )
+    expect(markSourceReadyMock).toHaveBeenCalledWith(
+      expect.anything(), 'f47ac10b-58cc-4372-a567-0e02b2c3d479', 'Nav menu.\n\nReal content.', 24,
+    )
+  })
+
+  it('should proceed unstripped and log a warning when the sibling lookup fails', async () => {
+    getSourceByIdMock.mockResolvedValue({ id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', client_id: 'c1', url: 'https://a.com/1', source_type: 'website_page' })
+    scrapeMock.mockResolvedValue('Only content.')
+    listReadySiblingWebsiteContentsMock.mockRejectedValue(new AppError('DB_ERROR', 'boom'))
+
+    const res = await POST(req({ sourceId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' }))
+
+    expect(res.status).toBe(200)
+    expect(stripBoilerplateParagraphsMock).toHaveBeenCalledWith('Only content.', [])
+    expect(markSourceFailedMock).not.toHaveBeenCalled()
+    expect(logEventSafeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'knowledge.sibling_lookup_failed' }),
+    )
   })
 })

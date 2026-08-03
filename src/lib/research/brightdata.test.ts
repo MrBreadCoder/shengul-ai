@@ -61,6 +61,12 @@ describe('brightdataResearch.scrape', () => {
     expect(text).toHaveLength(6_000)
   })
 
+  it('should accept a custom maxChars ceiling and truncate to it instead of the default', async () => {
+    fetchTextMock.mockResolvedValue('x'.repeat(50_000))
+    const text = await brightdataResearch.scrape('https://acme.com/huge', 40_000)
+    expect(text).toHaveLength(40_000)
+  })
+
   it('should wrap a transport failure as AppError', async () => {
     fetchTextMock.mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
     const pending = brightdataResearch.scrape('https://acme.com')

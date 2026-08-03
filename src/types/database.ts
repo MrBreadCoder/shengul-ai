@@ -942,7 +942,7 @@ export interface Database {
         Returns: Database['public']['Tables']['cases']['Row'][]
       }
       match_client_knowledge_chunks: {
-        Args: { p_client_id: string; p_query_embedding: number[]; p_limit: number }
+        Args: { p_client_id: string; p_query_embedding: number[]; p_query_text: string; p_limit: number }
         Returns: {
           source_id: string
           source_title: string

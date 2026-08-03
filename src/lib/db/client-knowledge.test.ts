@@ -17,6 +17,7 @@ import {
   embedAndStoreChunks,
   deleteChunksForSource,
   matchClientKnowledgeChunks,
+  listReadySiblingWebsiteContents,
 } from './client-knowledge'
 
 beforeEach(() => {
@@ -237,10 +238,14 @@ describe('deleteChunksForSource', () => {
 })
 
 describe('matchClientKnowledgeChunks', () => {
-  it('should call the rpc and return its rows mapped to camelCase', async () => {
+  it('should call the rpc with the query text and return its rows mapped to camelCase', async () => {
     const rows = [{ source_id: 's1', source_title: 'About', resource_id: null, content: 'x', similarity: 0.9 }]
-    const supabase = { rpc: vi.fn().mockResolvedValue({ data: rows, error: null }) } as never
-    const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1, 0.2], 6)
+    const rpc = vi.fn().mockResolvedValue({ data: rows, error: null })
+    const supabase = { rpc } as never
+    const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1, 0.2], 'pricing question', 6)
+    expect(rpc).toHaveBeenCalledWith('match_client_knowledge_chunks', {
+      p_client_id: 'c1', p_query_embedding: [0.1, 0.2], p_query_text: 'pricing question', p_limit: 6,
+    })
     expect(result).toEqual([
       { sourceId: 's1', sourceTitle: 'About', resourceId: null, content: 'x', similarity: 0.9 },
     ])
@@ -256,7 +261,7 @@ describe('matchClientKnowledgeChunks', () => {
     })
     const supabase = { rpc } as never
 
-    const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1], 6)
+    const result = await matchClientKnowledgeChunks(supabase, 'c1', [0.1], 'q', 6)
 
     expect(result).toEqual([
       { sourceId: 's1', sourceTitle: 'Deck', resourceId: 'r1', content: 'Three fintech identities.', similarity: 0.8 },
@@ -266,6 +271,31 @@ describe('matchClientKnowledgeChunks', () => {
 
   it('should throw DB_ERROR when the rpc fails', async () => {
     const supabase = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'boom' } }) } as never
-    await expect(matchClientKnowledgeChunks(supabase, 'c1', [0.1], 6)).rejects.toBeInstanceOf(AppError)
+    await expect(matchClientKnowledgeChunks(supabase, 'c1', [0.1], 'q', 6)).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listReadySiblingWebsiteContents', () => {
+  it('should return content from ready website-page siblings, excluding the given source and nulls', async () => {
+    const rows = [{ content: 'Sibling one.' }, { content: null }, { content: 'Sibling two.' }]
+    const eq3 = vi.fn().mockReturnValue({ neq: () => Promise.resolve({ data: rows, error: null }) })
+    const eq2 = vi.fn().mockReturnValue({ eq: eq3 })
+    const eq1 = vi.fn().mockReturnValue({ eq: eq2 })
+    const supabase = { from: () => ({ select: () => ({ eq: eq1 }) }) } as never
+
+    const result = await listReadySiblingWebsiteContents(supabase, 'c1', 's1')
+
+    expect(result).toEqual(['Sibling one.', 'Sibling two.'])
+    expect(eq1).toHaveBeenCalledWith('client_id', 'c1')
+    expect(eq2).toHaveBeenCalledWith('source_type', 'website_page')
+    expect(eq3).toHaveBeenCalledWith('status', 'ready')
+  })
+
+  it('should throw DB_ERROR when the query fails', async () => {
+    const eq3 = vi.fn().mockReturnValue({ neq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) })
+    const eq2 = vi.fn().mockReturnValue({ eq: eq3 })
+    const eq1 = vi.fn().mockReturnValue({ eq: eq2 })
+    const supabase = { from: () => ({ select: () => ({ eq: eq1 }) }) } as never
+    await expect(listReadySiblingWebsiteContents(supabase, 'c1', 's1')).rejects.toBeInstanceOf(AppError)
   })
 })

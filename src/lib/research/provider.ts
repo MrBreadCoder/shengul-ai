@@ -15,7 +15,8 @@ export interface WebResearch {
   // transport/parse failure.
   search(query: string): Promise<WebSnippet[]>
 
-  // Fetches a single page and returns its text content (capped by the
-  // implementation). Throws AppError on a transport/parse failure.
-  scrape(url: string): Promise<string>
+  // Fetches a single page and returns its text content, capped at maxChars
+  // (implementation provides its own default). Throws AppError on a
+  // transport/parse failure.
+  scrape(url: string, maxChars?: number): Promise<string>
 }

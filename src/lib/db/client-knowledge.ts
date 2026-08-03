@@ -241,11 +241,13 @@ export async function matchClientKnowledgeChunks(
   supabase: SupabaseClient<Database>,
   clientId: string,
   queryEmbedding: number[],
+  queryText: string,
   limit: number,
 ): Promise<MatchedChunk[]> {
   const { data, error } = await supabase.rpc('match_client_knowledge_chunks', {
     p_client_id: clientId,
     p_query_embedding: queryEmbedding,
+    p_query_text: queryText,
     p_limit: limit,
   })
   if (error) {
@@ -255,4 +257,28 @@ export async function matchClientKnowledgeChunks(
     sourceId: row.source_id, sourceTitle: row.source_title, resourceId: row.resource_id,
     content: row.content, similarity: row.similarity,
   }))
+}
+
+// Used by the boilerplate stripper before chunking a new website page — the
+// client's other already-scraped, ready pages are the comparison set for
+// detecting repeated nav/footer content. Excludes the source being processed
+// (it may already have a stale `content` from a prior scrape attempt).
+export async function listReadySiblingWebsiteContents(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+  excludeSourceId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('client_knowledge_sources')
+    .select('content')
+    .eq('client_id', clientId)
+    .eq('source_type', 'website_page')
+    .eq('status', 'ready')
+    .neq('id', excludeSourceId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list sibling knowledge sources', { clientId, cause: error.message })
+  }
+  return (data ?? [])
+    .map((row) => row.content)
+    .filter((content): content is string => content !== null)
 }

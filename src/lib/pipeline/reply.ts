@@ -18,6 +18,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext } from '@/lib/llm/client'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { listActiveResourcesForClient } from '@/lib/db/client-resources'
 import { insertEmailAttachments } from '@/lib/db/email-attachments'
 import {
@@ -260,9 +261,14 @@ export async function runReplyForInbound(
 
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
+  const inboundBody = (inbound.body ?? '').trim()
   const clientKnowledge = await retrieveClientKnowledge(supabase, {
     clientId: inbound.client_id,
-    queryText: `${dossierText} ${inbound.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
+    queryText: buildKnowledgeQueryText(
+      inboundBody.length > 0
+        ? { primary: inboundBody, secondary: [dossierText, campaign.value_prop ?? ''] }
+        : { primary: dossierText, secondary: [campaign.value_prop ?? ''] },
+    ),
     resourceOrdinalById,
   })
   const classification = await classifyReply(context, {

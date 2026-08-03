@@ -39,7 +39,7 @@ describe('retrieveClientKnowledge', () => {
     expect(result).toBe('- (Pricing) Starts at $99/mo.\n- (About) Founded in 2019.')
   })
 
-  it('should embed the query with RETRIEVAL_QUERY task type and pass the limit through', async () => {
+  it('should embed the query with RETRIEVAL_QUERY task type and pass query text + limit through', async () => {
     embedTextsMock.mockResolvedValue([[0.1]])
     matchClientKnowledgeChunksMock.mockResolvedValue([])
     await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'q', limit: 3 })
@@ -47,7 +47,7 @@ describe('retrieveClientKnowledge', () => {
       { clientId: 'c1', actor: 'client_knowledge_retrieval' },
       { values: ['q'], taskType: 'RETRIEVAL_QUERY' },
     )
-    expect(matchClientKnowledgeChunksMock).toHaveBeenCalledWith(expect.anything(), 'c1', [0.1], 3)
+    expect(matchClientKnowledgeChunksMock).toHaveBeenCalledWith(expect.anything(), 'c1', [0.1], 'q', 3)
   })
 
   it('should label a chunk from a menu resource with its attach ordinal', async () => {
@@ -124,5 +124,27 @@ describe('retrieveClientKnowledge', () => {
     matchClientKnowledgeChunksMock.mockResolvedValue([chunk({ similarity: 0.3 })])
     const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'prospect facts' })
     expect(result).toBe('')
+  })
+
+  it('should drop a near-duplicate chunk that repeats an already-kept chunk almost verbatim', async () => {
+    const original = 'Contact us at info@acme.com or call +1 555 0100 for support during business hours'
+    const nearDuplicate = `${original} today`
+    embedTextsMock.mockResolvedValue([[0.1]])
+    matchClientKnowledgeChunksMock.mockResolvedValue([
+      chunk({ sourceId: 's1', content: original }),
+      chunk({ sourceId: 's2', sourceTitle: 'Footer', content: nearDuplicate }),
+    ])
+    const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'contact' })
+    expect(result).toBe(`- (Pricing) ${original}`)
+  })
+
+  it('should keep two chunks whose content has low token overlap', async () => {
+    embedTextsMock.mockResolvedValue([[0.1]])
+    matchClientKnowledgeChunksMock.mockResolvedValue([
+      chunk({ sourceId: 's1', content: 'Starts at $99/mo.' }),
+      chunk({ sourceId: 's2', sourceTitle: 'About', content: 'Founded in 2019.' }),
+    ])
+    const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'q' })
+    expect(result).toBe('- (Pricing) Starts at $99/mo.\n- (About) Founded in 2019.')
   })
 })

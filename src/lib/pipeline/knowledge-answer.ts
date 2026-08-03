@@ -9,6 +9,7 @@ import { generateText, type LlmCallContext } from '@/lib/llm/client'
 import { sendOrDraftReply, replyDisposition } from '@/lib/pipeline/reply'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { getActiveResourcesByIds, type ClientResourceRow } from '@/lib/db/client-resources'
 import { applyAttachmentBudget } from '@/lib/resources/menu'
 
@@ -130,7 +131,10 @@ export async function runKnowledgeAnswer(
   const dossierText = knowledge.map((k) => k.content).join(' ')
   const clientKnowledge = await retrieveClientKnowledge(supabase, {
     clientId: inbound.client_id,
-    queryText: `${dossierText} ${kr.human_answer} ${campaign.value_prop ?? ''}`.trim(),
+    queryText: buildKnowledgeQueryText({
+      primary: kr.human_answer,
+      secondary: [dossierText, campaign.value_prop ?? ''],
+    }),
   })
   const body = await generateText(context, {
     instructions: SYSTEM_PROMPT,

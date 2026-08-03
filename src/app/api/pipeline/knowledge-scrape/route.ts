@@ -4,14 +4,21 @@ import { verifyQstashSignature } from '@/lib/qstash/verify'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   getSourceById, deleteChunksForSource, embedAndStoreChunks, markSourceReady, markSourceFailed,
+  listReadySiblingWebsiteContents,
 } from '@/lib/db/client-knowledge'
 import { brightdataResearch } from '@/lib/research/brightdata'
+import { stripBoilerplateParagraphs } from '@/lib/knowledge/strip-boilerplate'
 import { isAppError, AppError } from '@/lib/errors/app-error'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 
 export const runtime = 'nodejs'
 
 const ACTOR = 'knowledge_scrape'
+// Sized to store and chunk a whole marketing page, not to fit one LLM
+// prompt — deliberately much higher than the research/dossier scraper's
+// MAX_SCRAPE_CHARS (6,000), which shares brightdataResearch.scrape but has a
+// different, tighter budget need.
+const KNOWLEDGE_SCRAPE_MAX_CHARS = 40_000
 const bodySchema = z.object({ sourceId: z.string().uuid() })
 
 export async function POST(request: Request) {
@@ -29,12 +36,31 @@ export async function POST(request: Request) {
     }
 
     try {
-      const content = await brightdataResearch.scrape(source.url)
+      const content = await brightdataResearch.scrape(source.url, KNOWLEDGE_SCRAPE_MAX_CHARS)
+
+      // Boilerplate cleanliness is a quality improvement, not a correctness
+      // requirement — a failure here must never turn a working scrape into a
+      // failed source, so it's caught locally and degrades to "no siblings".
+      let siblingContents: string[] = []
+      try {
+        siblingContents = await listReadySiblingWebsiteContents(admin, source.client_id, sourceId)
+      } catch (siblingError) {
+        await logEventSafe({
+          clientId: source.client_id, actor: ACTOR, type: 'knowledge.sibling_lookup_failed',
+          severity: 'warn',
+          payload: { sourceId, message: siblingError instanceof AppError ? siblingError.message : 'unknown' },
+        })
+      }
+      const cleanedContent = stripBoilerplateParagraphs(content, siblingContents)
+
       // Delete-then-insert (not append) keeps this idempotent across QStash's
       // own automatic retries and the explicit re-scrape action — both funnel
       // through this same route and must never leave duplicate chunks behind.
       await deleteChunksForSource(admin, sourceId)
-      await embedAndStoreChunks(admin, { clientId: source.client_id, sourceId, content, actor: ACTOR })
+      await embedAndStoreChunks(admin, { clientId: source.client_id, sourceId, content: cleanedContent, actor: ACTOR })
+      // The raw (unstripped) scrape is what's stored on the source row — the
+      // audit trail / re-derivation source of truth. Only the text handed to
+      // the chunker above is cleaned.
       await markSourceReady(admin, sourceId, content, content.length)
       await logEventSafe({
         clientId: source.client_id, actor: ACTOR, type: 'knowledge.page_scraped',

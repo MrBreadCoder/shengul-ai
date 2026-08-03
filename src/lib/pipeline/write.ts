@@ -14,6 +14,7 @@ import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 
 const MAX_OUTPUT_TOKENS = 1_400
 const ACTOR = 'email_writer_agent'
@@ -162,7 +163,7 @@ export async function runWriteForCase(
   const dossierText = knowledge.map((k) => k.content).join(' ')
   const clientKnowledge = await retrieveClientKnowledge(supabase, {
     clientId: input.clientId,
-    queryText: `${dossierText} ${input.valueProp ?? ''}`.trim(),
+    queryText: buildKnowledgeQueryText({ primary: dossierText, secondary: [input.valueProp ?? ''] }),
   })
 
   let sent = 0

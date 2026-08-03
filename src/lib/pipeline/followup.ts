@@ -26,6 +26,7 @@ import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
+import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 
 const DAY_SECONDS = 86_400
 export const FOLLOWUP_DELAYS_SECONDS: readonly number[] = [3 * DAY_SECONDS, 7 * DAY_SECONDS, 14 * DAY_SECONDS]
@@ -218,7 +219,10 @@ export async function runFollowupStep(
   const context: LlmCallContext = { clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR }
   const clientKnowledge = await retrieveClientKnowledge(supabase, {
     clientId: sequence.client_id,
-    queryText: `${firstOutbound?.body ?? ''} ${campaign.value_prop ?? ''}`.trim(),
+    queryText: buildKnowledgeQueryText({
+      primary: (firstOutbound?.body ?? '').trim(),
+      secondary: [campaign.value_prop ?? ''],
+    }),
   })
   const nudgeBody = await generateText(context, {
     instructions: SYSTEM_PROMPT,

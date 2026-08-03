@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { chunkText, CHUNK_SIZE_CHARS, CHUNK_OVERLAP_CHARS } from './chunk-text'
+import { chunkText, CHUNK_SIZE_CHARS, CHUNK_OVERLAP_CHARS, MIN_CHUNK_CHARS } from './chunk-text'
 
 describe('chunkText', () => {
   it('should return an empty array for empty or whitespace-only text', () => {
@@ -7,40 +7,60 @@ describe('chunkText', () => {
     expect(chunkText('   \n  ')).toEqual([])
   })
 
-  it('should return a single chunk when text is shorter than chunkSize', () => {
-    const result = chunkText('short text', 1000, 100)
-    expect(result).toEqual([{ index: 0, content: 'short text' }])
+  it('should keep a single paragraph that is long enough to clear the minimum chunk size', () => {
+    const result = chunkText('This is a short paragraph.', 1000, 100)
+    expect(result).toEqual([{ index: 0, content: 'This is a short paragraph.' }])
   })
 
-  it('should split long text into overlapping chunks', () => {
-    const text = 'a'.repeat(2500)
+  it('should pack multiple short paragraphs into one chunk when they fit together', () => {
+    const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.'
     const result = chunkText(text, 1000, 100)
-    expect(result.length).toBe(3)
-    expect(result[0]!.content.length).toBe(1000)
-    expect(result[1]!.content.length).toBe(1000)
-    // Last chunk covers the remainder: starts at 1800 (2*(1000-100)), ends at 2500.
-    expect(result[2]!.content.length).toBe(700)
-    expect(result.map((c) => c.index)).toEqual([0, 1, 2])
+    expect(result).toEqual([{ index: 0, content: text }])
   })
 
-  it('should overlap consecutive chunks by exactly the overlap amount', () => {
-    const text = '0123456789'.repeat(300) // 3000 chars
+  it('should split paragraphs that do not fit together into separate chunks with a whitespace-snapped overlap prefix', () => {
+    const paragraphA = Array.from({ length: 100 }, (_, i) => `alpha${i}`).join(' ')
+    const paragraphB = Array.from({ length: 100 }, (_, i) => `beta${i}`).join(' ')
+    const result = chunkText(`${paragraphA}\n\n${paragraphB}`, 1000, 100)
+
+    expect(result.length).toBe(2)
+    expect(result[0]!.content).toBe(paragraphA)
+    expect(result[1]!.content.endsWith(paragraphB)).toBe(true)
+    expect(result[1]!.content).not.toBe(paragraphB)
+
+    const overlapPrefix = result[1]!.content.slice(0, result[1]!.content.length - paragraphB.length - 2)
+    const boundaryIndex = paragraphA.indexOf(overlapPrefix)
+    expect(boundaryIndex).toBeGreaterThanOrEqual(0)
+    expect(boundaryIndex === 0 || paragraphA[boundaryIndex - 1] === ' ').toBe(true)
+  })
+
+  it('should split a single oversized paragraph at whitespace, never mid-word', () => {
+    const words = Array.from({ length: 300 }, (_, i) => `token${i}`)
+    const text = words.join(' ')
     const result = chunkText(text, 1000, 100)
-    const firstChunkTail = result[0]!.content.slice(-100)
-    const secondChunkHead = result[1]!.content.slice(0, 100)
-    expect(firstChunkTail).toBe(secondChunkHead)
+
+    expect(result.length).toBeGreaterThan(1)
+    for (const chunk of result) {
+      for (const piece of chunk.content.split('\n\n')) {
+        for (const word of piece.trim().split(/\s+/)) {
+          if (word.length === 0) continue
+          expect(words).toContain(word)
+        }
+      }
+    }
   })
 
-  it('should trim leading/trailing whitespace before chunking', () => {
-    const result = chunkText('  hello world  ', 1000, 100)
-    expect(result).toEqual([{ index: 0, content: 'hello world' }])
+  it('should drop chunks shorter than MIN_CHUNK_CHARS non-whitespace characters', () => {
+    expect(chunkText('ok', 1000, 100)).toEqual([])
+    expect(MIN_CHUNK_CHARS).toBe(20)
   })
 
   it('should use the default chunk size and overlap constants when not provided', () => {
-    const text = 'x'.repeat(CHUNK_SIZE_CHARS + 50)
-    const result = chunkText(text)
-    expect(result.length).toBe(2)
     expect(CHUNK_SIZE_CHARS).toBe(1000)
     expect(CHUNK_OVERLAP_CHARS).toBe(100)
+    const paragraphA = Array.from({ length: 100 }, (_, i) => `alpha${i}`).join(' ')
+    const paragraphB = Array.from({ length: 100 }, (_, i) => `beta${i}`).join(' ')
+    const result = chunkText(`${paragraphA}\n\n${paragraphB}`)
+    expect(result.length).toBe(2)
   })
 })
