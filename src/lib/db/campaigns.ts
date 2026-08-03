@@ -95,6 +95,24 @@ export async function resumeCampaignsForClient(
   }
 }
 
+// No status filter, unlike pauseActiveCampaignsForClient/resumeCampaignsForClient
+// — every campaign (active, paused, or archived) must reflect the client's
+// current preference immediately, so a paused campaign is already correct if
+// it is ever resumed.
+export async function syncReplyModeForClient(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+  mode: Database['public']['Enums']['reply_mode'],
+): Promise<void> {
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ reply_mode: mode })
+    .eq('client_id', clientId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to sync reply mode for client', { clientId, cause: error.message })
+  }
+}
+
 export async function updateCampaignStatus(
   supabase: SupabaseClient<Database>,
   id: string,

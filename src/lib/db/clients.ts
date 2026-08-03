@@ -165,6 +165,23 @@ export async function updateClientLogoUrl(
   return data
 }
 
+export async function updateClientReplyMode(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  mode: Database['public']['Enums']['reply_mode'],
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ reply_mode: mode })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client reply mode', { id, cause: error?.message })
+  }
+  return data
+}
+
 export async function updateClientStatus(
   supabase: SupabaseClient<Database>,
   id: string,

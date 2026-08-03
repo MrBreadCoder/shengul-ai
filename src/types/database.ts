@@ -17,6 +17,7 @@ export interface Database {
           settings: Json
           warmup_profile: Database['public']['Enums']['warmup_profile']
           mailreach_enabled: boolean
+          reply_mode: Database['public']['Enums']['reply_mode']
           domain: string | null
           logo_url: string | null
           created_at: string
@@ -29,6 +30,7 @@ export interface Database {
           settings?: Json
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           mailreach_enabled?: boolean
+          reply_mode?: Database['public']['Enums']['reply_mode']
           domain?: string | null
           logo_url?: string | null
           created_at?: string

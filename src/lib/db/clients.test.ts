@@ -14,6 +14,7 @@ import {
   updateClientDomain,
   updateClientLogoUrl,
   updateClientMailreachEnabled,
+  updateClientReplyMode,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -290,5 +291,26 @@ describe('updateClientMailreachEnabled', () => {
       from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }) }),
     } as never
     await expect(updateClientMailreachEnabled(supabase, 'c1', true)).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientReplyMode', () => {
+  it('should persist the mode and return the updated row', async () => {
+    const row = { id: 'c1', reply_mode: 'auto_send' }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateClientReplyMode({ from: () => ({ update }) } as never, 'c1', 'auto_send')
+    expect(update).toHaveBeenCalledWith({ reply_mode: 'auto_send' })
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateClientReplyMode({ from: () => ({ update }) } as never, 'c1', 'auto_send'),
+    ).rejects.toBeInstanceOf(AppError)
   })
 })

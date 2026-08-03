@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertCampaign } from '@/lib/db/campaigns'
+import { getClientById } from '@/lib/db/clients'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
@@ -42,12 +43,20 @@ export async function POST(request: Request) {
       excludeKeywords: body.excludeKeywords,
     })
     const admin = createAdminClient()
+    // The campaign inherits the client's current reply-mode preference rather
+    // than the column default, so a client already on auto_send doesn't get a
+    // new campaign silently created on human_approve.
+    const client = await getClientById(admin, body.clientId)
+    if (!client) {
+      return NextResponse.json({ error: 'client_not_found' }, { status: 404 })
+    }
     const campaign = await insertCampaign(admin, {
       client_id: body.clientId,
       name: body.name,
       value_prop: body.valueProp,
       booking_link: body.bookingLink,
       daily_target: body.dailyTarget,
+      reply_mode: client.reply_mode,
       icp,
     })
     try {

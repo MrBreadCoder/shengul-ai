@@ -3,11 +3,13 @@ import { Envelope } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listMailboxesForViewer, type MailboxSummary } from '@/lib/db/mailboxes'
+import { getClientById } from '@/lib/db/clients'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { ConnectButtons } from './connect-buttons'
 import { MailboxRow } from './mailbox-row'
 import { MailboxesWebMcpTools } from './mailboxes-webmcp-tools'
+import { ReplyModeSection } from './reply-mode-section'
 import type { MailboxHealthEntry } from '@/types/webmcp-app'
 
 export const dynamic = 'force-dynamic'
@@ -51,6 +53,9 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
   // show a client-role user every other client's connected addresses.
   const supabase = await createServerClient()
   const connected = await listMailboxesForViewer(supabase)
+  // Reply mode is a client-owned preference — an operator viewing their own
+  // /settings has no client_id and nothing to scope it to.
+  const client = appUser.client_id ? await getClientById(supabase, appUser.client_id) : null
 
   return (
     <div className="flex max-w-3xl flex-col gap-10">
@@ -59,6 +64,12 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
         title="Settings"
         description={`Signed in as ${appUser.role}. Mailboxes connected here are what the agent sends from.`}
       />
+
+      {client ? (
+        <Section title="Reply mode">
+          <ReplyModeSection currentMode={client.reply_mode} />
+        </Section>
+      ) : null}
 
       <Section title="Connect a mailbox">
         <ConnectButtons />

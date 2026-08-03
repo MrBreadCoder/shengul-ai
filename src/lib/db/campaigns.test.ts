@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   insertCampaign,
   getCampaignById,
@@ -7,6 +7,7 @@ import {
   getCampaignForCase,
   pauseActiveCampaignsForClient,
   resumeCampaignsForClient,
+  syncReplyModeForClient,
   updateCampaignStatus,
   deleteCampaign,
 } from './campaigns'
@@ -159,6 +160,22 @@ describe('resumeCampaignsForClient', () => {
       from: () => ({ update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: { message: 'boom' } }) }) }) }),
     } as never
     await expect(resumeCampaignsForClient(supabase, 'c1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('syncReplyModeForClient', () => {
+  it('should bulk-update every campaign for the client regardless of status', async () => {
+    const update = vi.fn().mockReturnValue({ eq: () => Promise.resolve({ error: null }) })
+    const supabase = { from: () => ({ update }) } as never
+    await expect(syncReplyModeForClient(supabase, 'c1', 'auto_send')).resolves.toBeUndefined()
+    expect(update).toHaveBeenCalledWith({ reply_mode: 'auto_send' })
+  })
+
+  it('should throw DB_ERROR when the bulk update fails', async () => {
+    const supabase = {
+      from: () => ({ update: () => ({ eq: () => Promise.resolve({ error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(syncReplyModeForClient(supabase, 'c1', 'auto_send')).rejects.toBeInstanceOf(AppError)
   })
 })
 

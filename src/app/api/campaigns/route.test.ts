@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const requireUserMock = vi.fn()
 const insertCampaignMock = vi.fn()
 const logEventMock = vi.fn()
+const getClientByIdMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/db/campaigns', () => ({ insertCampaign: (...a: unknown[]) => insertCampaignMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 
 import { POST } from './route'
@@ -25,6 +27,7 @@ beforeEach(() => {
   requireUserMock.mockReset()
   insertCampaignMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
+  getClientByIdMock.mockReset().mockResolvedValue({ id: validBody.clientId, reply_mode: 'human_approve' })
 })
 
 describe('POST /api/campaigns', () => {
@@ -69,5 +72,28 @@ describe('POST /api/campaigns', () => {
         }),
       }),
     )
+  })
+
+  it('should use the client current reply_mode as the new campaign default', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue({ id: validBody.clientId, reply_mode: 'auto_send' })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req(validBody))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ reply_mode: 'auto_send' }),
+    )
+  })
+
+  it('should return 404 when the client does not exist', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue(null)
+
+    const res = await POST(req(validBody))
+
+    expect(res.status).toBe(404)
+    expect(insertCampaignMock).not.toHaveBeenCalled()
   })
 })

@@ -1926,3 +1926,55 @@ unrelated warnings, no new ones), `pnpm test` 173 files / 1771 tests passing.
 Manual in-browser verification (multi-contact case, zero-contact case,
 "New" tab send, parked-contact history) not run — no dev server session in
 this environment; only automated checks confirmed.
+
+---
+
+## Client-configurable reply mode — DONE (2026-08-03, inline, no commits)
+
+**Goal:** let a client choose, from `/settings`, how the AI handles lead
+replies across all of their campaigns — Automatic (`auto_send`), Manual
+(`human_approve`), or Hybrid — applying account-wide instead of per-campaign.
+**Design:** `docs/superpowers/specs/2026-08-03-client-reply-mode-setting-design.md`
+· **Plan:** `docs/superpowers/plans/2026-08-03-client-reply-mode-setting.md`
+
+Executed inline (no subagent dispatch), skipping the plan's per-task commit
+steps at the user's request. All 6 tasks implemented; no pipeline code
+(`src/lib/pipeline/*.ts`) changed — `getCampaignForCase()` still reads
+`campaigns.reply_mode` exclusively, and the new `clients.reply_mode` is kept
+in sync onto every campaign row for that client.
+
+- `supabase/migrations/0023_client_reply_mode.sql` — `clients.reply_mode`
+  column, reusing the existing `reply_mode` enum, `not null default
+  'human_approve'`. `src/types/database.ts` hand-edited to match (`Row`/`Insert`
+  on the `clients` table).
+- `src/lib/db/clients.ts` `updateClientReplyMode` + `src/lib/db/campaigns.ts`
+  `syncReplyModeForClient` (bulk `.update({ reply_mode }).eq('client_id', ...)`,
+  deliberately **no status filter** — active, paused, and archived campaigns
+  all get the new mode immediately). 4 new tests across both files.
+- `src/app/api/campaigns/route.ts` — campaign creation now fetches the client
+  row first (404s on `client_not_found`) and passes `client.reply_mode`
+  explicitly into the insert, so a new campaign for a client already on
+  `auto_send` no longer silently starts on the `human_approve` column default.
+  2 new tests (client-mode default, 404 path), 6/6 passing.
+- `src/app/(app)/settings/reply-mode-actions.ts` (new) — `updateReplyMode`
+  Server Action: `client`-role + non-null `client_id` only (`FORBIDDEN`
+  otherwise), Zod-validates the enum, writes `updateClientReplyMode` then
+  `syncReplyModeForClient` in that order (both target the terminal value, so
+  a retry after a partial failure is idempotent), logs
+  `client.reply_mode_changed`, revalidates `/settings`. 3/3 tests.
+- `src/app/(app)/settings/reply-mode-section.tsx` (new, client component) —
+  labeled `<select>` matching `mailbox-controls.tsx` styling, three options
+  each with inline one-line help text, `useTransition` + optimistic revert
+  on a failed save (matches `pipeline-picker.tsx`'s pattern). No component
+  test, matching the codebase's existing convention for small settings
+  selects (`QUALITY.md`: "React components: critical paths only").
+- `src/app/(app)/settings/page.tsx` — loads the client's row via
+  `getClientById` when `appUser.client_id` is set and renders a new
+  "Reply mode" `Section` above "Connect a mailbox"; renders nothing for an
+  operator viewing their own settings (no `client_id` to scope to).
+
+Verified: `pnpm typecheck` clean, `pnpm test` 174 files / 1780 tests passing.
+Manual in-browser verification (switch the setting as a client-role user,
+confirm every campaign row updates in the DB, confirm a newly created
+campaign inherits the new mode) not run — no dev server / live Supabase
+session in this environment; only automated checks confirmed.
