@@ -786,6 +786,110 @@ export interface Database {
           },
         ]
       }
+      crm_connections: {
+        Row: {
+          id: string
+          client_id: string
+          provider: Database['public']['Enums']['crm_provider']
+          account_label: string | null
+          account_ref: string | null
+          oauth: Json
+          pipeline_id: string | null
+          pipeline_label: string | null
+          initial_stage_id: string | null
+          won_stage_id: string | null
+          lost_stage_id: string | null
+          status: Database['public']['Enums']['crm_connection_status']
+          status_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          provider: Database['public']['Enums']['crm_provider']
+          account_label?: string | null
+          account_ref?: string | null
+          oauth?: Json
+          pipeline_id?: string | null
+          pipeline_label?: string | null
+          initial_stage_id?: string | null
+          won_stage_id?: string | null
+          lost_stage_id?: string | null
+          status?: Database['public']['Enums']['crm_connection_status']
+          status_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['crm_connections']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'crm_connections_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: true
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      case_crm_links: {
+        Row: {
+          id: string
+          client_id: string
+          case_id: string
+          crm_connection_id: string
+          external_contact_ids: string[]
+          external_company_id: string | null
+          external_deal_id: string | null
+          external_deal_url: string | null
+          sync_started_at: string | null
+          last_synced_at: string | null
+          last_sync_status: Database['public']['Enums']['crm_sync_status'] | null
+          last_sync_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          case_id: string
+          crm_connection_id: string
+          external_contact_ids?: string[]
+          external_company_id?: string | null
+          external_deal_id?: string | null
+          external_deal_url?: string | null
+          sync_started_at?: string | null
+          last_synced_at?: string | null
+          last_sync_status?: Database['public']['Enums']['crm_sync_status'] | null
+          last_sync_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['case_crm_links']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'case_crm_links_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'case_crm_links_case_id_fkey'
+            columns: ['case_id']
+            isOneToOne: true
+            referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'case_crm_links_crm_connection_id_fkey'
+            columns: ['crm_connection_id']
+            isOneToOne: false
+            referencedRelation: 'crm_connections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -914,7 +1018,17 @@ export interface Database {
     Enums: {
       user_role: 'operator' | 'client'
       log_severity: 'info' | 'warn' | 'error'
-      log_source: 'app' | 'pipeline' | 'gemini' | 'apollo' | 'brightdata' | 'mailbox' | 'qstash' | 'db' | 'emailable'
+      log_source:
+        | 'app'
+        | 'pipeline'
+        | 'gemini'
+        | 'apollo'
+        | 'brightdata'
+        | 'mailbox'
+        | 'qstash'
+        | 'db'
+        | 'emailable'
+        | 'crm'
       client_status: 'active' | 'paused' | 'archived'
       campaign_status: 'active' | 'paused' | 'archived'
       reply_mode: 'auto_send' | 'human_approve' | 'hybrid'
@@ -945,6 +1059,9 @@ export interface Database {
       knowledge_source_type: 'website_page' | 'pdf' | 'file' | 'resource'
       knowledge_source_status: 'pending' | 'ready' | 'failed'
       resource_content_status: 'pending' | 'ready' | 'failed' | 'unsupported'
+      crm_provider: 'hubspot' | 'pipedrive'
+      crm_connection_status: 'connected' | 'error'
+      crm_sync_status: 'ok' | 'error'
     }
     CompositeTypes: Record<string, never>
   }

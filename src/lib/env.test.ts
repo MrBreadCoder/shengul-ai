@@ -20,6 +20,10 @@ const complete: Record<string, string> = {
   APOLLO_API_KEY: 'apollo-key',
   EMAILABLE_API_KEY: 'emailable-key',
   MAILREACH_API_KEY: 'mailreach-key',
+  HUBSPOT_OAUTH_CLIENT_ID: 'hs-id',
+  HUBSPOT_OAUTH_CLIENT_SECRET: 'hs-secret',
+  PIPEDRIVE_OAUTH_CLIENT_ID: 'pd-id',
+  PIPEDRIVE_OAUTH_CLIENT_SECRET: 'pd-secret',
 }
 
 describe('loadEnv', () => {

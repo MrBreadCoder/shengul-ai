@@ -3,6 +3,7 @@
 //
 //   pnpm seed:dev                 # seed (refuses to run if data already exists)
 //   pnpm seed:dev --reset         # wipe all rows in these tables, then seed
+//   pnpm seed:dev --additive      # keep existing rows, add a new fake client alongside them
 //   pnpm seed:dev --dry-run       # generate + print the summary, write nothing
 //   pnpm seed:dev --seed=123      # different dataset from the same generator
 //   pnpm seed:dev --password=…    # override the well-known default seed-account password
@@ -11,7 +12,8 @@
 // at a database whose contents you care about: --reset is unconditional, and
 // the default password is a well-known constant checked into this repo. Any
 // target that isn't the local Supabase CLI instance (127.0.0.1/localhost)
-// requires --i-am-sure to run at all.
+// requires --i-am-sure to run at all. --additive never deletes anything, but
+// it still creates real auth users and fake rows in whatever DB you point it at.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod/v3';
 import type { Database } from '../src/types/database'
@@ -48,10 +50,13 @@ const envSchema = z.object({
 
 const argsSchema = z.object({
   reset: z.boolean(),
+  additive: z.boolean(),
   dryRun: z.boolean(),
   iAmSure: z.boolean(),
   seed: z.number().int(),
   password: z.string().min(6),
+}).refine((args) => !(args.reset && args.additive), {
+  message: '--reset and --additive are mutually exclusive',
 })
 
 type Args = z.infer<typeof argsSchema>
@@ -69,6 +74,7 @@ function parseArgs(argv: readonly string[]): Args {
   const rawSeed = values.get('--seed')
   const parsed = argsSchema.safeParse({
     reset: flags.has('--reset'),
+    additive: flags.has('--additive'),
     dryRun: flags.has('--dry-run'),
     iAmSure: flags.has('--i-am-sure'),
     seed: rawSeed === undefined ? DEFAULT_SEED : Number(rawSeed),
@@ -242,10 +248,14 @@ async function main(): Promise<void> {
 
   if (args.reset) {
     await resetDatabase(admin)
-  } else {
+  } else if (!args.additive) {
     const existing = await countClients(admin)
     if (existing > 0) {
-      throw new AppError('VALIDATION_ERROR', `Database already has ${existing} client(s). Re-run with --reset to replace them.`, {})
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `Database already has ${existing} client(s). Re-run with --reset to replace them, or --additive to add a new fake client alongside existing data.`,
+        {},
+      )
     }
   }
 

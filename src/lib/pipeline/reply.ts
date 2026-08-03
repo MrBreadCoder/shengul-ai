@@ -11,6 +11,7 @@ import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge
 import { addSuppression } from '@/lib/db/suppressions'
 import { stopSequenceForLead } from '@/lib/db/sequences'
 import { updateCaseStatus } from '@/lib/db/cases'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import { triggerCollisionNotice } from '@/lib/pipeline/collision-notify'
 import { createKnowledgeRequest } from '@/lib/db/knowledge-requests'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
@@ -271,6 +272,7 @@ export async function runReplyForInbound(
 
   // A reply always means we are in a conversation now.
   await updateCaseStatus(supabase, inbound.case_id, 'in_conversation')
+  await enqueueCrmSync(inbound.case_id, 'in_conversation')
 
   switch (classification.intent) {
     case 'price': {
@@ -284,6 +286,7 @@ export async function runReplyForInbound(
       await addSuppression(supabase, { clientId: inbound.client_id, email: lead.email, reason: 'price_handoff' })
       await stopSequenceForLead(supabase, inbound.lead_id, 'stopped')
       await updateCaseStatus(supabase, inbound.case_id, 'hot_handoff')
+      await enqueueCrmSync(inbound.case_id, 'hot_handoff')
       await triggerCollisionNotice(supabase, inbound.case_id, inbound.lead_id)
       await logEventSafe({
         clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
@@ -295,6 +298,7 @@ export async function runReplyForInbound(
       await addSuppression(supabase, { clientId: inbound.client_id, email: lead.email, reason: 'manual' })
       await stopSequenceForLead(supabase, inbound.lead_id, 'stopped')
       await updateCaseStatus(supabase, inbound.case_id, 'lost')
+      await enqueueCrmSync(inbound.case_id, 'lost')
       await logEventSafe({
         clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
         type: 'reply.opt_out', payload: { emailId: inbound.id, leadId: inbound.lead_id },

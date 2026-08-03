@@ -16,6 +16,7 @@ export const LOG_SOURCES: readonly LogSource[] = [
   'qstash',
   'db',
   'emailable',
+  'crm',
 ] as const
 
 /**

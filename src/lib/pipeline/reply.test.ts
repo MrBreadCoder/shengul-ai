@@ -21,6 +21,7 @@ const listActiveResourcesForClientMock = vi.fn()
 const insertEmailAttachmentsMock = vi.fn()
 const loadResourceAttachmentsMock = vi.fn()
 const retrieveClientKnowledgeMock = vi.fn()
+const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
@@ -54,6 +55,7 @@ vi.mock('@/lib/db/email-attachments', () => ({
 vi.mock('@/lib/resources/load-attachments', () => ({
   loadResourceAttachments: (...a: unknown[]) => loadResourceAttachmentsMock(...a),
 }))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runReplyForInbound, replyDisposition, sendOrDraftReply } from './reply'
 
@@ -77,7 +79,7 @@ beforeEach(() => {
     claimReplyEmailMock, markEmailSentMock, markEmailFailedMock, addSuppressionMock, stopSequenceForLeadMock,
     updateCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
     triggerCollisionNoticeMock, listActiveResourcesForClientMock, insertEmailAttachmentsMock,
-    loadResourceAttachmentsMock, retrieveClientKnowledgeMock]) m.mockReset()
+    loadResourceAttachmentsMock, retrieveClientKnowledgeMock, enqueueCrmSyncMock]) m.mockReset()
   getEmailByIdMock.mockResolvedValue(inbound)
   getLeadByIdMock.mockResolvedValue(lead)
   getCampaignForCaseMock.mockResolvedValue(campaign)

@@ -19,6 +19,7 @@ import { getLeadById } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { updateCaseStatus } from '@/lib/db/cases'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateText, type LlmCallContext } from '@/lib/llm/client'
 import { publishJsonWithDelay } from '@/lib/qstash/client'
@@ -283,6 +284,7 @@ export async function runFollowupStep(
     await advanceSequence(supabase, sequence.id, { currentStep: input.step, nextActionAt: null, qstashMessageId: null })
     await stopSequence(supabase, sequence.id, 'stopped')
     await updateCaseStatus(supabase, sequence.case_id, 'dead')
+    await enqueueCrmSync(sequence.case_id, 'dead')
     await logEventSafe({
       clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR,
       type: 'pipeline.followup.exhausted', payload: { sequenceId: sequence.id, step: input.step },

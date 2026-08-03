@@ -7,6 +7,7 @@ import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
 import { updateCaseStatus } from '@/lib/db/cases'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext } from '@/lib/llm/client'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
@@ -173,6 +174,7 @@ export async function runWriteForCase(
   }
 
   await updateCaseStatus(supabase, input.caseId, 'contacted')
+  await enqueueCrmSync(input.caseId, 'contacted')
   await logEventSafe({
     clientId: input.clientId,
     caseId: input.caseId,

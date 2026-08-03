@@ -25,6 +25,10 @@ const envSchema = publicEnvSchema.extend({
   APOLLO_API_KEY: nonEmpty,
   EMAILABLE_API_KEY: nonEmpty,
   MAILREACH_API_KEY: nonEmpty,
+  HUBSPOT_OAUTH_CLIENT_ID: nonEmpty,
+  HUBSPOT_OAUTH_CLIENT_SECRET: nonEmpty,
+  PIPEDRIVE_OAUTH_CLIENT_ID: nonEmpty,
+  PIPEDRIVE_OAUTH_CLIENT_SECRET: nonEmpty,
 })
 
 export type Env = z.infer<typeof envSchema>

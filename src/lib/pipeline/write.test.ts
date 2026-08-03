@@ -13,6 +13,7 @@ const generateJsonMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
+const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
 vi.mock('@/lib/db/leads', () => ({ listActiveLeadsForCase: (...a: unknown[]) => listActiveLeadsMock(...a) }))
@@ -32,6 +33,7 @@ vi.mock('@/lib/llm/client', () => ({ generateJson: (...a: unknown[]) => generate
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runWriteForCase } from './write'
 
@@ -44,7 +46,7 @@ const input = {
 beforeEach(() => {
   for (const m of [listKnowledgeMock, listActiveLeadsMock, isSuppressedMock, claimOutboundEmailMock,
     markEmailSentMock, markEmailFailedMock, createSequenceMock, advanceSequenceMock, sendViaMailboxMock,
-    generateJsonMock, updateCaseStatusMock, publishDelayMock, logEventMock]) m.mockReset()
+    generateJsonMock, updateCaseStatusMock, publishDelayMock, logEventMock, enqueueCrmSyncMock]) m.mockReset()
   listKnowledgeMock.mockResolvedValue([{ kind: 'company', content: 'builds widgets' }])
   isSuppressedMock.mockResolvedValue(false)
   generateJsonMock.mockResolvedValue({ subject: 'Quick idea for Acme', body: 'Hi Jane...' })

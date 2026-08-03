@@ -17,6 +17,7 @@ const getCampaignForCaseMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
+const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/db/sequences', () => ({
   getSequenceById: (...a: unknown[]) => getSequenceByIdMock(...a),
@@ -40,6 +41,7 @@ vi.mock('@/lib/llm/client', () => ({ generateText: (...a: unknown[]) => generate
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runFollowupStep, FOLLOWUP_DELAYS_SECONDS } from './followup'
 
@@ -50,7 +52,7 @@ beforeEach(() => {
   for (const m of [getSequenceByIdMock, hasInboundReplyMock, stopSequenceMock, advanceSequenceMock,
     getLeadByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock, markEmailFailedMock,
     isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock, updateCaseStatusMock,
-    publishDelayMock, logEventMock, consumeFollowupSkipMock]) m.mockReset()
+    publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock]) m.mockReset()
   getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)

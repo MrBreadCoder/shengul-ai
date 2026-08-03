@@ -1495,7 +1495,7 @@ Implements `CrmProvider` against the HubSpot CRM v3 API. Uses **search-then-crea
 
 **Reference:** HubSpot association type ids used below are HubSpot-defined constants — deal→contact `3`, deal→company `341`, note→deal `214`. Deal-stage closure is read from `stage.metadata.probability`: `"1.0"` is closed-won, `"0.0"` is closed-lost.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/lib/crm/hubspot-provider.test.ts`:
 
@@ -1830,12 +1830,12 @@ describe('hubspotProvider.addDealNote', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/lib/crm/hubspot-provider.test.ts`
 Expected: FAIL — cannot resolve `./hubspot-provider`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/crm/hubspot-provider.ts`:
 
@@ -2215,12 +2215,12 @@ export const hubspotProvider: CrmProvider = {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/lib/crm/hubspot-provider.test.ts`
 Expected: PASS, 20 tests.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -2245,7 +2245,7 @@ Pipedrive differs from HubSpot in three ways that shape this implementation: the
 - Consumes: `CrmProvider` and its input types (Task 3); `hubspotProvider` (Task 6).
 - Produces: `export const pipedriveProvider: CrmProvider`, `getCrmProvider(provider: CrmProviderName): CrmProvider`.
 
-- [ ] **Step 1: Write the failing Pipedrive test**
+- [x] **Step 1: Write the failing Pipedrive test**
 
 Create `src/lib/crm/pipedrive-provider.test.ts`:
 
@@ -2527,12 +2527,12 @@ describe('pipedriveProvider.addDealNote', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/lib/crm/pipedrive-provider.test.ts`
 Expected: FAIL — cannot resolve `./pipedrive-provider`.
 
-- [ ] **Step 3: Write the Pipedrive implementation**
+- [x] **Step 3: Write the Pipedrive implementation**
 
 Create `src/lib/crm/pipedrive-provider.ts`:
 
@@ -2826,12 +2826,12 @@ export const pipedriveProvider: CrmProvider = {
 }
 ```
 
-- [ ] **Step 4: Run the Pipedrive test to verify it passes**
+- [x] **Step 4: Run the Pipedrive test to verify it passes**
 
 Run: `pnpm vitest run src/lib/crm/pipedrive-provider.test.ts`
 Expected: PASS, 17 tests.
 
-- [ ] **Step 5: Write the failing registry test**
+- [x] **Step 5: Write the failing registry test**
 
 Create `src/lib/crm/registry.test.ts`:
 
@@ -2854,7 +2854,7 @@ describe('getCrmProvider', () => {
 })
 ```
 
-- [ ] **Step 6: Write the registry**
+- [x] **Step 6: Write the registry**
 
 Create `src/lib/crm/registry.ts`:
 
@@ -2877,12 +2877,12 @@ export function getCrmProvider(provider: CrmProviderName): CrmProvider {
 }
 ```
 
-- [ ] **Step 7: Run the registry test to verify it passes**
+- [x] **Step 7: Run the registry test to verify it passes**
 
 Run: `pnpm vitest run src/lib/crm/registry.test.ts`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 8: Verify and commit**
+- [x] **Step 8: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -2914,7 +2914,7 @@ git commit -m "feat: add Pipedrive CRM provider and provider registry"
 
 **Contract:** retryable failures (429, 5xx, timeout) are **thrown** so the route returns 500 and QStash retries. Terminal outcomes are **returned** so the route returns 200.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/lib/crm/sync.test.ts`:
 
@@ -3271,12 +3271,12 @@ describe('runCrmSync — token persistence', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/lib/crm/sync.test.ts`
 Expected: FAIL — cannot resolve `./sync`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/crm/sync.ts`:
 
@@ -3572,12 +3572,12 @@ export async function runCrmSync(
 
 `logError` takes `{ clientId, caseId, actor, type, source, error, payload }` — `source` is required and `payload` (not `context`) carries the extra fields. `source: 'crm'` is the enum value added by the Task 1 migration; if `pnpm typecheck` rejects it, `src/types/database.ts` was not regenerated after that migration. Also add `'crm'` to the `LOG_SOURCES` array in `src/types/logs.ts` so it appears in the Logs tab source filter.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/lib/crm/sync.test.ts`
 Expected: PASS, 22 tests.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -3602,7 +3602,7 @@ A thin adapter, per `QUALITY.md`: verify signature → validate body → delegat
 
 **Status-code contract:** `busy` and retryable throws → **500** (QStash retries). `synced`, `skipped`, `permanent_failure` → **200**. Signature failure → **401**. Bad body → **400**.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/app/api/crm/sync/route.test.ts`:
 
@@ -3698,12 +3698,12 @@ describe('POST /api/crm/sync', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm vitest run src/app/api/crm/sync/route.test.ts`
 Expected: FAIL — cannot resolve `./route`.
 
-- [ ] **Step 3: Write the route**
+- [x] **Step 3: Write the route**
 
 Create `src/app/api/crm/sync/route.ts`:
 
@@ -3779,12 +3779,12 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/app/api/crm/sync/route.test.ts`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -3810,7 +3810,7 @@ Mirrors `/api/mailboxes/google/{connect,callback}` with one deliberate inversion
 - Consumes: `getCrmProvider` (Task 7); `encryptCrmTokens` (Task 2); `upsertCrmConnection` (Task 4); `requireUser`; `timingSafeEqualString`; `createAdminClient`; `logEvent`.
 - Produces: `GET /api/crm/hubspot/connect`, `GET /api/crm/hubspot/callback`, and the same pair for `pipedrive`.
 
-- [ ] **Step 1: Write the shared state-cookie module**
+- [x] **Step 1: Write the shared state-cookie module**
 
 Create `src/app/api/crm/[provider]/state-cookie.ts`:
 
@@ -3821,7 +3821,7 @@ export const CRM_OAUTH_STATE_COOKIE_PATH = '/api/crm'
 export const CRM_OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 600
 ```
 
-- [ ] **Step 2: Write the failing connect-route test**
+- [x] **Step 2: Write the failing connect-route test**
 
 Create `src/app/api/crm/[provider]/connect/route.test.ts`:
 
@@ -3875,7 +3875,7 @@ describe('GET /api/crm/[provider]/connect', () => {
 })
 ```
 
-- [ ] **Step 3: Write the connect route**
+- [x] **Step 3: Write the connect route**
 
 Create `src/app/api/crm/[provider]/connect/route.ts`:
 
@@ -3929,7 +3929,7 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
 }
 ```
 
-- [ ] **Step 4: Write the failing callback-route test**
+- [x] **Step 4: Write the failing callback-route test**
 
 Create `src/app/api/crm/[provider]/callback/route.test.ts`:
 
@@ -4031,7 +4031,7 @@ describe('GET /api/crm/[provider]/callback', () => {
 })
 ```
 
-- [ ] **Step 5: Write the callback route**
+- [x] **Step 5: Write the callback route**
 
 Create `src/app/api/crm/[provider]/callback/route.ts`:
 
@@ -4123,12 +4123,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Next
 }
 ```
 
-- [ ] **Step 6: Run both route tests to verify they pass**
+- [x] **Step 6: Run both route tests to verify they pass**
 
 Run: `pnpm vitest run src/app/api/crm`
 Expected: PASS — 3 connect tests, 7 callback tests, plus the 9 sync tests from Task 9.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -4159,7 +4159,7 @@ Four states, all handled: no connection, setup incomplete, connected, errored. C
 - Consumes: `getCrmConnectionForClient`, `updateCrmConnectionPipeline`, `deleteCrmConnection` (Task 4); `getCrmProvider` (Task 7); `parseCrmTokens` (Task 2); `requireUser`; `createServerClient` / `createAdminClient`.
 - Produces: Server Actions `selectCrmPipeline(formData: FormData): Promise<void>` and `disconnectCrm(): Promise<void>`.
 
-- [ ] **Step 1: Write the failing actions test**
+- [x] **Step 1: Write the failing actions test**
 
 Create `src/app/(app)/settings/crm/actions.test.ts`:
 
@@ -4267,7 +4267,7 @@ describe('disconnectCrm', () => {
 })
 ```
 
-- [ ] **Step 2: Write the Server Actions**
+- [x] **Step 2: Write the Server Actions**
 
 Create `src/app/(app)/settings/crm/actions.ts`:
 
@@ -4364,12 +4364,12 @@ Also change the two closed-stage reads to normalize the empty string the form su
     lostStageId: formData.get('lostStageId') || null,
 ```
 
-- [ ] **Step 3: Run the actions test to verify it passes**
+- [x] **Step 3: Run the actions test to verify it passes**
 
 Run: `pnpm vitest run "src/app/(app)/settings/crm/actions.test.ts"`
 Expected: PASS, 8 tests.
 
-- [ ] **Step 3b: Add the last-sync lookup the connection card needs**
+- [x] **Step 3b: Add the last-sync lookup the connection card needs**
 
 The card shows when the connection last did anything, but `last_synced_at` lives per case link, not on the connection. Append to `src/lib/db/case-crm-links.ts`:
 
@@ -4476,7 +4476,7 @@ export function ConnectCrmButtons(): React.ReactElement {
 }
 ```
 
-- [ ] **Step 5: Write the pipeline picker**
+- [x] **Step 5: Write the pipeline picker**
 
 Create `src/app/(app)/settings/crm/pipeline-picker.tsx`. A Client Component so the pending state is visible; the pipeline data is fetched server-side and passed as props (never fetched in a Client Component):
 
@@ -4576,7 +4576,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
 
 The empty `value=""` on the hidden won/lost inputs is what makes the action's `.nullable().default(null)` fire — normalize `''` to `null` in the action by reading `formData.get(...) || null` for those two fields.
 
-- [ ] **Step 6: Write the connection card**
+- [x] **Step 6: Write the connection card**
 
 Create `src/app/(app)/settings/crm/connection-card.tsx`:
 
@@ -4661,7 +4661,7 @@ export function ConnectionCard({
 }
 ```
 
-- [ ] **Step 7: Write the page plus its loading and error boundaries**
+- [x] **Step 7: Write the page plus its loading and error boundaries**
 
 Create `src/app/(app)/settings/crm/page.tsx`:
 
@@ -4761,7 +4761,7 @@ export default async function CrmSettingsPage(): Promise<React.ReactElement> {
 
 Create `src/app/(app)/settings/crm/loading.tsx` and `error.tsx` by copying the shape of the existing `src/app/(app)/inbox/loading.tsx` and `error.tsx` — same components, title "CRM".
 
-- [ ] **Step 8: Verify and commit**
+- [x] **Step 8: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -4786,7 +4786,7 @@ One read, one line of UI. Shows where the case landed in the client's CRM, or wh
 - Consumes: `getCaseCrmLink` (Task 5).
 - Produces: `CrmLinkBadge` component.
 
-- [ ] **Step 1: Write the badge component**
+- [x] **Step 1: Write the badge component**
 
 Create `src/app/(app)/cases/[id]/crm-link-badge.tsx`:
 
@@ -4830,7 +4830,7 @@ export function CrmLinkBadge({ provider, dealUrl, syncError }: CrmLinkBadgeProps
 }
 ```
 
-- [ ] **Step 2: Wire it into the case page**
+- [x] **Step 2: Wire it into the case page**
 
 In `src/app/(app)/cases/[id]/page.tsx`:
 
@@ -4859,7 +4859,7 @@ Use whatever the page already names its case id and case row variables.
 ) : null}
 ```
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify (commit skipped per user request)**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 
@@ -4885,7 +4885,7 @@ Last on purpose: nothing fires until the worker and both providers are proven. S
 - Consumes: `enqueueCrmSync`, `CrmSyncReason` (Task 8).
 - Produces: nothing new.
 
-- [ ] **Step 1: Add the call sites**
+- [x] **Step 1: Add the call sites**
 
 In each file, add `import { enqueueCrmSync } from '@/lib/crm/sync'` to the internal-absolute import group, then insert the matching line **immediately after** the existing `updateCaseStatus` call:
 
@@ -4900,7 +4900,7 @@ In each file, add `import { enqueueCrmSync } from '@/lib/crm/sync'` to the inter
 
 `enqueueCrmSync` never throws, so no call site needs a try/catch. Match each file's existing variable name for the case id — the table above uses the names visible at those line numbers today; verify before editing, since earlier tasks may have shifted them.
 
-- [ ] **Step 2: Add a regression test for one call site**
+- [x] **Step 2: Add a regression test for one call site**
 
 `src/lib/pipeline/research.test.ts` declares its mocks as plain `vi.fn()` consts (not `vi.hoisted`), so follow that. Add next to the existing mock consts at the top:
 
@@ -4945,12 +4945,12 @@ Then add these two tests inside the `describe('runResearchForCase', ...)` block:
   })
 ```
 
-- [ ] **Step 3: Run the pipeline tests**
+- [x] **Step 3: Run the pipeline tests**
 
 Run: `pnpm vitest run src/lib/pipeline`
 Expected: PASS. If a test fails on an unmocked `@/lib/crm/sync`, add the mock above to that file too — `enqueueCrmSync` reaches for `createAdminClient` and QStash, neither of which belongs in a pipeline unit test.
 
-- [ ] **Step 4: Update the roadmap**
+- [x] **Step 4: Update the roadmap**
 
 Append to `.claude/roadmap.md`, after the P2 section:
 
@@ -4971,12 +4971,12 @@ Append to `.claude/roadmap.md`, after the P2 section:
 **Out of scope:** pulling from the CRM, two-way sync, backfilling pre-connection cases, custom field mapping, Salesforce, CRM-side webhooks.
 ```
 
-- [ ] **Step 5: Full verification**
+- [x] **Step 5: Full verification**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: all green. Record the actual test-file and test counts in the commit message rather than guessing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit (skipped per user request)**
 
 ```bash
 git add src/lib/pipeline/ .claude/roadmap.md
@@ -4989,11 +4989,11 @@ git commit -m "feat: enqueue CRM syncs from every case status transition"
 
 Run after Task 13, before calling the feature done:
 
-- [ ] `pnpm test` — full suite green, with new tests for tokens, mapping, both providers, registry, both DB modules, sync, all three routes, and the Server Actions.
-- [ ] `pnpm typecheck` — clean.
-- [ ] `pnpm lint` — no new warnings.
-- [ ] `grep -rn "TODO\|FIXME\|console\.log" src/lib/crm src/app/api/crm "src/app/(app)/settings/crm"` returns nothing.
-- [ ] `grep -rn "supabase.from(" src/lib/crm src/app/api/crm "src/app/(app)/settings/crm"` returns nothing — all data access is in `src/lib/db/`.
+- [x] `pnpm test` — full suite green, with new tests for tokens, mapping, both providers, registry, both DB modules, sync, all three routes, and the Server Actions.
+- [x] `pnpm typecheck` — clean.
+- [x] `pnpm lint` — no new warnings.
+- [x] `grep -rn "TODO\|FIXME\|console\.log" src/lib/crm src/app/api/crm "src/app/(app)/settings/crm"` returns nothing.
+- [x] `grep -rn "supabase.from(" src/lib/crm src/app/api/crm "src/app/(app)/settings/crm"` returns nothing — all data access is in `src/lib/db/`.
 - [ ] Manual: connect a HubSpot sandbox as a client-role user, pick a pipeline, force a case to `ready`, confirm one Contact, one Company, one Deal with a note appear, and that re-running the sync creates no duplicates.
 - [ ] Manual: revoke the app in HubSpot, trigger a sync, confirm `/settings/crm` shows the reconnect banner and no further syncs are published.
 

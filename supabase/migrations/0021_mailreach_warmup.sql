@@ -14,3 +14,5 @@ alter table mailboxes add column mailreach_account_id       text;
 alter table mailboxes add column mailreach_status           mailreach_status not null default 'disconnected';
 alter table mailboxes add column mailreach_reputation_score numeric;
 alter table mailboxes add column mailreach_stats_synced_at  timestamptz;
+
+

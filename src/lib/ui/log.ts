@@ -19,6 +19,7 @@ export const LOG_SOURCE_META: Record<LogSource, StatusMeta> = {
   qstash: { label: 'QStash', color: 'var(--status-dead)' },
   db: { label: 'Database', color: 'var(--status-lost)' },
   emailable: { label: 'Emailable', color: 'var(--status-hot-handoff)' },
+  crm: { label: 'CRM', color: 'var(--status-in-conversation)' },
 }
 
 export const LOG_SEVERITY_FILTER_LABEL: Record<LogSeverityFilter, string> = {

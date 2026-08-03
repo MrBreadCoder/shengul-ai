@@ -4,6 +4,7 @@ import type { WebResearch, ResearchLead } from '@/lib/research/provider'
 import { runResearchAgent, type ResearchAgentRole, type AgentDossierEntry } from '@/lib/research/agent'
 import { insertKnowledge, type KnowledgeInsert } from '@/lib/db/case-knowledge'
 import { updateCaseStatus } from '@/lib/db/cases'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import { logEventSafe } from '@/lib/events/log-event'
 import { type LlmCallContext } from '@/lib/llm/client'
 import { isAppError } from '@/lib/errors/app-error'
@@ -109,6 +110,7 @@ export async function runResearchForCase(
 
   const inserted = await insertKnowledge(supabase, toRows(input, entries))
   await updateCaseStatus(supabase, input.caseId, 'ready')
+  await enqueueCrmSync(input.caseId, 'qualified')
   await logEventSafe({
     clientId: input.clientId,
     caseId: input.caseId,

@@ -4,6 +4,7 @@ const runResearchAgentMock = vi.fn()
 const insertKnowledgeMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
 const logEventMock = vi.fn()
+const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/research/agent', () => ({ runResearchAgent: (...a: unknown[]) => runResearchAgentMock(...a) }))
 vi.mock('@/lib/db/case-knowledge', () => ({ insertKnowledge: (...a: unknown[]) => insertKnowledgeMock(...a) }))
@@ -12,6 +13,7 @@ vi.mock('@/lib/events/log-event', () => ({
   logEvent: (...a: unknown[]) => logEventMock(...a),
   logEventSafe: (...a: unknown[]) => logEventMock(...a),
 }))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runResearchForCase } from './research'
 
@@ -24,6 +26,7 @@ const input = {
 beforeEach(() => {
   runResearchAgentMock.mockReset(); insertKnowledgeMock.mockReset()
   updateCaseStatusMock.mockReset(); logEventMock.mockReset()
+  enqueueCrmSyncMock.mockReset()
 })
 
 describe('runResearchForCase', () => {
@@ -91,5 +94,26 @@ describe('runResearchForCase', () => {
     await runResearchForCase({} as never, { research }, { ...input, leads: [] })
 
     expect(runResearchAgentMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('should enqueue a CRM sync once the case is marked ready', async () => {
+    runResearchAgentMock
+      .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: null, citation: null }])
+      .mockResolvedValueOnce([])
+    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'qualified')
+  })
+
+  it('should not enqueue a CRM sync when the case never reaches ready', async () => {
+    runResearchAgentMock
+      .mockRejectedValueOnce(new Error('down'))
+      .mockRejectedValueOnce(new Error('down'))
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 })
