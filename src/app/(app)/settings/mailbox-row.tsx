@@ -5,7 +5,7 @@ import { EnvelopeSimple, GoogleLogo, MicrosoftOutlookLogo, PaperPlaneTilt } from
 import { Button } from '@/components/ui/button'
 import { StatusPill } from '@/components/status-dot'
 import { MAILBOX_HEALTH } from '@/lib/ui/status'
-import { effectiveDailyCap, type WarmupProfile } from '@/lib/mailbox/warmup'
+import { effectiveDailyCap, getMailboxWarmthStatus, type WarmupProfile } from '@/lib/mailbox/warmup'
 import { mailreachElapsedDays, MAILREACH_CAMPAIGN_GATE_DAYS } from '@/lib/mailbox/mailreach-gate'
 import type { Database } from '@/types/database'
 import { MailboxControls } from './mailbox-controls'
@@ -23,6 +23,9 @@ interface MailboxRowProps {
   healthReason: string | null
   warmupProfile: WarmupProfile
   warmupStartedAt: string | null
+  warmupStartCap: number
+  warmupIncrement: number
+  warmupTargetCap: number
   dailyCap: number
   sentToday: number
   viewerRole: UserRole
@@ -62,13 +65,18 @@ const PROVIDER_ICON = {
 export function MailboxRow(props: MailboxRowProps): React.ReactElement {
   const [state, setState] = useState<SendState>({ status: 'idle' })
   const Icon = PROVIDER_ICON[props.provider]
-  const capToday = effectiveDailyCap({
+  const now = new Date()
+  const rampInput = {
     profile: props.warmupProfile,
     warmupStartedAt: props.warmupStartedAt,
+    startCap: props.warmupStartCap,
+    increment: props.warmupIncrement,
+    targetCap: props.warmupTargetCap,
     dailyCap: props.dailyCap,
-    now: new Date(),
-  })
-  const isRamping = capToday < props.dailyCap
+    now,
+  }
+  const capToday = effectiveDailyCap(rampInput)
+  const warmthStatus = getMailboxWarmthStatus(rampInput)
   const mailreachText = mailreachStatusText({
     enabled: props.mailreachEnabled,
     startedAt: props.mailreachStartedAt,
@@ -112,7 +120,9 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
           <span className="tnum">
             {props.sentToday}/{capToday} today
           </span>
-          {isRamping ? ` · warming up (cap ${props.dailyCap})` : null}
+          {warmthStatus.kind === 'ramping'
+            ? ` · warming up (day ${warmthStatus.dayNumber}, target ${props.warmupTargetCap})`
+            : null}
           {props.healthReason ? ` · ${props.healthReason.replaceAll('_', ' ')}` : null}
           {mailreachText ? ` · ${mailreachText}` : null}
         </p>

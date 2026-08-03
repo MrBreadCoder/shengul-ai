@@ -209,6 +209,15 @@ describe('updateMailboxWarmup', () => {
       warmup_started_at: '2026-07-22T00:00:00.000Z',
     })
   })
+
+  it('should write only the provided ramp fields', async () => {
+    const update = vi.fn().mockReturnValue({ eq: () => Promise.resolve({ error: null }) })
+    await updateMailboxWarmup({ from: () => ({ update }) } as never, 'm1', {
+      warmup_start_cap: 8,
+      warmup_target_cap: 25,
+    })
+    expect(update).toHaveBeenCalledWith({ warmup_start_cap: 8, warmup_target_cap: 25 })
+  })
 })
 
 describe('resetDailyCounters', () => {

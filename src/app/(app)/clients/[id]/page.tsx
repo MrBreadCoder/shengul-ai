@@ -2,11 +2,12 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { z } from 'zod'
-import { ArrowLeft, Books, ChartLineUp, Lightning, ListMagnifyingGlass, UsersThree } from '@phosphor-icons/react/dist/ssr'
+import { ArrowLeft, Books, ChartLineUp, Lightning, ListMagnifyingGlass, Thermometer, UsersThree } from '@phosphor-icons/react/dist/ssr'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, listClientRoleAppUsers } from '@/lib/db/clients'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
+import { listMailboxesForClient } from '@/lib/db/mailboxes'
 import { listEventsForClient } from '@/lib/db/events'
 import { listSourcesForClient } from '@/lib/db/client-knowledge'
 import { SEVERITIES_FOR_FILTER } from '@/types/logs'
@@ -31,6 +32,7 @@ import { ClientLifecycleActions } from './client-lifecycle-actions'
 import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
 import { MailreachToggle } from './mailreach-toggle'
+import { WarmupTab } from './warmup-tab'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
 import { KnowledgeSourcesList } from './knowledge-sources-list'
@@ -40,7 +42,7 @@ import { ResourcesSection } from './resources-section'
 export const dynamic = 'force-dynamic'
 
 const paramsSchema = z.object({ id: z.string().uuid() })
-const tabSchema = z.enum(['campaigns', 'analytics', 'users', 'knowledge', 'logs'])
+const tabSchema = z.enum(['campaigns', 'warmup', 'analytics', 'users', 'knowledge', 'logs'])
 
 // Spelled out as literals rather than derived from the LOG_* arrays because
 // z.enum requires a non-empty tuple, and casting a readonly array into one
@@ -118,6 +120,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
   const nextLogCursor = hasOlderLogs ? (logs[logs.length - 1]?.created_at ?? null) : null
 
   const knowledgeSources = tab === 'knowledge' ? await listSourcesForClient(admin, clientId) : []
+  const mailboxes = tab === 'warmup' ? await listMailboxesForClient(admin, clientId) : []
 
   const now = new Date()
 
@@ -179,6 +182,12 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
               <span className="tnum text-faint">{campaigns.length}</span>
             </Link>
           </TabsTrigger>
+          <TabsTrigger value="warmup" asChild>
+            <Link href={`/clients/${clientId}?tab=warmup`}>
+              <Thermometer size={14} weight="light" />
+              Warmup
+            </Link>
+          </TabsTrigger>
           <TabsTrigger value="analytics" asChild>
             <Link href={`/clients/${clientId}?tab=analytics`}>
               <ChartLineUp size={14} weight="light" />
@@ -229,6 +238,10 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
               </ul>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="warmup">
+          <WarmupTab mailboxes={mailboxes} />
         </TabsContent>
 
         <TabsContent value="analytics">

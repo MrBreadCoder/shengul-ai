@@ -41,6 +41,7 @@ const tokens = { accessToken: 'a', refreshToken: 'r', expiresAt: '2099-01-01T00:
 const mailbox = {
   id: 'm1', provider: 'gmail', email_address: 'me@co.com', oauth: tokens, sent_today: 0, daily_cap: 50, health: 'ok',
   warmup_profile: 'none' as 'standard' | 'slow' | 'none', warmup_started_at: null as string | null,
+  warmup_start_cap: 5, warmup_increment: 3, warmup_target_cap: 50,
   mailreach_enabled: false, mailreach_started_at: null as string | null,
 }
 const baseInput = { clientId: 'c1', mailboxIds: ['m1'], to: 'x@y.com', subject: 's', body: 'b', maxJitterMs: 0, purpose: 'outreach' as const }

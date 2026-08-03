@@ -673,6 +673,9 @@ export interface Database {
           sent_today: number
           warmup_profile: Database['public']['Enums']['warmup_profile']
           warmup_started_at: string | null
+          warmup_start_cap: number
+          warmup_increment: number
+          warmup_target_cap: number
           health: Database['public']['Enums']['mailbox_health']
           health_reason: string | null
           health_changed_at: string | null
@@ -697,6 +700,9 @@ export interface Database {
           sent_today?: number
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           warmup_started_at?: string | null
+          warmup_start_cap?: number
+          warmup_increment?: number
+          warmup_target_cap?: number
           health?: Database['public']['Enums']['mailbox_health']
           health_reason?: string | null
           health_changed_at?: string | null

@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
-import type { WarmupProfile } from '@/lib/mailbox/warmup'
 import type { MailboxHealth } from '@/lib/mailbox/health'
 
 export type MailboxRow = Database['public']['Tables']['mailboxes']['Row']
@@ -141,7 +140,17 @@ export async function mailboxSendStats(
 export async function updateMailboxWarmup(
   supabase: SupabaseClient<Database>,
   id: string,
-  fields: { warmup_profile: WarmupProfile; warmup_started_at: string | null },
+  fields: Partial<
+    Pick<
+      MailboxRow,
+      | 'warmup_profile'
+      | 'warmup_started_at'
+      | 'warmup_start_cap'
+      | 'warmup_increment'
+      | 'warmup_target_cap'
+      | 'daily_cap'
+    >
+  >,
 ): Promise<void> {
   const { error } = await supabase.from('mailboxes').update(fields).eq('id', id)
   if (error) {
@@ -266,7 +275,9 @@ export async function updateInboundCursor(
 export type MailboxSummary = Pick<
   MailboxRow,
   | 'id' | 'provider' | 'email_address' | 'display_name' | 'health' | 'created_at'
-  | 'health_reason' | 'warmup_profile' | 'warmup_started_at' | 'daily_cap' | 'sent_today'
+  | 'health_reason' | 'warmup_profile' | 'warmup_started_at'
+  | 'warmup_start_cap' | 'warmup_increment' | 'warmup_target_cap'
+  | 'daily_cap' | 'sent_today'
   | 'mailreach_enabled' | 'mailreach_started_at' | 'mailreach_status' | 'mailreach_reputation_score'
 >
 
@@ -282,7 +293,7 @@ export async function listMailboxesForViewer(
   const { data, error } = await supabase
     .from('mailboxes')
     .select(
-      'id, provider, email_address, display_name, health, created_at, health_reason, warmup_profile, warmup_started_at, daily_cap, sent_today, mailreach_enabled, mailreach_started_at, mailreach_status, mailreach_reputation_score',
+      'id, provider, email_address, display_name, health, created_at, health_reason, warmup_profile, warmup_started_at, warmup_start_cap, warmup_increment, warmup_target_cap, daily_cap, sent_today, mailreach_enabled, mailreach_started_at, mailreach_status, mailreach_reputation_score',
     )
     .order('created_at', { ascending: false })
   if (error) {

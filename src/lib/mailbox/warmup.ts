@@ -4,19 +4,10 @@ import { AppError } from '@/lib/errors/app-error'
 export type WarmupProfile = Database['public']['Enums']['warmup_profile']
 
 /**
- * Day-one send allowance for a ramping mailbox. 2026 deliverability consensus
- * is to open a new mailbox at 5-10 sends/day and ramp over 2-4 weeks.
- */
-export const WARMUP_START_CAP = 5
-
-/** Sends added at each step of the ramp. */
-export const WARMUP_INCREMENT = 3
-
-/**
  * Days a mailbox holds each level before stepping up. 'standard' steps daily
- * (5, 8, 11, ...); 'slow' holds each level for two days (5, 5, 8, 8, ...) for a
- * domain that needs a gentler ramp; 'none' is an already-warm mailbox and skips
- * the ramp entirely.
+ * (start, start+increment, start+2*increment, ...); 'slow' holds each level
+ * for two days, for a domain that needs a gentler ramp; 'none' is an
+ * already-warm mailbox and skips the ramp entirely.
  */
 export const WARMUP_STEP_DAYS: Record<WarmupProfile, number> = {
   standard: 1,
@@ -29,32 +20,72 @@ const MS_PER_DAY = 86_400_000
 export interface EffectiveCapInput {
   profile: WarmupProfile
   warmupStartedAt: string | null
+  /** Day-one send allowance, per mailbox (replaces the old global WARMUP_START_CAP). */
+  startCap: number
+  /** Sends added at each step of the ramp, per mailbox (replaces WARMUP_INCREMENT). */
+  increment: number
+  /** The ramp ceiling — once the computed ramp value reaches this, the mailbox is "Already warm". */
+  targetCap: number
+  /** The already-warm cap: served directly for profile 'none', and once the ramp completes. */
   dailyCap: number
   now: Date
 }
 
-/**
- * Today's send allowance for one mailbox: the ramp level, never above the
- * operator-configured `daily_cap`. Pure so it can be exhaustively tested; the
- * atomic enforcement lives in the claim_mailbox_send RPC, which takes this
- * number and clamps it with `least(daily_cap, ...)`.
- */
-export function effectiveDailyCap({ profile, warmupStartedAt, dailyCap, now }: EffectiveCapInput): number {
-  const stepDays = WARMUP_STEP_DAYS[profile]
-  if (stepDays === 0 || warmupStartedAt === null) return dailyCap
+interface RampState {
+  rampValue: number
+  elapsedDays: number
+}
 
-  const startedAt = Date.parse(warmupStartedAt)
+/**
+ * Shared by effectiveDailyCap and getMailboxWarmthStatus so the elapsed-time
+ * and ramp-value math lives once. Returns null when the mailbox isn't
+ * ramping at all (profile 'none', or warmup never started).
+ */
+function computeRampState(input: EffectiveCapInput): RampState | null {
+  const stepDays = WARMUP_STEP_DAYS[input.profile]
+  if (stepDays === 0 || input.warmupStartedAt === null) return null
+
+  const startedAt = Date.parse(input.warmupStartedAt)
   if (Number.isNaN(startedAt)) {
     throw new AppError('INVARIANT_VIOLATION', 'Mailbox warmup_started_at is not a valid timestamp', {
-      warmupStartedAt,
+      warmupStartedAt: input.warmupStartedAt,
     })
   }
 
   // Clamped at 0 so clock skew (or a start date stamped slightly in the future)
   // opens the mailbox at the start cap rather than a negative one.
-  const elapsedDays = Math.floor((now.getTime() - startedAt) / MS_PER_DAY)
-  const steps = Math.max(0, Math.floor(elapsedDays / stepDays))
-  return Math.min(dailyCap, WARMUP_START_CAP + WARMUP_INCREMENT * steps)
+  const elapsedDays = Math.max(0, Math.floor((input.now.getTime() - startedAt) / MS_PER_DAY))
+  const steps = Math.floor(elapsedDays / stepDays)
+  return { rampValue: input.startCap + input.increment * steps, elapsedDays }
+}
+
+/**
+ * Today's send allowance for one mailbox. Fully derived — once the ramp value
+ * reaches targetCap, this starts returning dailyCap (the already-warm cap) on
+ * every subsequent call, with nothing persisted. Raising targetCap later
+ * simply makes the ramp resume on the next call.
+ */
+export function effectiveDailyCap(input: EffectiveCapInput): number {
+  const state = computeRampState(input)
+  if (state === null) return input.dailyCap
+  return state.rampValue >= input.targetCap ? input.dailyCap : state.rampValue
+}
+
+export type WarmthStatus =
+  | { kind: 'not_ramping' }
+  | { kind: 'ramping'; currentCap: number; dayNumber: number }
+  | { kind: 'ramp_complete' }
+
+/**
+ * Display-only status for the settings screen and the Clients-page Warmup
+ * tab, so both surfaces label a mailbox "Already warm" the same way whether
+ * it was set to 'none' directly or got there by finishing its ramp.
+ */
+export function getMailboxWarmthStatus(input: EffectiveCapInput): WarmthStatus {
+  const state = computeRampState(input)
+  if (state === null) return { kind: 'not_ramping' }
+  if (state.rampValue >= input.targetCap) return { kind: 'ramp_complete' }
+  return { kind: 'ramping', currentCap: state.rampValue, dayNumber: state.elapsedDays + 1 }
 }
 
 /**

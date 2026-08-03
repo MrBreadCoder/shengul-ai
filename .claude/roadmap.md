@@ -1978,3 +1978,95 @@ Manual in-browser verification (switch the setting as a client-role user,
 confirm every campaign row updates in the DB, confirm a newly created
 campaign inherits the new mode) not run — no dev server / live Supabase
 session in this environment; only automated checks confirmed.
+
+## CRM settings moved into main `/settings` page
+
+The CRM connect/pipeline/connection UI previously lived on its own route,
+`/settings/crm` (`src/app/(app)/settings/crm/`). Folded it into the main
+`/settings` page instead of a separate route:
+
+- Moved `crm/connect-crm-buttons.tsx`, `crm/connection-card.tsx`,
+  `crm/pipeline-picker.tsx` up to `src/app/(app)/settings/` (unchanged
+  content besides import paths).
+- `crm/actions.ts` -> `settings/crm-actions.ts` (renamed to avoid ambiguity
+  now that it sits next to `reply-mode-actions.ts`); `SETTINGS_PATH` updated
+  from `/settings/crm` to `/settings`. Test file moved and renamed to match.
+- Deleted `crm/page.tsx`, `crm/loading.tsx`, `crm/error.tsx` — no longer a
+  distinct route, so no route-level loading/error boundary needed.
+- `src/app/(app)/settings/page.tsx` now also fetches the CRM connection
+  (`getCrmConnectionForClient`), pipelines (when setup is incomplete), and
+  last-synced-at, rendering the same four states (no connection / error /
+  needs-pipeline / connected) as a `Section` below "Connected mailboxes".
+- `src/app/api/crm/[provider]/callback/route.ts` redirects updated from
+  `/settings/crm?...` to `/settings?...` (both the success and error paths).
+
+No nav link pointed at `/settings/crm` (the sidebar's `/crm` entry is the
+unrelated Pipeline view), so nothing else needed updating.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on touched files, both
+affected test files passing (`settings/crm-actions.test.ts`,
+`api/crm/[provider]/callback/route.test.ts`, 15/15).
+
+## Configurable per-mailbox warmup caps (all 7 tasks, plan in
+## `docs/superpowers/plans/2026-08-03-configurable-warmup-caps.md`)
+
+Executed inline (no commits made — left staged/unstaged for the user to
+review and commit). All 7 tasks done.
+
+- **Task 1** — `supabase/migrations/0024_configurable_warmup_caps.sql`:
+  adds `mailboxes.warmup_start_cap` (default 5), `warmup_increment`
+  (default 3), `warmup_target_cap` (backfilled from `daily_cap`, then set
+  `not null`). `src/types/database.ts` `mailboxes` `Row`/`Insert` widened
+  to match.
+- **Task 2** — `src/lib/mailbox/warmup.ts` rewritten: deleted the global
+  `WARMUP_START_CAP`/`WARMUP_INCREMENT` constants; `EffectiveCapInput` now
+  takes `startCap`/`increment`/`targetCap` per mailbox instead. Added
+  `getMailboxWarmthStatus()` (discriminated union: `not_ramping` /
+  `ramping` / `ramp_complete`) as the shared source of truth for "is this
+  mailbox still ramping," sharing ramp-value math with `effectiveDailyCap`
+  via an internal `computeRampState` helper. `warmup.test.ts` fully
+  rewritten, 19/19 passing.
+- **Task 3** — `src/lib/mailbox/sender.ts` now passes
+  `candidate.warmup_start_cap`/`warmup_increment`/`warmup_target_cap`
+  into `effectiveDailyCap`. `sender.test.ts` fixture updated with the
+  three new fields; 27/27 passing.
+- **Task 4** — `src/lib/db/mailboxes.ts`: `updateMailboxWarmup` now takes
+  a `Partial<Pick<MailboxRow, ...>>` covering all four numeric fields plus
+  `warmup_profile`/`warmup_started_at` (was a fixed two-field shape);
+  removed the now-unused `WarmupProfile` import. `MailboxSummary` and
+  `listMailboxesForViewer`'s select string both widened with the three new
+  columns. `mailboxes.test.ts` +1 test (partial-update case), 42/42
+  passing.
+
+- **Task 5** — `src/app/(app)/settings/mailbox-row.tsx`: now imports
+  `getMailboxWarmthStatus`, takes `warmupStartCap`/`warmupIncrement`/
+  `warmupTargetCap` props, and the "warming up" label reads
+  `day N, target T` off the shared status helper instead of comparing
+  `capToday < dailyCap`. `page.tsx` passes the three new fields through
+  from `MailboxSummary`.
+- **Task 6** — `src/app/api/mailboxes/[id]/warmup/route.ts` rewritten
+  from a single-field `{ profile }` body to a fully partial update
+  (`profile`, `warmupStartCap`, `warmupIncrement`, `warmupTargetCap`,
+  `dailyCap`, all optional, `z.number().int().positive()`). Only resets
+  `warmup_started_at` when `profile` is present **and** differs from the
+  mailbox's current stored value; a numeric-only payload never touches the
+  clock; a no-op payload skips the DB write and the event log entirely.
+  New `route.test.ts`, 8/8 passing.
+- **Task 7** — new Warmup tab on `/clients/[id]`: `warmup-mailbox-row.tsx`
+  (Client Component, per-mailbox row with profile `<select>` and four
+  `<input type="number">` fields — start cap, increment, target cap,
+  already-warm cap — each posted independently on blur via the Task 6
+  route) and `warmup-tab.tsx` (Server Component, calls
+  `listMailboxesForClient`, empty state when the client has zero
+  mailboxes). Wired into `page.tsx`: `tabSchema` gained `'warmup'`, a
+  lazily-fetched `mailboxes` var (only queried when that tab is active,
+  matching the existing `knowledgeSources` pattern), a `TabsTrigger`
+  (Thermometer icon) and `TabsContent` between Campaigns and Analytics.
+
+Verified: `pnpm typecheck` clean, `pnpm test` fully green (175 files /
+1798 tests, up from 174/1790), `pnpm lint` clean on every touched file.
+Manual in-browser verification (per the plan's Task 7 Step 6) not run — no
+dev server / live Supabase session in this environment; only automated
+checks confirmed. The migration itself has also not been applied to any
+database — that requires the user's own `supabase db reset` or equivalent
+migration-apply step before the new columns exist anywhere.

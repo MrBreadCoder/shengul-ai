@@ -176,6 +176,9 @@ export async function sendViaMailbox(
           effectiveDailyCap({
             profile: candidate.warmup_profile,
             warmupStartedAt: candidate.warmup_started_at,
+            startCap: candidate.warmup_start_cap,
+            increment: candidate.warmup_increment,
+            targetCap: candidate.warmup_target_cap,
             dailyCap: candidate.daily_cap,
             now,
           }),
