@@ -130,7 +130,7 @@ reach the chunker.
 
 ## Retrieval changes
 
-### Migration (new `supabase/migrations/0020_knowledge_hybrid_search.sql`)
+### Migration (new `supabase/migrations/0025_knowledge_hybrid_search.sql`)
 
 ```sql
 alter table client_knowledge_chunks
