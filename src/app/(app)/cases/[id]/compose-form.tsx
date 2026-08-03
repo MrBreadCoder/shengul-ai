@@ -12,13 +12,8 @@ import {
 import { ResourcePicker } from '@/components/resource-picker'
 import type { ResourceSummary } from '@/components/resource-list'
 import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS } from '@/lib/validation/email-limits'
+import type { ComposeContact } from '@/types/mail'
 import { sendManualEmail, type SendManualEmailResult } from './send-actions'
-
-export interface ComposeContact {
-  id: string
-  fullName: string
-  email: string
-}
 
 interface ComposeFormProps {
   caseId: string
@@ -80,19 +75,26 @@ export function ComposeForm({
     <form action={submit} className="border-hairline bg-surface flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex min-w-56 flex-col gap-1.5">
-          <Label htmlFor="compose-recipient">To</Label>
-          <Select value={leadId} onValueChange={setLeadId}>
-            <SelectTrigger id="compose-recipient">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {contacts.map((contact) => (
-                <SelectItem key={contact.id} value={contact.id}>
-                  {contact.fullName} — {contact.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label htmlFor={contacts.length > 1 ? 'compose-recipient' : undefined}>To</Label>
+          {contacts.length === 1 ? (
+            // length check above guarantees index 0 exists
+            <p className="text-sm font-medium">
+              {contacts[0]!.fullName} — {contacts[0]!.email}
+            </p>
+          ) : (
+            <Select value={leadId} onValueChange={setLeadId}>
+              <SelectTrigger id="compose-recipient">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {contacts.map((contact) => (
+                  <SelectItem key={contact.id} value={contact.id}>
+                    {contact.fullName} — {contact.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <div className="flex min-w-64 flex-1 flex-col gap-1.5">
           <Label htmlFor="compose-subject">Subject</Label>

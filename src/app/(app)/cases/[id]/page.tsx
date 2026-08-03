@@ -13,6 +13,8 @@ import {
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { getCaseById } from '@/lib/db/cases'
+import { getCaseCrmLink } from '@/lib/db/case-crm-links'
+import { getCrmConnectionForClient } from '@/lib/db/crm-connections'
 import { listLeadsForCase } from '@/lib/db/leads'
 import { listEmailsForCase } from '@/lib/db/emails'
 import { listKnowledgeForCase } from '@/lib/db/case-knowledge'
@@ -22,16 +24,17 @@ import { getCampaignById } from '@/lib/db/campaigns'
 import { listNotesForCase } from '@/lib/db/notes'
 import { listActiveResourcesForClient } from '@/lib/db/client-resources'
 import { CASE_STATUS, KNOWLEDGE_REQ_STATUS, LEAD_EMAIL_STATUS } from '@/lib/ui/status'
+import { buildContactThreads } from '@/lib/ui/mail-threads'
 import { formatAbsolute, formatRelative, humanizeEnum } from '@/lib/format'
 import { CompanyMark } from '@/components/company-mark'
 import { StatusPill } from '@/components/status-dot'
-import { EmailMessage } from '@/components/email-message'
 import { KnowledgeItem } from '@/components/knowledge-item'
 import { EmptyState } from '@/components/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StopLeadButton } from './stop-lead-button'
 import { NotesPanel, type NotePanelItem } from './notes-panel'
-import { ComposeForm } from './compose-form'
+import { MailTab } from './mail-tab'
+import { CrmLinkBadge } from './crm-link-badge'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +77,7 @@ export default async function CasePage({
   // is the behaviour we want: no existence leak across clients.
   if (!kase) notFound()
 
-  const [leads, emails, knowledge, requests, events, campaign, notes, resources] = await Promise.all([
+  const [leads, emails, knowledge, requests, events, campaign, notes, resources, crmLink] = await Promise.all([
     listLeadsForCase(supabase, caseId),
     listEmailsForCase(supabase, caseId),
     listKnowledgeForCase(supabase, caseId),
@@ -83,7 +86,9 @@ export default async function CasePage({
     getCampaignById(supabase, kase.campaign_id),
     listNotesForCase(supabase, caseId),
     listActiveResourcesForClient(supabase, kase.client_id, RESOURCE_LIMIT),
+    getCaseCrmLink(supabase, caseId),
   ])
+  const crmConnection = crmLink ? await getCrmConnectionForClient(supabase, kase.client_id) : null
 
   const now = new Date()
   const openRequests = requests.filter((request) => request.status === 'open').length
@@ -114,12 +119,7 @@ export default async function CasePage({
     // safe: filtered on lead.email !== null immediately above
     .map((lead) => ({ id: lead.id, fullName: lead.full_name, email: lead.email! }))
 
-  const lastOutboundSubject = [...emails]
-    .reverse()
-    .find((email) => email.direction === 'outbound')?.subject ?? null
-  const defaultSubject = lastOutboundSubject
-    ? (lastOutboundSubject.startsWith('Re: ') ? lastOutboundSubject : `Re: ${lastOutboundSubject}`)
-    : ''
+  const { threads: mailThreads, newContactOptions } = buildContactThreads(leads, emails, composeContacts)
 
   // Mapped inline, matching /inbox, /knowledge/resources and the client detail
   // page. Extracting a shared mapper is a cross-cutting change those three
@@ -167,6 +167,13 @@ export default async function CasePage({
               <span title={formatAbsolute(kase.created_at)}>
                 Opened {formatRelative(kase.created_at, now)}
               </span>
+              {crmLink && crmConnection ? (
+                <CrmLinkBadge
+                  provider={crmConnection.provider}
+                  dealUrl={crmLink.external_deal_url}
+                  syncError={crmLink.last_sync_status === 'error' ? crmLink.last_sync_error : null}
+                />
+              ) : null}
             </div>
           </div>
           <StatusPill meta={CASE_STATUS[kase.status]} className="mt-1 px-2.5 py-1 text-xs" />
@@ -274,37 +281,13 @@ export default async function CasePage({
         </TabsList>
 
         <TabsContent value="mail">
-          <div className="flex max-w-[80ch] flex-col gap-4">
-            {emails.length === 0 ? (
-              <EmptyState
-                icon={Envelope}
-                title="No mail on this case"
-                description="Outbound drafts appear here once the writer agent runs, and replies land automatically when the inbound poller picks them up."
-              />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {emails.map((email) => (
-                  <EmailMessage
-                    key={email.id}
-                    direction={email.direction}
-                    status={email.status}
-                    subject={email.subject}
-                    body={email.body}
-                    sequenceStep={email.sequence_step}
-                    timestamp={email.sent_at ?? email.created_at}
-                    now={now}
-                    sentByHuman={email.sent_by !== null}
-                  />
-                ))}
-              </div>
-            )}
-            <ComposeForm
-              caseId={kase.id}
-              contacts={composeContacts}
-              resources={composeResources}
-              defaultSubject={defaultSubject}
-            />
-          </div>
+          <MailTab
+            caseId={kase.id}
+            threads={mailThreads}
+            newContactOptions={newContactOptions}
+            resources={composeResources}
+            now={now}
+          />
         </TabsContent>
 
         <TabsContent value="knowledge">

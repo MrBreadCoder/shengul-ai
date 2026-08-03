@@ -1538,3 +1538,391 @@ actually configured inside the GTM container itself — that happens in the
 Google Tag Manager web UI, outside this repo, and nothing here can verify or
 change what tags exist there. The cookie-policy analytics table is written
 generically for that reason.
+
+---
+
+## CRM integrations (HubSpot / Pipedrive) — Tasks 1-3 of 11 (2026-08-02, inline, no commits)
+
+Design: `docs/superpowers/specs/2026-08-02-crm-integrations-design.md`. Plan:
+`docs/superpowers/plans/2026-08-02-crm-integrations.md`. Executed via
+superpowers:executing-plans, inline (no subagents), skipping the plan's
+per-task commit steps at the user's request.
+
+**Task 1 — migration + generated types.**
+`supabase/migrations/0022_crm_integrations.sql` — `crm_provider`
+(`hubspot`/`pipedrive`), `crm_connection_status` (`connected`/`error`),
+`crm_sync_status` (`ok`/`error`); `crm_connections` (one per client, unique
+`client_id`, encrypted `oauth` jsonb, nullable pipeline/stage columns until
+setup is finished); `case_crm_links` (unique `case_id`, `sync_started_at` as
+the single-flight claim). RLS: flat per-client SELECT, write locked to
+`is_operator()` (all writes go through `createAdminClient()`). Also adds
+`'crm'` to the existing `log_source` enum.
+
+Docker wasn't running, so `pnpm supabase db reset` / `gen types` couldn't
+execute — used the plan's documented fallback and hand-wrote the two
+`Tables` entries and three `Enums` entries into `src/types/database.ts` to
+match the SQL exactly. Adding `'crm'` to `log_source` broke two exhaustive
+consumers the plan didn't mention: `LOG_SOURCES` in `src/types/logs.ts` and
+`LOG_SOURCE_META` in `src/lib/ui/log.ts` both needed a `crm` entry to keep
+`tsc --noEmit` clean — fixed both.
+
+**Task 2 — token encryption + env vars.** `src/lib/crm/tokens.ts` —
+`encryptCrmTokens`/`parseCrmTokens`, same AES-256-GCM envelope as
+`mailbox/tokens.ts`, reusing `MAILBOX_ENCRYPTION_KEY`. Unlike mailbox
+tokens there's no legacy plaintext shape to accept, since these tables are
+new. Added `HUBSPOT_OAUTH_CLIENT_ID/SECRET` and
+`PIPEDRIVE_OAUTH_CLIENT_ID/SECRET` to `src/lib/env.ts` (`nonEmpty`),
+`vitest.config.ts`'s stub test env, and `.env.example`. `src/lib/env.test.ts`'s
+`complete` fixture was missing the four new required keys, which made its
+"all vars present" test fail against the tightened schema — added them.
+
+**Task 3 — provider interface + mapping.** `src/lib/crm/provider.ts` — the
+`CrmProvider` interface (HubSpot/Pipedrive will implement it in later
+tasks), `CrmDealTarget` discriminated union so callers never need to know
+HubSpot models closure as a pipeline stage while Pipedrive models it as a
+separate status field. `src/lib/crm/mapping.ts` — pure functions
+(`splitFullName`, `toCompanyInput`, `toContactInput`, `toDealTitle`,
+`toCreationNote`, `isSyncableLead`), no I/O. Plan's test fixture used
+`status: 'stopped'` for a non-syncable lead, but the actual `lead_status`
+enum is `'new' | 'parked' | 'active'` (no `'stopped'`) — followed the plan's
+own documented contingency and used `'parked'` in both the fixture and the
+implementation's `isSyncableLead` check.
+
+Verified after each task and once more at the end: full suite 162 files /
+1636 tests passing (was 1619 before Task 2's env-fixture fix, 1611 before
+this work started), `tsc --noEmit` clean, `eslint` clean (same six
+pre-existing unrelated warnings only, no errors).
+
+Not done yet, per the plan's own ordering: Tasks 4-11 (`crm_connections` /
+`case_crm_links` data access, both provider implementations, the sync
+worker + QStash route, connect/callback routes, `/settings/crm` UI, case-
+detail sync indicator, and wiring the six `enqueueCrmSync` call sites).
+Nothing commits until the user asks — working tree is dirty by design.
+
+---
+
+## CRM integrations (HubSpot / Pipedrive) — Tasks 4-5 of 11 (2026-08-02, inline, no commits)
+
+Continuation of the above, same plan/design docs, same executing-plans
+process, inline, no commits.
+
+**Task 4 — `crm_connections` data access.** `src/lib/db/crm-connections.ts`
+— `getCrmConnectionForClient`, `getCrmConnectionById`, `upsertCrmConnection`
+(upsert on the `client_id` unique constraint; a reconnect resets
+`pipeline_id`/`initial_stage_id`/`won_stage_id`/`lost_stage_id` to null so a
+provider switch can't leave a stale stage id from the previous CRM behind),
+`updateCrmConnectionPipeline`, `updateCrmConnectionTokens`,
+`markCrmConnectionError`, `deleteCrmConnection`. One function per DB
+operation per `QUALITY.md`; every write assumes the caller already checked
+session/role/ownership. 14 tests, matching the plan's count exactly.
+
+**Task 5 — `case_crm_links` data access + single-flight claim.**
+`src/lib/db/case-crm-links.ts` — `getCaseCrmLink`, `ensureCaseCrmLink`
+(race-safe upsert on the `case_id` unique index), `claimCrmSync` (atomic
+conditional update — claims when `sync_started_at` is null or older than
+`CRM_SYNC_CLAIM_STALE_MS` (5 min), so a crashed worker can't deadlock a case
+permanently), `updateCaseCrmLinkIds` (persists whichever external ids were
+passed, letting a retry after partial failure resume instead of
+re-creating objects), `markCrmSyncResult` (records outcome and releases the
+claim in one write, truncating a stored error to 500 chars). 15 tests
+(plan said 14 — the plan's own count was off by one, no test was added or
+removed relative to what it specified).
+
+One divergence from the plan's code, caught by `tsc --noEmit`:
+`updateCaseCrmLinkIds`'s conditional patch object was typed as
+`Record<string, string | string[]>`, which Supabase's generated client
+rejects (`RejectExcessProperties` on `.update()` needs the patch typed
+against the actual `Update` row shape, not an untyped Record) — retyped it
+as `Database['public']['Tables']['case_crm_links']['Update']`, which
+satisfies the exact-optional-property assignment the plan's `if (...!==
+undefined) patch.x = ...` pattern relies on.
+
+Verified: full suite 164 files / 1665 tests passing (was 1636 after Tasks
+1-3), `tsc --noEmit` clean, `eslint` clean (same six pre-existing unrelated
+warnings, no errors).
+
+Not done yet: Tasks 6-11 (HubSpot provider, Pipedrive provider, sync worker
++ QStash route, connect/callback routes, `/settings/crm` UI, case-detail
+sync indicator, wiring the six `enqueueCrmSync` call sites). Nothing
+commits until asked — working tree stays dirty by design.
+
+---
+
+## CRM integrations (HubSpot / Pipedrive) — Task 6 of 11 (2026-08-02, inline, no commits)
+
+Continuation of the above, same plan/design docs, same executing-plans
+process, inline, no commits.
+
+**Task 6 — HubSpot provider.** `src/lib/crm/hubspot-provider.ts` — the
+first `CrmProvider` implementation, against the HubSpot CRM v3 API.
+`upsertCompany`/`upsertContact` use search-then-create-or-patch (by
+`domain` / by `email`) rather than HubSpot's batch-upsert endpoint, since
+upsert-by-`idProperty` depends on a portal-configured unique property we
+can't guarantee exists. `listPipelines` reads closure off
+`stage.metadata.probability` (`"1.0"` → won, `"0.0"` → lost — HubSpot
+platform constants). `moveDeal` re-reads the deal's live pipeline before
+resolving a `closed` target instead of trusting stored stage ids, since a
+client can move a deal to a different pipeline in HubSpot after we created
+it; when no closed stage is found it drops a note instead of failing the
+sync. `createDeal` builds `HUBSPOT_DEFINED` associations (deal→company
+`341`, deal→contact `3`) and a portal deep link from `account_ref` (empty
+string when unknown, not a broken link). Every method round-trips
+possibly-refreshed tokens via `ensureFresh`/`refreshAccessToken`
+(30s-skew expiry check), matching the `MailboxProvider` contract exactly.
+`exchangeCode` fetches the portal id via a second call whose URL embeds
+the access token — passed a redacted `logUrl` to `fetchJson` so the raw
+token never lands in `AppError.context` (which is written to `events` and
+rendered on the operator Logs tab).
+
+21 tests (plan said 20 — one extra assertion split, no behavior gap).
+`src/lib/crm/hubspot-provider.test.ts` copied verbatim from the plan;
+implementation copied verbatim too — no divergence needed this time, the
+existing `fetchJson(url, options, schema, timeoutMs?, logUrl?)` signature
+and `provider.ts`/`tokens.ts` shapes from Tasks 2-3 already matched what
+the plan's HubSpot code expected.
+
+Verified: full suite 165 files / 1686 tests passing (was 1665 after Tasks
+1-5), `tsc --noEmit` clean, `eslint` clean (same six pre-existing
+unrelated warnings, no errors).
+
+Not done yet: Tasks 7-11 (Pipedrive provider + registry, sync worker +
+QStash route, connect/callback routes, `/settings/crm` UI, case-detail
+sync indicator, wiring the six `enqueueCrmSync` call sites). Nothing
+commits until asked — working tree stays dirty by design.
+
+---
+
+## CRM integrations (HubSpot / Pipedrive) — Tasks 7-9 of 11 (2026-08-02, inline, no commits)
+
+Continuation of the above, same plan/design docs, same executing-plans
+process, inline, no commits.
+
+**Task 7 — Pipedrive provider + registry.** `src/lib/crm/pipedrive-provider.ts`
+— the second `CrmProvider` implementation. Three ways Pipedrive differs from
+HubSpot shaped it: the token endpoint needs HTTP Basic auth (not a body
+credential); the API base URL is per-account (`api_domain`), returned only
+with the token response, so it's packed onto the end of `accessToken` after
+a `|` separator (mailbox tokens share `CrmOAuthCredentials`'s shape, so
+widening it wasn't an option) and unpacked at every call site; and deal
+closure is a `status` field independent of stage, so `listPipelines` never
+flags a `closedOutcome` and `moveDeal` sets `{ status: 'won' | 'lost' }`
+instead of moving a stage — `won_stage_id`/`lost_stage_id` stay null for
+Pipedrive connections by construction. `upsertCompany`/`upsertContact` search
+first (`exact_match: true` on name/email) and only create on a miss, same
+create-or-reuse shape as HubSpot's search-then-patch. `createDeal` links at
+most one person (`contactExternalIds[0]`) since a Pipedrive deal has exactly
+one `person_id` — the rest of the case's contacts are already Persons on the
+linked organization. `src/lib/crm/registry.ts` — `getCrmProvider` with an
+exhaustive switch and a `never` default, matching `mailbox/registry.ts`
+exactly. 19 Pipedrive tests + 3 registry tests = 22 (plan's own per-file
+counts were off, same as earlier tasks — no behavior gap).
+
+**Task 8 — sync orchestration.** `src/lib/crm/sync.ts` — `enqueueCrmSync`
+(fire-and-forget QStash publish, never throws, short-circuits for clients
+with no usable connection) and `runCrmSync` (the worker body: precondition
+checks → single-flight claim via `claimCrmSync` → create-or-update on ANY
+reason if `external_deal_id` is null, persisting each external id the moment
+it's obtained so a retry resumes instead of restarting → apply the reason
+(note-only for intermediate reasons, `moveDeal` to closed for `won`/`lost`/
+`dead`) → release the claim and record the outcome). Failure classification
+(`classifyFailure`) reads the AppError's HTTP status: 401/403 parks the
+connection (`markCrmConnectionError`, terminal), 429/5xx/timeout rethrows so
+the QStash route returns 500 and gets retried, everything else is a
+permanent validation failure recorded on the link row. Token rotation is
+persisted inside a `call()` wrapper immediately after each provider call
+returns — not batched at the end — because Pipedrive rotates its refresh
+token on every use, so a crash before the write would strand a dead token.
+23 tests (plan said 22).
+
+Two divergences caught by `tsc --noEmit`, neither changing behavior: (1) the
+plan's `connection.id` reference inside the nested `call()` closure doesn't
+keep TypeScript's null-narrowing from the outer `if (!connection) return`
+checks — closures aren't covered by that control-flow analysis — so it's
+hoisted into a `const connectionId = connection.id` above the closure and
+`call()` uses that instead; (2) `sync.test.ts`'s shared `credentials` fixture
+was left as an untyped literal, whose inferred `kind: string` doesn't satisfy
+`CrmOAuthCredentials`'s `kind: 'oauth'` once a test narrows `provider.upsertCompany`
+through `vi.mocked()` (which types strictly against the `CrmProvider`
+interface) — annotated it `const credentials: CrmOAuthCredentials = {...}`,
+same pattern already used in `hubspot-provider.test.ts`.
+
+**Task 9 — sync worker route.** `POST /api/crm/sync`
+(`src/app/api/crm/sync/route.ts`) — thin adapter: verify QStash signature →
+Zod-validate `{ caseId: uuid, reason: enum }` → delegate to `runCrmSync` →
+map the outcome union to a status code (`synced`/`skipped`/`permanent_failure`
+→ 200, `busy` → 500 so QStash retries, a thrown retryable AppError falls
+into the same 500 catch-all). All logic stays in `runCrmSync`; the route has
+none of its own. 9/9 tests, matching the plan's count exactly.
+
+One test-fixture bug caught by Zod, not by the plan's code: the plan's
+`route.test.ts` used `caseId = '11111111-2222-3333-4444-555555555555'` for
+its valid-UUID fixture, but Zod 4's `.uuid()` enforces the real RFC 4122
+shape (version nibble `1`-`8`, variant nibble `8`/`9`/`a`/`b`) — that fourth
+group starts with `5`, which fails variant validation, so every "happy path"
+test was silently hitting the 400 branch instead of exercising success/skip/
+busy/permanent-failure at all. Replaced with
+`'11111111-2222-4333-8444-555555555555'` (version `4`, variant `8`),
+matching the fixture convention already used in
+`src/app/api/inbound/reply/route.test.ts`.
+
+Verified: full suite 169 files / 1740 tests passing (was 1686 after Task 6),
+`tsc --noEmit` clean, `eslint` clean (same six pre-existing unrelated
+warnings, no errors).
+
+Not done yet: Tasks 10-13 (OAuth connect/callback routes, `/settings/crm`
+page + Server Actions, case-detail sync indicator, wiring the six
+`enqueueCrmSync` call sites). Nothing commits until asked — working tree
+stays dirty by design.
+
+## CRM integrations (HubSpot / Pipedrive) — Tasks 10-12 of 13 (2026-08-02, inline, no commits)
+
+Continuation of the above, same plan/design docs, inline execution (no
+subagent dispatch), no commits.
+
+**Task 10 — OAuth connect and callback routes.** New dynamic segment
+`src/app/api/crm/[provider]/{state-cookie.ts,connect/route.ts,callback/route.ts}`,
+mirroring `/api/mailboxes/google/{connect,callback}` with the one
+deliberate inversion the design calls out: `role !== 'client'` → 403, not
+`!== 'operator'` — a CRM grant belongs to the client, a mailbox belongs to
+the agency. `connect` mints a random `state` nonce into an httpOnly,
+`sameSite: 'lax'` cookie scoped to `/api/crm` and redirects to
+`getCrmProvider(provider).buildAuthUrl(state)`; `callback` reads the raw
+`cookie` header (no typed jar on a plain `Request`), compares state with
+`timingSafeEqualString` (the actual CSRF check), exchanges the code,
+`upsertCrmConnection`s the encrypted tokens, logs `crm.connected`, and
+redirects to `/settings/crm?connect=<provider>` or `?error=<code>` on any
+thrown `AppError`. `provider` is `z.enum(['hubspot','pipedrive'])`-checked
+in both routes; anything else 404s before touching auth state. 19/19 tests
+across the three route files (3 connect + 7 callback + the 9 existing sync
+tests), matching the plan.
+
+**Task 11 — `/settings/crm` page and Server Actions.** `actions.ts` —
+`selectCrmPipeline` and `disconnectCrm`, both inlining the same
+session → role → ownership chain rather than sharing a helper: the design
+note calls out that `disconnectCrm` must tolerate a missing connection
+while `selectCrmPipeline` must reject one, so a shared helper would need a
+flag parameter, which is worse than four duplicated lines. The pipeline
+picker's hidden `wonStageId`/`lostStageId` inputs submit `''` when a
+provider (Pipedrive) reports no closed stage, so the action reads
+`formData.get(...) || null` for those two fields before Zod's
+`.nullable().default(null)` sees them — `.min(1)` would otherwise reject
+the empty string. Added `getLatestCrmSyncAt` to
+`src/lib/db/case-crm-links.ts` (most recent `last_synced_at` across a
+connection's cases, since that timestamp lives per-case-link, not on the
+connection) — 18/18 in that test file now (was 13). Four page states in
+`page.tsx`, matching §7.1 of the design exactly: no connection → `EmptyState`
++ connect buttons; `status = 'error'` → reconnect banner naming
+`status_reason`; `pipeline_id === null` → `PipelinePicker` (live
+`listPipelines()` call, only made in this branch); else → `ConnectionCard`
+with last-sync time and a disconnect confirmation that names the blast
+radius (existing CRM records untouched, no re-creation on reconnect).
+Operators get the same page with `canManage = false`, so pickers/buttons
+render read-only copy instead of controls. `loading.tsx`/`error.tsx` copied
+from the `/settings` shape verbatim, title changed to "CRM". 8/8 action
+tests.
+
+**Task 12 — case-detail sync indicator.** `crm-link-badge.tsx` — one
+component, three states: sync error → `WarningCircle` + truncated message;
+deal exists but provider gave no portal URL → renders nothing rather than a
+dead anchor; else → "Synced to {Provider} ↗" linking out. Wired into
+`cases/[id]/page.tsx`'s existing header metadata row (next to the
+"Opened …" timestamp) via one added `Promise.all` entry (`getCaseCrmLink`)
+plus a conditional second read (`getCrmConnectionForClient`, only fired
+when a link row exists — a case with no CRM sync costs nothing extra).
+
+Verified after all three tasks: full suite 172 files / 1761 tests passing
+(was 169/1740 after Task 9), `tsc --noEmit` clean, `eslint` clean (same six
+pre-existing unrelated warnings, no errors).
+
+Not done yet: Task 13 (wiring the six `enqueueCrmSync` call sites into
+`research.ts`/`write.ts`/`reply.ts`/`followup.ts`). Nothing commits until
+asked — working tree stays dirty by design.
+
+## CRM Integrations — DONE (Task 13 of 13, 2026-08-02, inline, no commits)
+
+**Goal:** push qualified cases into the client's own CRM (HubSpot, Pipedrive) as Contact + Company + Deal, then keep the Deal's notes and won/lost outcome in step with the case. One-way, outbound only.
+**Design:** `docs/superpowers/specs/2026-08-02-crm-integrations-design.md` · **Plan:** `docs/superpowers/plans/2026-08-02-crm-integrations.md`
+
+**Task 13 — wire the pipeline call sites.** Last on purpose, per the plan:
+nothing fires until the worker and both providers were proven (Tasks 1-12).
+Six one-line `await enqueueCrmSync(caseId, reason)` calls, each immediately
+after the existing `updateCaseStatus` it shadows, `enqueueCrmSync` never
+throws so none needed a try/catch:
+
+- [x] `src/lib/pipeline/research.ts` → `'ready'` → `enqueueCrmSync(input.caseId, 'qualified')`
+- [x] `src/lib/pipeline/write.ts` → `'contacted'` → `enqueueCrmSync(input.caseId, 'contacted')`
+- [x] `src/lib/pipeline/reply.ts` → `'in_conversation'` / `'hot_handoff'` / `'lost'` → `enqueueCrmSync(inbound.case_id, ...)` at all three transitions
+- [x] `src/lib/pipeline/followup.ts` → `'dead'` → `enqueueCrmSync(sequence.case_id, 'dead')`
+
+Each pipeline test file (`research.test.ts`, `write.test.ts`, `reply.test.ts`,
+`followup.test.ts`) needed `vi.mock('@/lib/crm/sync', ...)` added — without
+it, the real `enqueueCrmSync` reached for `createAdminClient`/QStash inside
+its catch-branch (`logError`, unmocked in those files) and every test that
+exercised a wired transition failed with "No 'logError' export is defined
+on the mock." Added a plain `enqueueCrmSyncMock = vi.fn()` per file
+(matching each file's existing plain-`vi.fn()` convention, not
+`vi.hoisted`) and folded it into the shared `beforeEach` reset loop.
+`research.test.ts` also got the two regression tests the plan specified:
+sync enqueued once the case reaches `ready`, not enqueued when every
+research agent fails and the case never gets there.
+
+**Six pipeline call sites wired: `ready`→qualified, `contacted`→contacted,
+`in_conversation`, `hot_handoff`, `lost`, `dead`→closed-lost.**
+**Known dormant path:** nothing sets `case_status = 'won'` yet, so the
+`'won'` reason and its closed-won mapping are implemented and tested but
+unreachable until a "mark won" action exists.
+**Out of scope:** pulling from the CRM, two-way sync, backfilling
+pre-connection cases, custom field mapping, Salesforce, CRM-side webhooks.
+
+Verified: full suite 172 files / 1763 tests passing (was 172/1761 before
+Task 13 — +2 for the new research.ts regression tests), `tsc --noEmit`
+clean, `eslint` clean (same six pre-existing unrelated warnings, no new
+ones). `grep -rn "TODO\|FIXME\|console\.log"` and `grep -rn "supabase.from("`
+over `src/lib/crm`, `src/app/api/crm`, `src/app/(app)/settings/crm` both
+return nothing, per the plan's Verification Checklist. Manual HubSpot/
+Pipedrive sandbox verification (connect, force a case to `ready`, confirm
+one Contact/Company/Deal, revoke and confirm the reconnect banner) was not
+run — no live sandbox credentials in this environment.
+
+All 13 tasks of the plan are now implemented. Nothing has been committed at
+any point in this feature's build — working tree stays dirty by design,
+per explicit instruction each session.
+
+---
+
+## Case Mail per-contact tabs — DONE (2026-08-03, inline, no commits until asked)
+
+**Goal:** split the case page's Mail tab from one flat chronological list of
+every email into one sub-tab per contacted person, so a multi-contact case
+reads as separate conversations instead of an interleaved mess.
+**Design:** `docs/superpowers/specs/2026-08-03-case-mail-per-contact-tabs-design.md`
+· **Plan:** `docs/superpowers/plans/2026-08-03-case-mail-per-contact-tabs.md`
+
+Executed inline (no subagent dispatch), skipping the plan's per-task commit
+steps at the user's request.
+
+- `src/types/mail.ts` (new) — `ComposeContact` moved out of `compose-form.tsx`
+  so both `mail-threads.ts` and `mail-tab.tsx` can import it without
+  duplicating the shape.
+- `src/lib/ui/mail-threads.ts` + `mail-threads.test.ts` (new) —
+  `buildContactThreads(leads, emails, composeContacts)` groups a case's flat
+  email list into one `ContactThread` per lead with ≥1 email, in `leads`
+  order (not recency), plus `newContactOptions` (eligible leads with no
+  thread yet). `defaultSubject` is computed per lead from that lead's own
+  emails only, replacing the old case-wide computation that leaked one
+  contact's subject line into another's reply box. 8/8 tests.
+- `compose-form.tsx` — `contacts.length === 1` now renders a static
+  "To: Name — email" line instead of a one-option `Select`; the dropdown
+  stays for `contacts.length > 1` (the "New" tab). No prop/behavior change.
+- `mail-tab.tsx` (new) — three layouts: no threads + no eligible leads today's
+  `EmptyState` only; no threads + eligible leads adds a single `ComposeForm`;
+  ≥1 thread renders nested `Tabs`, one per contact plus a trailing "New" tab
+  when uncontacted eligible leads exist.
+- `page.tsx` — replaced the case-wide subject computation and inline Mail
+  `TabsContent` body with `buildContactThreads` + `<MailTab>`.
+
+Verified: `pnpm typecheck` clean, `pnpm lint` clean (same six pre-existing
+unrelated warnings, no new ones), `pnpm test` 173 files / 1771 tests passing.
+Manual in-browser verification (multi-contact case, zero-contact case,
+"New" tab send, parked-contact history) not run — no dev server session in
+this environment; only automated checks confirmed.
