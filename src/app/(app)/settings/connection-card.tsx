@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { disconnectCrm } from './actions'
+import { disconnectCrm } from './crm-actions'
 
 interface ConnectionCardProps {
   provider: string

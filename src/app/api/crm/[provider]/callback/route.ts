@@ -57,7 +57,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Next
   // The single-use nonce comparison IS the CSRF check. Without a match this
   // callback either was not initiated by this browser or is a replay.
   if (!code || !state || !expectedState || !timingSafeEqualString(state, expectedState)) {
-    return redirectAndClearState('/settings/crm?error=oauth')
+    return redirectAndClearState('/settings?error=oauth')
   }
 
   try {
@@ -77,9 +77,9 @@ export async function GET(request: Request, context: RouteContext): Promise<Next
       source: 'crm',
       payload: { connectionId: connection.id, provider, accountLabel: exchange.accountLabel },
     })
-    return redirectAndClearState(`/settings/crm?connect=${provider}`)
+    return redirectAndClearState(`/settings?connect=${provider}`)
   } catch (error) {
     const reason = isAppError(error) ? error.code : 'unknown'
-    return redirectAndClearState(`/settings/crm?error=${reason}`)
+    return redirectAndClearState(`/settings?error=${reason}`)
   }
 }

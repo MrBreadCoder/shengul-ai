@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { selectCrmPipeline, disconnectCrm } from './actions'
+import { selectCrmPipeline, disconnectCrm } from './crm-actions'
 
 const hoisted = vi.hoisted(() => ({
   requireUser: vi.fn(),

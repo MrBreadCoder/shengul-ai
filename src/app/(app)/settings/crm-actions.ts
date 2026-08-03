@@ -10,7 +10,7 @@ import {
 import { logEvent } from '@/lib/events/log-event'
 import { AppError } from '@/lib/errors/app-error'
 
-const SETTINGS_PATH = '/settings/crm'
+const SETTINGS_PATH = '/settings'
 
 const selectionSchema = z.object({
   pipelineId: z.string().min(1),

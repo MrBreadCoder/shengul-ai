@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import type { CrmPipeline } from '@/lib/crm/provider'
-import { selectCrmPipeline } from './actions'
+import { selectCrmPipeline } from './crm-actions'
 
 interface PipelinePickerProps {
   pipelines: readonly CrmPipeline[]

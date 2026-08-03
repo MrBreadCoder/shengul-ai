@@ -52,7 +52,7 @@ describe('GET /api/crm/[provider]/callback', () => {
       {},
       expect.objectContaining({ clientId: 'c1', provider: 'hubspot', accountLabel: 'Acme Portal', accountRef: '123' }),
     )
-    expect(locationOf(response)).toContain('/settings/crm?connect=hubspot')
+    expect(locationOf(response)).toContain('/settings?connect=hubspot')
   })
 
   it('should reject the callback when the state does not match the cookie', async () => {
