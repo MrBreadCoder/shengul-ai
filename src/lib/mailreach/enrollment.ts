@@ -24,6 +24,20 @@ function startedAtFor(mailbox: Pick<MailboxRow, 'mailreach_started_at'>, now: Da
   return mailbox.mailreach_started_at ?? now.toISOString()
 }
 
+// Legacy fallback only: mailboxes connected before first_name/last_name existed on
+// the connect form have null columns here. Every mailbox created after this ships
+// always has real values from the required form fields, so this branch only ever
+// fires for pre-existing rows.
+function legacyNameFallback(
+  mailbox: Pick<MailboxRow, 'first_name' | 'last_name' | 'email_address'>,
+): { firstName: string; lastName: string } {
+  if (mailbox.first_name && mailbox.last_name) {
+    return { firstName: mailbox.first_name, lastName: mailbox.last_name }
+  }
+  const local = mailbox.email_address.split('@')[0] ?? 'Mailbox'
+  return { firstName: mailbox.first_name ?? local, lastName: mailbox.last_name ?? local }
+}
+
 export async function connectSmtpMailbox(
   supabase: SupabaseClient<Database>,
   mailbox: MailboxRow,
@@ -38,8 +52,11 @@ export async function connectSmtpMailbox(
   if (credentials.kind !== 'smtp') {
     throw new AppError('INVARIANT_VIOLATION', 'SMTP mailbox has non-smtp credentials', { mailboxId: mailbox.id })
   }
+  const { firstName, lastName } = legacyNameFallback(mailbox)
   const { accountId } = await connectSmtpAccount({
     emailAddress: credentials.emailAddress,
+    firstName,
+    lastName,
     username: credentials.username,
     password: credentials.password,
     smtpHost: credentials.smtpHost,

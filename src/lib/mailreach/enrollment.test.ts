@@ -39,6 +39,9 @@ function smtpMailbox(overrides: Record<string, unknown> = {}) {
     id: 'm1',
     client_id: 'c1',
     provider: 'smtp',
+    email_address: 'sales@acme.com',
+    first_name: null,
+    last_name: null,
     mailreach_account_id: null,
     mailreach_status: 'disconnected',
     mailreach_enabled: false,
@@ -87,6 +90,22 @@ describe('connectSmtpMailbox', () => {
   it('should throw VALIDATION_ERROR for a non-smtp mailbox', async () => {
     await expect(connectSmtpMailbox({} as never, smtpMailbox({ provider: 'gmail' }), now)).rejects.toBeInstanceOf(AppError)
     expect(connectSmtpAccount).not.toHaveBeenCalled()
+  })
+
+  it('should pass the mailbox first_name/last_name straight through when present', async () => {
+    connectSmtpAccount.mockResolvedValue({ accountId: 'acc_named' })
+    await connectSmtpMailbox({} as never, smtpMailbox({ first_name: 'Jordan', last_name: 'Lee' }), now)
+    expect(connectSmtpAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ firstName: 'Jordan', lastName: 'Lee' }),
+    )
+  })
+
+  it('should fall back to the email local part when first_name/last_name are null (legacy row)', async () => {
+    connectSmtpAccount.mockResolvedValue({ accountId: 'acc_legacy' })
+    await connectSmtpMailbox({} as never, smtpMailbox({ email_address: 'ops@client.com' }), now)
+    expect(connectSmtpAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ firstName: 'ops', lastName: 'ops' }),
+    )
   })
 })
 
