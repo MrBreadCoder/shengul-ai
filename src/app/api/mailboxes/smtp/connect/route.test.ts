@@ -8,6 +8,7 @@ const insertMailboxMock = vi.fn()
 const resolveMailboxClientIdMock = vi.fn()
 const getClientByIdMock = vi.fn()
 const logEventMock = vi.fn()
+const logWarnMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -20,7 +21,10 @@ vi.mock('@/lib/db/clients', () => ({
   resolveMailboxClientId: (...a: unknown[]) => resolveMailboxClientIdMock(...a),
   getClientById: (...a: unknown[]) => getClientByIdMock(...a),
 }))
-vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
+vi.mock('@/lib/events/log-event', () => ({
+  logEvent: (...a: unknown[]) => logEventMock(...a),
+  logWarn: (...a: unknown[]) => logWarnMock(...a),
+}))
 
 import { POST } from './route'
 
@@ -53,6 +57,7 @@ beforeEach(() => {
   resolveMailboxClientIdMock.mockReset().mockResolvedValue('client-1')
   getClientByIdMock.mockReset().mockResolvedValue({ id: 'client-1', warmup_profile: 'standard' })
   logEventMock.mockReset().mockResolvedValue(undefined)
+  logWarnMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('POST /api/mailboxes/smtp/connect', () => {
@@ -102,6 +107,28 @@ describe('POST /api/mailboxes/smtp/connect', () => {
     await expect(res.json()).resolves.toMatchObject({ error: 'auth_failed', stage: 'smtp' })
     expect(verifyImapConnectionMock).not.toHaveBeenCalled()
     expect(insertMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should log the server response for an operator to diagnose, scoped to the resolved client', async () => {
+    verifySmtpConnectionMock.mockRejectedValue(
+      new AppError('UNAUTHORIZED', 'rejected', {
+        status: 401,
+        stage: 'smtp',
+        cause: '535 5.7.8 Error: authentication failed',
+      }),
+    )
+    await POST(req(validBody))
+    expect(logWarnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client-1',
+        type: 'mailbox.connect_failed',
+        source: 'mailbox',
+        payload: expect.objectContaining({
+          stage: 'smtp',
+          serverResponse: '535 5.7.8 Error: authentication failed',
+        }),
+      }),
+    )
   })
 
   it('should insert nothing when IMAP verification fails', async () => {
@@ -173,5 +200,19 @@ describe('POST /api/mailboxes/smtp/connect', () => {
     insertMailboxMock.mockRejectedValue(new AppError('DB_ERROR', 'insert failed', {}))
     const res = await POST(req(validBody))
     expect(res.status).toBe(500)
+  })
+
+  it('should return 403 without verifying credentials when resolving the client is forbidden', async () => {
+    resolveMailboxClientIdMock.mockRejectedValue(new AppError('FORBIDDEN', 'no client_id', {}))
+    const res = await POST(req(validBody))
+    expect(res.status).toBe(403)
+    expect(verifySmtpConnectionMock).not.toHaveBeenCalled()
+  })
+
+  it('should return 500 without verifying credentials when resolving the client fails unexpectedly', async () => {
+    resolveMailboxClientIdMock.mockRejectedValue(new AppError('DB_ERROR', 'boom', {}))
+    const res = await POST(req(validBody))
+    expect(res.status).toBe(500)
+    expect(verifySmtpConnectionMock).not.toHaveBeenCalled()
   })
 })

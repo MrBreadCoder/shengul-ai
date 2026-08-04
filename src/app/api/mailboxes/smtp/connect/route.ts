@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertMailbox } from '@/lib/db/mailboxes'
 import { getClientById, resolveMailboxClientId } from '@/lib/db/clients'
-import { logEvent } from '@/lib/events/log-event'
+import { logEvent, logWarn } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
 import { warmupInsertFields } from '@/lib/mailbox/warmup'
@@ -81,6 +81,20 @@ export async function POST(request: Request) {
     imapSecure: parsed.data.imapSecure,
   }
 
+  // Resolved before verification (not just before insert) so a failed
+  // connection attempt can still be logged against the right client — an
+  // operator's demo-client lookup and a client-role user's own client_id are
+  // both cheap and side-effect-free to resolve early.
+  const admin = createAdminClient()
+  let clientId: string
+  try {
+    clientId = await resolveMailboxClientId(admin, appUser)
+  } catch (error) {
+    const code = isAppError(error) ? error.code : 'unknown'
+    const status = isAppError(error) && error.code === 'FORBIDDEN' ? 403 : 500
+    return NextResponse.json({ error: code }, { status })
+  }
+
   // Both legs must authenticate before anything is written: a mailbox whose
   // IMAP credentials are wrong would send fine and silently never detect a
   // reply or a bounce.
@@ -88,12 +102,32 @@ export async function POST(request: Request) {
     await verifySmtpConnection(credentials)
     await verifyImapConnection(credentials)
   } catch (error) {
+    // Best-effort and structured (no password): this is the only place that
+    // captures *why* Yandex/Gmail/etc. rejected the attempt. `cause` is the
+    // mail server's own reply text (e.g. an SMTP 535 banner) — never sent to
+    // the browser (see the comment on `verificationFailure`), but safe in an
+    // operator-only log since it never contains the credentials themselves.
+    const stage = isAppError(error) && typeof error.context.stage === 'string' ? error.context.stage : undefined
+    const cause = isAppError(error) && typeof error.context.cause === 'string' ? error.context.cause : undefined
+    await logWarn({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'mailbox.connect_failed',
+      source: 'mailbox',
+      error,
+      payload: {
+        provider: 'smtp',
+        emailAddress: credentials.emailAddress,
+        smtpHost: credentials.smtpHost,
+        imapHost: credentials.imapHost,
+        stage: stage ?? null,
+        serverResponse: cause ?? null,
+      },
+    })
     return verificationFailure(error)
   }
 
   try {
-    const admin = createAdminClient()
-    const clientId = await resolveMailboxClientId(admin, appUser)
     // A newly connected mailbox starts at the client's configured ramp, the
     // same as an OAuth one.
     const client = await getClientById(admin, clientId)
