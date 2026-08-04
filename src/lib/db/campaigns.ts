@@ -43,6 +43,31 @@ export async function listCampaignsForClient(
   return data ?? []
 }
 
+// Scrubs a deleted mailbox out of every one of the client's campaigns that
+// still lists it. Supabase's query builder has no array_remove, so this reads
+// the small candidate set (one client's campaigns) and writes back the
+// filtered array per row rather than a single set-based statement. Safe to
+// call even if the id is not assigned to anything — the filter just no-ops.
+export async function removeMailboxFromCampaigns(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+  mailboxId: string,
+): Promise<void> {
+  const campaigns = await listCampaignsForClient(supabase, clientId)
+  const affected = campaigns.filter((campaign) => campaign.mailbox_ids.includes(mailboxId))
+  for (const campaign of affected) {
+    const { error } = await supabase
+      .from('campaigns')
+      .update({ mailbox_ids: campaign.mailbox_ids.filter((id) => id !== mailboxId) })
+      .eq('id', campaign.id)
+    if (error) {
+      throw new AppError('DB_ERROR', 'Failed to remove mailbox from campaign', {
+        campaignId: campaign.id, mailboxId, cause: error.message,
+      })
+    }
+  }
+}
+
 // Loads the campaign that owns a case, via a case → campaign lookup. Returns
 // null if the case or its campaign is missing.
 export async function getCampaignForCase(

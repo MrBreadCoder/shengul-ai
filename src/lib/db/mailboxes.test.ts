@@ -19,6 +19,7 @@ import {
   updateMailboxMailreachStats,
   listMailboxesForClient,
   listMailreachConnectedMailboxes,
+  deleteMailbox,
 } from './mailboxes'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -362,5 +363,21 @@ describe('listMailreachConnectedMailboxes', () => {
       from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
     } as never
     await expect(listMailreachConnectedMailboxes(supabase)).resolves.toEqual(rows)
+  })
+})
+
+describe('deleteMailbox', () => {
+  function mockSupabase(result: { error: unknown }) {
+    return {
+      from: () => ({ delete: () => ({ eq: () => Promise.resolve(result) }) }),
+    } as never
+  }
+
+  it('should resolve when the delete succeeds', async () => {
+    await expect(deleteMailbox(mockSupabase({ error: null }), 'm1')).resolves.toBeUndefined()
+  })
+
+  it('should throw DB_ERROR when the delete fails', async () => {
+    await expect(deleteMailbox(mockSupabase({ error: { message: 'boom' } }), 'm1')).rejects.toBeInstanceOf(AppError)
   })
 })

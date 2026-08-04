@@ -10,6 +10,7 @@ import { mailreachElapsedDays, MAILREACH_CAMPAIGN_GATE_DAYS } from '@/lib/mailbo
 import type { Database } from '@/types/database'
 import { MailboxControls } from './mailbox-controls'
 import { MailreachControls } from './mailreach-controls'
+import { MailboxDeleteControl } from './mailbox-delete-control'
 
 type UserRole = Database['public']['Enums']['user_role']
 type MailreachStatus = Database['public']['Enums']['mailreach_status']
@@ -159,6 +160,11 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
           </span>
         ) : null}
       </div>
+
+      {/* Visible to both roles, unlike the operator-only block above:
+          removing a mailbox is the client's own connection to manage
+          (mirrors CRM's disconnectCrm), not an operator-only lever. */}
+      <MailboxDeleteControl id={props.id} emailAddress={props.emailAddress} />
     </div>
   )
 }

@@ -10,6 +10,7 @@ import {
   syncReplyModeForClient,
   updateCampaignStatus,
   deleteCampaign,
+  removeMailboxFromCampaigns,
 } from './campaigns'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -212,5 +213,46 @@ describe('deleteCampaign', () => {
 
   it('should throw DB_ERROR when the delete fails', async () => {
     await expect(deleteCampaign(mockSupabase({ error: { message: 'boom' } }), 'camp1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('removeMailboxFromCampaigns', () => {
+  function mockSupabase(campaigns: { id: string; mailbox_ids: string[] }[], updateError: unknown = null) {
+    const update = vi.fn().mockReturnValue({ eq: () => Promise.resolve({ error: updateError }) })
+    const supabase = {
+      from: () => ({
+        select: () => ({ order: () => ({ eq: () => Promise.resolve({ data: campaigns, error: null }) }) }),
+        update,
+      }),
+    } as never
+    return { supabase, update }
+  }
+
+  it('should filter the mailbox id out of every campaign that lists it', async () => {
+    const { supabase, update } = mockSupabase([
+      { id: 'camp1', mailbox_ids: ['m1', 'm2'] },
+      { id: 'camp2', mailbox_ids: ['m2'] },
+      { id: 'camp3', mailbox_ids: ['m1'] },
+    ])
+
+    await removeMailboxFromCampaigns(supabase, 'c1', 'm1')
+
+    expect(update).toHaveBeenCalledTimes(2)
+    expect(update).toHaveBeenCalledWith({ mailbox_ids: ['m2'] })
+    expect(update).toHaveBeenCalledWith({ mailbox_ids: [] })
+  })
+
+  it('should no-op when no campaign references the mailbox', async () => {
+    const { supabase, update } = mockSupabase([{ id: 'camp1', mailbox_ids: ['m2'] }])
+
+    await removeMailboxFromCampaigns(supabase, 'c1', 'm1')
+
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('should throw DB_ERROR when a campaign update fails', async () => {
+    const { supabase } = mockSupabase([{ id: 'camp1', mailbox_ids: ['m1'] }], { message: 'boom' })
+
+    await expect(removeMailboxFromCampaigns(supabase, 'c1', 'm1')).rejects.toBeInstanceOf(AppError)
   })
 })

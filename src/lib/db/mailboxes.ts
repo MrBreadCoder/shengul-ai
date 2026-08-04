@@ -271,6 +271,16 @@ export async function updateInboundCursor(
   }
 }
 
+// Hard delete — safe because nothing in the schema holds an FK to
+// mailboxes.id: emails.mailbox_id and campaigns.mailbox_ids are both loose
+// uuid columns. Callers are responsible for any best-effort external cleanup
+// (Mailreach account teardown) and for scrubbing the id out of
+// campaigns.mailbox_ids before calling this — see removeMailboxFromCampaigns.
+export async function deleteMailbox(supabase: SupabaseClient<Database>, id: string): Promise<void> {
+  const { error } = await supabase.from('mailboxes').delete().eq('id', id)
+  if (error) throw new AppError('DB_ERROR', 'Failed to delete mailbox', { id, cause: error.message })
+}
+
 /** The subset the settings screen renders. Excludes OAuth tokens by design. */
 export type MailboxSummary = Pick<
   MailboxRow,
