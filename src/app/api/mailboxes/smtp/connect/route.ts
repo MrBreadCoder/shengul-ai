@@ -92,13 +92,14 @@ export async function POST(request: Request) {
   } catch (error) {
     // No clientId to scope this to yet — that's exactly what failed to
     // resolve — so it logs against no client rather than being dropped.
+    const cause = isAppError(error) && typeof error.context.cause === 'string' ? error.context.cause : undefined
     await logError({
       clientId: null,
       actor: `human:${appUser.id}`,
       type: 'mailbox.connect_error',
       source: 'mailbox',
       error,
-      payload: { provider: 'smtp', stage: 'resolve_client' },
+      payload: { provider: 'smtp', stage: 'resolve_client', dbError: cause ?? null },
     })
     const code = isAppError(error) ? error.code : 'unknown'
     const status = isAppError(error) && error.code === 'FORBIDDEN' ? 403 : 500
@@ -168,6 +169,11 @@ export async function POST(request: Request) {
     })
     return NextResponse.json({ ok: true, mailboxId: mailbox.id })
   } catch (error) {
+    // `cause` is the raw Postgres error text (e.g. a unique-constraint or
+    // foreign-key violation) that `insertMailbox`/`logEvent` wrap into a
+    // generic AppError message — describeError alone would only ever surface
+    // "Failed to insert mailbox", never the reason it actually failed.
+    const cause = isAppError(error) && typeof error.context.cause === 'string' ? error.context.cause : undefined
     await logError({
       clientId,
       actor: `human:${appUser.id}`,
@@ -181,6 +187,7 @@ export async function POST(request: Request) {
         // whether this is a stuck duplicate or a genuine insert failure.
         mailboxId: mailbox?.id ?? null,
         stage: mailbox ? 'post_insert' : 'insert',
+        dbError: cause ?? null,
       },
     })
     const code = isAppError(error) ? error.code : 'unknown'

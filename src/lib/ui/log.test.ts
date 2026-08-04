@@ -95,6 +95,50 @@ describe('describeEvent', () => {
     )
   })
 
+  it('should surface the raw db error on a genuine mailbox insert failure', () => {
+    const result = describeEvent('mailbox.connect_error', {
+      provider: 'smtp',
+      stage: 'insert',
+      mailboxId: null,
+      dbError: 'duplicate key value violates unique constraint "mailboxes_client_id_email_address_key"',
+      errorCode: 'DB_ERROR',
+      errorMessage: 'Failed to insert mailbox',
+    })
+
+    expect(result).toBe(
+      'Could not save the mailbox: duplicate key value violates unique constraint "mailboxes_client_id_email_address_key".',
+    )
+  })
+
+  it('should call out a created-but-unfinished mailbox row distinctly', () => {
+    const result = describeEvent('mailbox.connect_error', {
+      provider: 'smtp',
+      stage: 'post_insert',
+      mailboxId: 'mb1',
+      dbError: 'insert into "events" violates check constraint',
+      errorMessage: 'Failed to insert event',
+    })
+
+    expect(result).toBe(
+      'Mailbox row mb1 was created, but finishing the connection failed: insert into "events" violates check constraint.',
+    )
+  })
+
+  it('should report a client-resolution failure distinctly', () => {
+    const result = describeEvent('mailbox.connect_error', {
+      provider: 'smtp',
+      stage: 'resolve_client',
+      mailboxId: null,
+      dbError: null,
+      errorCode: 'FORBIDDEN',
+      errorMessage: 'Client user has no client_id assigned',
+    })
+
+    expect(result).toBe(
+      'Could not determine which client to attach the mailbox to: Client user has no client_id assigned.',
+    )
+  })
+
   it('should warn on a discovery run that activated leads without verification', () => {
     const result = describeEvent('pipeline.discover.completed', {
       campaignId: 'camp1',

@@ -199,8 +199,12 @@ describe('POST /api/mailboxes/smtp/connect', () => {
     expect(JSON.stringify(event)).not.toContain('smtp-password-fixture')
   })
 
-  it('should return 500 and log a genuine insert failure with no mailboxId', async () => {
-    insertMailboxMock.mockRejectedValue(new AppError('DB_ERROR', 'insert failed', {}))
+  it('should return 500 and log the raw db error with no mailboxId on a genuine insert failure', async () => {
+    insertMailboxMock.mockRejectedValue(
+      new AppError('DB_ERROR', 'Failed to insert mailbox', {
+        cause: 'duplicate key value violates unique constraint "mailboxes_client_id_email_address_key"',
+      }),
+    )
     const res = await POST(req(validBody))
     expect(res.status).toBe(500)
     expect(logErrorMock).toHaveBeenCalledWith(
@@ -208,7 +212,11 @@ describe('POST /api/mailboxes/smtp/connect', () => {
         clientId: 'client-1',
         type: 'mailbox.connect_error',
         source: 'mailbox',
-        payload: expect.objectContaining({ mailboxId: null, stage: 'insert' }),
+        payload: expect.objectContaining({
+          mailboxId: null,
+          stage: 'insert',
+          dbError: 'duplicate key value violates unique constraint "mailboxes_client_id_email_address_key"',
+        }),
       }),
     )
   })

@@ -119,6 +119,25 @@ const SENTENCE_BUILDERS: Record<string, (payload: Json) => string> = {
     const reason = readString(p, 'serverResponse') ?? readString(p, 'errorMessage') ?? 'unknown error'
     return `Mailbox connect failed${leg}: ${reason}.`
   },
+  // Failure moved past mail-server verification into our own backend.
+  // `dbError` is the raw Postgres message (e.g. a unique/foreign-key
+  // violation) — the actual reason, versus the generic AppError message
+  // ("Failed to insert mailbox") every DB failure produces. `mailboxId`
+  // present means the row was actually created and only a step after it
+  // (the audit log) failed — worth calling out, since that needs a
+  // different fix than a genuine insert failure.
+  'mailbox.connect_error': (p) => {
+    const stage = readString(p, 'stage')
+    const reason = readString(p, 'dbError') ?? readString(p, 'errorMessage') ?? 'unknown error'
+    const mailboxId = readString(p, 'mailboxId')
+    if (stage === 'post_insert' && mailboxId) {
+      return `Mailbox row ${mailboxId} was created, but finishing the connection failed: ${reason}.`
+    }
+    if (stage === 'resolve_client') {
+      return `Could not determine which client to attach the mailbox to: ${reason}.`
+    }
+    return `Could not save the mailbox: ${reason}.`
+  },
 }
 
 export function describeEvent(type: string, payload: Json): string {
