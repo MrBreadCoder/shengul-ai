@@ -18,7 +18,11 @@ vi.mock('@/lib/mailreach/enrollment', () => ({
   connectSmtpMailbox: (...args: unknown[]) => connectSmtpMailbox(...args),
   oauthAuthorizeUrl: (...args: unknown[]) => oauthAuthorizeUrl(...args),
 }))
-vi.mock('@/lib/events/log-event', () => ({ logEventSafe: () => Promise.resolve() }))
+const logError = vi.fn()
+vi.mock('@/lib/events/log-event', () => ({
+  logEventSafe: () => Promise.resolve(),
+  logError: (...args: unknown[]) => logError(...args),
+}))
 vi.mock('@/lib/env', () => ({ env: { APP_URL: 'http://localhost:3000' } }))
 
 const { POST } = await import('./route')
@@ -91,6 +95,22 @@ describe('POST /api/mailboxes/[id]/mailreach/connect', () => {
     expect(response.status).toBe(500)
     const body = await response.json()
     expect(body.error).toBe('EXTERNAL_ERROR')
+  })
+
+  it('should log the vendor status and body when the smtp connect fails on a non-2xx response', async () => {
+    getMailboxById.mockResolvedValue({ id: 'm1', client_id: 'c1', provider: 'smtp' })
+    const { AppError } = await import('@/lib/errors/app-error')
+    connectSmtpMailbox.mockRejectedValue(
+      new AppError('EXTERNAL_ERROR', 'HTTP 401', { url: 'x', status: 401, body: 'invalid api key' }),
+    )
+    await POST(new Request('http://x', { method: 'POST' }), context)
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'c1',
+        type: 'mailbox.mailreach_connect_failed',
+        payload: expect.objectContaining({ mailboxId: 'm1', provider: 'smtp', status: 401, body: 'invalid api key' }),
+      }),
+    )
   })
 
   it('should return 500 with the AppError code when the oauth branch fails', async () => {

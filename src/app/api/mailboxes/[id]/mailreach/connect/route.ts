@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getMailboxById, updateMailboxMailreachPending } from '@/lib/db/mailboxes'
 import { getClientById } from '@/lib/db/clients'
 import { connectSmtpMailbox, oauthAuthorizeUrl } from '@/lib/mailreach/enrollment'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { env } from '@/lib/env'
 import {
@@ -49,6 +49,22 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       })
       return NextResponse.json({ ok: true, redirect: false })
     } catch (error) {
+      // Diagnostic instrumentation: this catch previously returned only a bare
+      // AppError code to the client and logged nothing, so a failed connect
+      // left no trace anywhere to debug from. fetchJson's AppError carries the
+      // real detail in `context` (vendor status/body, or a network `cause`) —
+      // pull out whichever of those this particular failure actually set.
+      await logError({
+        clientId: mailbox.client_id, actor: `human:${appUser.id}`, type: 'mailbox.mailreach_connect_failed',
+        source: 'mailbox', error,
+        payload: {
+          mailboxId: id,
+          provider: 'smtp',
+          ...(isAppError(error) && typeof error.context.status === 'number' ? { status: error.context.status } : {}),
+          ...(isAppError(error) && typeof error.context.body === 'string' ? { body: error.context.body } : {}),
+          ...(isAppError(error) && typeof error.context.cause === 'string' ? { cause: error.context.cause } : {}),
+        },
+      })
       return NextResponse.json({ error: isAppError(error) ? error.code : 'unknown' }, { status: 500 })
     }
   }
