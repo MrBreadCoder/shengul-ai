@@ -9,6 +9,7 @@ const resolveMailboxClientIdMock = vi.fn()
 const getClientByIdMock = vi.fn()
 const logEventMock = vi.fn()
 const logWarnMock = vi.fn()
+const logErrorMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -24,6 +25,7 @@ vi.mock('@/lib/db/clients', () => ({
 vi.mock('@/lib/events/log-event', () => ({
   logEvent: (...a: unknown[]) => logEventMock(...a),
   logWarn: (...a: unknown[]) => logWarnMock(...a),
+  logError: (...a: unknown[]) => logErrorMock(...a),
 }))
 
 import { POST } from './route'
@@ -58,6 +60,7 @@ beforeEach(() => {
   getClientByIdMock.mockReset().mockResolvedValue({ id: 'client-1', warmup_profile: 'standard' })
   logEventMock.mockReset().mockResolvedValue(undefined)
   logWarnMock.mockReset().mockResolvedValue(undefined)
+  logErrorMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('POST /api/mailboxes/smtp/connect', () => {
@@ -196,10 +199,29 @@ describe('POST /api/mailboxes/smtp/connect', () => {
     expect(JSON.stringify(event)).not.toContain('smtp-password-fixture')
   })
 
-  it('should return 500 when the insert fails', async () => {
+  it('should return 500 and log a genuine insert failure with no mailboxId', async () => {
     insertMailboxMock.mockRejectedValue(new AppError('DB_ERROR', 'insert failed', {}))
     const res = await POST(req(validBody))
     expect(res.status).toBe(500)
+    expect(logErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client-1',
+        type: 'mailbox.connect_error',
+        source: 'mailbox',
+        payload: expect.objectContaining({ mailboxId: null, stage: 'insert' }),
+      }),
+    )
+  })
+
+  it('should log the mailboxId when the row was created but the audit-log write failed after', async () => {
+    logEventMock.mockRejectedValue(new AppError('DB_ERROR', 'events insert failed', {}))
+    const res = await POST(req(validBody))
+    expect(res.status).toBe(500)
+    expect(logErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ mailboxId: 'mb1', stage: 'post_insert' }),
+      }),
+    )
   })
 
   it('should return 403 without verifying credentials when resolving the client is forbidden', async () => {
@@ -207,6 +229,9 @@ describe('POST /api/mailboxes/smtp/connect', () => {
     const res = await POST(req(validBody))
     expect(res.status).toBe(403)
     expect(verifySmtpConnectionMock).not.toHaveBeenCalled()
+    expect(logErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: null, type: 'mailbox.connect_error' }),
+    )
   })
 
   it('should return 500 without verifying credentials when resolving the client fails unexpectedly', async () => {

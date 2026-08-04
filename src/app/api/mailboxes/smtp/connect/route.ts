@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertMailbox } from '@/lib/db/mailboxes'
 import { getClientById, resolveMailboxClientId } from '@/lib/db/clients'
-import { logEvent, logWarn } from '@/lib/events/log-event'
+import { logEvent, logWarn, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
 import { warmupInsertFields } from '@/lib/mailbox/warmup'
@@ -90,6 +90,16 @@ export async function POST(request: Request) {
   try {
     clientId = await resolveMailboxClientId(admin, appUser)
   } catch (error) {
+    // No clientId to scope this to yet — that's exactly what failed to
+    // resolve — so it logs against no client rather than being dropped.
+    await logError({
+      clientId: null,
+      actor: `human:${appUser.id}`,
+      type: 'mailbox.connect_error',
+      source: 'mailbox',
+      error,
+      payload: { provider: 'smtp', stage: 'resolve_client' },
+    })
     const code = isAppError(error) ? error.code : 'unknown'
     const status = isAppError(error) && error.code === 'FORBIDDEN' ? 403 : 500
     return NextResponse.json({ error: code }, { status })
@@ -127,11 +137,15 @@ export async function POST(request: Request) {
     return verificationFailure(error)
   }
 
+  // Tracked outside the try so the catch below can tell a genuine insert
+  // failure (nothing written) apart from the row having been created and only
+  // the follow-up audit-log write failing — those need different fixes.
+  let mailbox: { id: string } | undefined
   try {
     // A newly connected mailbox starts at the client's configured ramp, the
     // same as an OAuth one.
     const client = await getClientById(admin, clientId)
-    const mailbox = await insertMailbox(admin, {
+    mailbox = await insertMailbox(admin, {
       client_id: clientId,
       provider: 'smtp',
       email_address: credentials.emailAddress,
@@ -154,6 +168,21 @@ export async function POST(request: Request) {
     })
     return NextResponse.json({ ok: true, mailboxId: mailbox.id })
   } catch (error) {
+    await logError({
+      clientId,
+      actor: `human:${appUser.id}`,
+      type: 'mailbox.connect_error',
+      source: 'mailbox',
+      error,
+      payload: {
+        provider: 'smtp',
+        emailAddress: credentials.emailAddress,
+        // Present only when the row was actually created — tells the operator
+        // whether this is a stuck duplicate or a genuine insert failure.
+        mailboxId: mailbox?.id ?? null,
+        stage: mailbox ? 'post_insert' : 'insert',
+      },
+    })
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })
   }
