@@ -8,6 +8,8 @@ import { connectSmtpAccount, buildOAuthAuthorizeUrl, completeOAuthConnect, disco
 
 const smtpInput = {
   emailAddress: 'sales@acme.com',
+  firstName: 'Jordan',
+  lastName: 'Lee',
   username: 'sales@acme.com',
   password: 'app-password',
   smtpHost: 'smtp.acme.com',
@@ -21,18 +23,36 @@ const smtpInput = {
 describe('connectSmtpAccount', () => {
   beforeEach(() => mockFetchJson.mockReset())
 
-  it('should POST the credentials with the API key header and return the account id', async () => {
-    mockFetchJson.mockResolvedValueOnce({ account_id: 'acc_123' })
+  it('should POST to /v1/imap_auth with the real field names and return the account id', async () => {
+    mockFetchJson.mockResolvedValueOnce({ id: 1234 })
     const result = await connectSmtpAccount(smtpInput)
-    expect(result).toEqual({ accountId: 'acc_123' })
+    expect(result).toEqual({ accountId: '1234' })
     const [url, options] = mockFetchJson.mock.calls[0]!
-    expect(url).toBe('https://api.mailreach.co/api/v1/connect-account')
+    expect(url).toBe('https://api.mailreach.co/api/v1/imap_auth')
     expect(options.method).toBe('POST')
     expect(options.headers['X-Api-Key']).toBe('Bearer test-mailreach-key')
     const body = JSON.parse(options.body as string)
-    expect(body.email).toBe('sales@acme.com')
-    expect(body.smtp_host).toBe('smtp.acme.com')
-    expect(body.imap_host).toBe('imap.acme.com')
+    expect(body).toEqual({
+      email: 'sales@acme.com',
+      first_name: 'Jordan',
+      last_name: 'Lee',
+      provider: 'custom',
+      imap_server: 'imap.acme.com',
+      imap_server_port: 993,
+      imap_server_username: 'sales@acme.com',
+      imap_server_password: 'app-password',
+      smtp_server: 'smtp.acme.com',
+      smtp_server_port: 587,
+      smtp_server_username: 'sales@acme.com',
+      smtp_server_password: 'app-password',
+      smtp_server_starttls: false,
+    })
+  })
+
+  it('should coerce a string id in the response to the returned accountId unchanged', async () => {
+    mockFetchJson.mockResolvedValueOnce({ id: 'already-a-string' })
+    const result = await connectSmtpAccount(smtpInput)
+    expect(result).toEqual({ accountId: 'already-a-string' })
   })
 })
 
