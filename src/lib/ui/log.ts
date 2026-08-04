@@ -109,6 +109,16 @@ const SENTENCE_BUILDERS: Record<string, (payload: Json) => string> = {
   'mailbox.none_healthy': (p) =>
     `No healthy mailbox available — ${readNumber(p, 'mailboxCount')} configured, all capped or blocked.`,
   'mailbox.connected': () => 'Mailbox connected.',
+  // `serverResponse` is the mail host's own reply text (e.g. an SMTP 535
+  // banner) — the actual diagnostic, and worth more than the generic
+  // `errorMessage` every logWarn call also carries. Falls back to it only
+  // when the server never returned one (a timeout or a connection failure).
+  'mailbox.connect_failed': (p) => {
+    const stage = readString(p, 'stage')
+    const leg = stage ? ` on the ${stage === 'smtp' ? 'sending (SMTP)' : 'reading (IMAP)'} server` : ''
+    const reason = readString(p, 'serverResponse') ?? readString(p, 'errorMessage') ?? 'unknown error'
+    return `Mailbox connect failed${leg}: ${reason}.`
+  },
 }
 
 export function describeEvent(type: string, payload: Json): string {

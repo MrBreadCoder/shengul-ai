@@ -67,6 +67,34 @@ describe('describeEvent', () => {
     expect(result).toBe('Could not save Apollo company info for a case: insert failed.')
   })
 
+  it('should surface the mail server\'s own reply text and which leg failed', () => {
+    const result = describeEvent('mailbox.connect_failed', {
+      provider: 'smtp',
+      stage: 'smtp',
+      serverResponse: '535 5.7.8 Error: authentication failed',
+      errorCode: 'UNAUTHORIZED',
+      errorMessage: 'Mailbox credentials were rejected',
+    })
+
+    expect(result).toBe(
+      'Mailbox connect failed on the sending (SMTP) server: 535 5.7.8 Error: authentication failed.',
+    )
+  })
+
+  it('should fall back to the generic error message when the server never replied', () => {
+    const result = describeEvent('mailbox.connect_failed', {
+      provider: 'smtp',
+      stage: 'imap',
+      serverResponse: null,
+      errorCode: 'EXTERNAL_TIMEOUT',
+      errorMessage: 'Mail operation exceeded its deadline',
+    })
+
+    expect(result).toBe(
+      'Mailbox connect failed on the reading (IMAP) server: Mail operation exceeded its deadline.',
+    )
+  })
+
   it('should warn on a discovery run that activated leads without verification', () => {
     const result = describeEvent('pipeline.discover.completed', {
       campaignId: 'camp1',
