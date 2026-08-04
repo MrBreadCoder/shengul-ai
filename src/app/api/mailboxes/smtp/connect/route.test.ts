@@ -187,6 +187,11 @@ describe('POST /api/mailboxes/smtp/connect', () => {
       email_address: 'ops@client.com',
       display_name: 'Client Ops',
       warmup_profile: 'standard',
+      // mailboxes.warmup_target_cap is NOT NULL with no column default
+      // (migration 0024) — omitting it here is exactly the production bug
+      // this test guards against ("null value ... violates not-null
+      // constraint" on every connect attempt).
+      warmup_target_cap: 20,
     })
     expect(row.warmup_started_at).toEqual(expect.any(String))
     expect(JSON.stringify(row.oauth)).not.toContain('smtp-password-fixture')

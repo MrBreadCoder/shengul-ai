@@ -17,6 +17,15 @@ export const WARMUP_STEP_DAYS: Record<WarmupProfile, number> = {
 
 const MS_PER_DAY = 86_400_000
 
+// Mirrors `mailboxes.daily_cap`'s own column default (migration 0001) — kept
+// as a named constant here because `warmup_target_cap` has no column default
+// of its own (migration 0024, deliberately: it's meant to be an explicit
+// per-mailbox value). A newly connected mailbox has no daily_cap override
+// yet, so its target cap should start equal to the daily_cap it will
+// actually get, matching the pre-0024 behavior where the ramp's implicit
+// target was always daily_cap itself.
+export const DEFAULT_MAILBOX_DAILY_CAP = 20
+
 export interface EffectiveCapInput {
   profile: WarmupProfile
   warmupStartedAt: string | null

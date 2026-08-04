@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { effectiveDailyCap, getMailboxWarmthStatus, warmupInsertFields } from './warmup'
+import {
+  effectiveDailyCap,
+  getMailboxWarmthStatus,
+  warmupInsertFields,
+  DEFAULT_MAILBOX_DAILY_CAP,
+} from './warmup'
 import { AppError } from '@/lib/errors/app-error'
+
+// Guards against the mailboxes.daily_cap column default (migration 0001)
+// silently drifting away from this mirrored constant — connect routes rely
+// on both staying in sync (see the constant's own comment).
+describe('DEFAULT_MAILBOX_DAILY_CAP', () => {
+  it('should match the mailboxes.daily_cap column default', () => {
+    expect(DEFAULT_MAILBOX_DAILY_CAP).toBe(20)
+  })
+})
 
 const START = '2026-07-01T00:00:00.000Z'
 

@@ -8,7 +8,7 @@ import { logEvent } from '@/lib/events/log-event'
 import { env } from '@/lib/env'
 import { isAppError } from '@/lib/errors/app-error'
 import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
-import { warmupInsertFields } from '@/lib/mailbox/warmup'
+import { warmupInsertFields, DEFAULT_MAILBOX_DAILY_CAP } from '@/lib/mailbox/warmup'
 import { timingSafeEqualString } from '@/lib/auth/timing-safe-equal'
 import { GMAIL_OAUTH_STATE_COOKIE } from '../state-cookie'
 
@@ -59,6 +59,10 @@ export async function GET(request: Request) {
       email_address: exchange.emailAddress,
       display_name: exchange.displayName,
       oauth: encryptMailboxTokens(exchange.tokens),
+      // `daily_cap` isn't set explicitly (the column defaults it), so the
+      // ramp's target has to match that same default — it has no default of
+      // its own (see the constant's own comment).
+      warmup_target_cap: DEFAULT_MAILBOX_DAILY_CAP,
       ...warmupInsertFields(client?.warmup_profile ?? 'standard', new Date()),
     })
     await logEvent({

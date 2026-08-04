@@ -7,7 +7,7 @@ import { getClientById, resolveMailboxClientId } from '@/lib/db/clients'
 import { logEvent, logWarn, logError } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
-import { warmupInsertFields } from '@/lib/mailbox/warmup'
+import { warmupInsertFields, DEFAULT_MAILBOX_DAILY_CAP } from '@/lib/mailbox/warmup'
 import { verifyImapConnection, verifySmtpConnection } from '@/lib/mailbox/smtp-connection'
 import type { SmtpCredentials } from '@/lib/mailbox/provider'
 
@@ -152,6 +152,10 @@ export async function POST(request: Request) {
       email_address: credentials.emailAddress,
       display_name: parsed.data.displayName ?? null,
       oauth: encryptMailboxTokens(credentials),
+      // `daily_cap` isn't set explicitly (the column defaults it), so the
+      // ramp's target has to match that same default — it has no default of
+      // its own (see the constant's own comment).
+      warmup_target_cap: DEFAULT_MAILBOX_DAILY_CAP,
       ...warmupInsertFields(client?.warmup_profile ?? 'standard', new Date()),
     })
     await logEvent({
