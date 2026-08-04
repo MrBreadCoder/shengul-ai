@@ -21,6 +21,8 @@ const hostSchema = z.string().min(1).max(253)
 const bodySchema = z.object({
   emailAddress: z.string().email(),
   displayName: z.string().min(1).max(200).nullable().optional(),
+  firstName: z.string().min(1).max(200),
+  lastName: z.string().min(1).max(200),
   username: z.string().min(1),
   password: z.string().min(1),
   smtpHost: hostSchema,
@@ -151,6 +153,8 @@ export async function POST(request: Request) {
       provider: 'smtp',
       email_address: credentials.emailAddress,
       display_name: parsed.data.displayName ?? null,
+      first_name: parsed.data.firstName,
+      last_name: parsed.data.lastName,
       oauth: encryptMailboxTokens(credentials),
       // `daily_cap` isn't set explicitly (the column defaults it), so the
       // ramp's target has to match that same default — it has no default of

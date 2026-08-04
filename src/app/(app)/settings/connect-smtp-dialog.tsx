@@ -23,6 +23,8 @@ type ConnectState =
 interface FormValues {
   emailAddress: string
   displayName: string
+  firstName: string
+  lastName: string
   username: string
   password: string
   smtpHost: string
@@ -38,6 +40,8 @@ interface FormValues {
 const INITIAL_VALUES: FormValues = {
   emailAddress: '',
   displayName: '',
+  firstName: '',
+  lastName: '',
   username: '',
   password: '',
   smtpHost: '',
@@ -98,6 +102,8 @@ export function ConnectSmtpDialog(): React.ReactElement {
         body: JSON.stringify({
           emailAddress: values.emailAddress,
           displayName: values.displayName.trim() === '' ? null : values.displayName.trim(),
+          firstName: values.firstName.trim(),
+          lastName: values.lastName.trim(),
           username: values.username,
           password: values.password,
           smtpHost: values.smtpHost,
@@ -186,6 +192,37 @@ export function ConnectSmtpDialog(): React.ReactElement {
               onChange={(event) => setField('displayName', event.target.value)}
               placeholder="Client Ops"
             />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="smtp-first-name" className="text-xs">
+                First name
+              </Label>
+              <Input
+                id="smtp-first-name"
+                type="text"
+                required
+                autoComplete="off"
+                value={values.firstName}
+                onChange={(event) => setField('firstName', event.target.value)}
+                placeholder="Jordan"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="smtp-last-name" className="text-xs">
+                Last name
+              </Label>
+              <Input
+                id="smtp-last-name"
+                type="text"
+                required
+                autoComplete="off"
+                value={values.lastName}
+                onChange={(event) => setField('lastName', event.target.value)}
+                placeholder="Lee"
+              />
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">

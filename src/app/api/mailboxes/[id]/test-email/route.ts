@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth/require-user'
+import { canManageClient } from '@/lib/auth/can-manage-client'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getMailboxById, updateMailboxOauth } from '@/lib/db/mailboxes'
 import { getMailboxProvider } from '@/lib/mailbox/registry'
@@ -10,15 +11,22 @@ import type { Json } from '@/types/database'
 
 export const runtime = 'nodejs'
 
+// Operators may test-send any mailbox; a client may only test-send one of
+// their own client's, per canManageClient — mirrors DELETE /api/mailboxes/[id]
+// (mailbox-row.tsx renders this button for both roles, unlike the
+// operator-only controls block above it, so the route must accept a
+// client-role caller who owns the mailbox instead of hard-rejecting every
+// non-operator).
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
-
   const { id } = await context.params
   try {
     const admin = createAdminClient()
     const mailbox = await getMailboxById(admin, id)
     if (!mailbox) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    if (!canManageClient(appUser, mailbox.client_id)) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
 
     // parseMailboxTokens (not a route-local schema) so this endpoint decrypts
     // tokens the same way every other mailbox code path does, and accepts both

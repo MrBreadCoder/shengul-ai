@@ -2241,3 +2241,62 @@ Verified: `pnpm test` fully green (178 files / 1827 tests, up from
 unrelated warnings, 0 errors). Not verified: no manual in-browser
 click-through as a client-role login — no dev server / live Supabase
 session in this environment.
+
+## Mailreach SMTP connect 404 fix (2026-08-04)
+
+**Plan:** `docs/superpowers/plans/2026-08-04-mailreach-smtp-connect-404.md`
+**Spec:** `docs/superpowers/specs/2026-08-04-mailreach-smtp-connect-404-design.md`
+
+Root cause (confirmed live, not guessed): `connectSmtpAccount` posted to
+`POST /connect-account`, which returns a real `404` on Mailreach's API —
+it never existed. Every SMTP mailbox connect attempt was failing
+silently. The real endpoint is `POST /v1/imap_auth`, confirmed against
+Mailreach's OpenAPI spec plus a live probe with the project's own
+`MAILREACH_API_KEY`.
+
+- **Task 1** (committed) — `supabase/migrations/0027_mailbox_contact_name.sql`
+  adds nullable `mailboxes.first_name`/`last_name` (Mailreach's
+  `imap_auth` requires both, and nothing collected them before now).
+  `src/types/database.ts` `Row`/`Insert` updated to match.
+- **Task 2** (committed) — `src/lib/mailreach/client.ts`: `connectSmtpAccount`
+  rewritten against the real `POST /v1/imap_auth` request/response shape
+  — `provider: 'custom'` (generic SMTP/IMAP, per the endpoint's own
+  description), real field names (`imap_server`, `smtp_server_username`,
+  etc.), and `accountId: String(res.id)` (an integer on the wire, never
+  `res.account_id`). `toMailreachProvider`/OAuth path/`getAccountStats`
+  untouched — both explicitly out of scope for this fix.
+  `client.test.ts` rewritten to match.
+- **Task 3** (committed) — `src/lib/mailreach/enrollment.ts`:
+  `connectSmtpMailbox` now reads `mailbox.first_name`/`last_name` via a
+  new `legacyNameFallback` helper (falls back to the email's local part
+  for pre-migration rows where both columns are still `null`) and passes
+  them to `connectSmtpAccount`. `bulkReconnectSmtpForClient` unchanged —
+  it calls `connectSmtpMailbox` and inherits the fallback for free.
+  `enrollment.test.ts` +2 tests (named-row pass-through, legacy fallback).
+- **Task 4** (uncommitted, per user request to skip further commits) —
+  `src/app/api/mailboxes/smtp/connect/route.ts`: `bodySchema` gains
+  required `firstName`/`lastName` (min length 1), threaded straight to
+  `insertMailbox`'s `first_name`/`last_name` (not through the encrypted
+  `SmtpCredentials` payload — they're a plain column, not a token).
+  `route.test.ts` +2 tests (missing/empty-string rejection) + the
+  success-path assertion extended to check both columns land on the row.
+- **Task 5** (uncommitted) — `src/app/(app)/settings/connect-smtp-dialog.tsx`:
+  two new required "First name"/"Last name" inputs (`FormValues`,
+  `INITIAL_VALUES`, POST body, JSX grid) placed right after the existing
+  optional "Display name" field, before the Username/Password grid. No
+  colocated test file for this component (client components are tested
+  at critical paths only per `.claude/QUALITY.md`), so this task was
+  implement-and-typecheck, not red/green.
+
+Verified: `pnpm typecheck && pnpm lint && pnpm test` all clean — 179
+files / 1855 tests passing, 0 type errors, 0 new lint errors (same 7
+pre-existing unrelated warnings). **Not verified**: no live click-through
+against a real Mailreach account — no dev server / live Supabase session
+/ real `MAILREACH_API_KEY` round-trip available in this environment. Per
+the plan's Task 6, this fix should not be considered fully confirmed
+until someone does one real connect against
+`info@uniformsfashion.com` (mailbox `28879483-ed6b-4f87-9d48-553b909c39a8`)
+and checks `mailreach_status`/`mailreach_account_id` plus Mailreach's own
+`GET /v1/accounts` — the `provider: 'custom'` enum value in particular
+was reasoned from the OpenAPI spec's endpoint description, not
+live-tested end to end.

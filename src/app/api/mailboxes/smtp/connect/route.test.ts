@@ -33,6 +33,8 @@ import { POST } from './route'
 const validBody = {
   emailAddress: 'ops@client.com',
   displayName: 'Client Ops',
+  firstName: 'Jordan',
+  lastName: 'Lee',
   username: 'ops@client.com',
   password: 'smtp-password-fixture-qhvnz',
   smtpHost: 'smtp.client.com',
@@ -99,6 +101,19 @@ describe('POST /api/mailboxes/smtp/connect', () => {
   it('should return 400 when the port is out of range', async () => {
     const res = await POST(req({ ...validBody, smtpPort: 70000 }))
     expect(res.status).toBe(400)
+  })
+
+  it('should return 400 when firstName is missing', async () => {
+    const { firstName: _omitted, ...incomplete } = validBody
+    const res = await POST(req(incomplete))
+    expect(res.status).toBe(400)
+    expect(insertMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should return 400 when lastName is empty', async () => {
+    const res = await POST(req({ ...validBody, lastName: '' }))
+    expect(res.status).toBe(400)
+    expect(insertMailboxMock).not.toHaveBeenCalled()
   })
 
   it('should insert nothing when SMTP verification fails', async () => {
@@ -186,6 +201,8 @@ describe('POST /api/mailboxes/smtp/connect', () => {
       provider: 'smtp',
       email_address: 'ops@client.com',
       display_name: 'Client Ops',
+      first_name: 'Jordan',
+      last_name: 'Lee',
       warmup_profile: 'standard',
       // mailboxes.warmup_target_cap is NOT NULL with no column default
       // (migration 0024) — omitting it here is exactly the production bug
