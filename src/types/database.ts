@@ -668,6 +668,8 @@ export interface Database {
           provider: Database['public']['Enums']['mailbox_provider']
           email_address: string
           display_name: string | null
+          first_name: string | null
+          last_name: string | null
           oauth: Json
           daily_cap: number
           sent_today: number
@@ -695,6 +697,8 @@ export interface Database {
           provider: Database['public']['Enums']['mailbox_provider']
           email_address: string
           display_name?: string | null
+          first_name?: string | null
+          last_name?: string | null
           oauth?: Json
           daily_cap?: number
           sent_today?: number
