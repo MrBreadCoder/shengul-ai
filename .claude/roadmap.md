@@ -2170,3 +2170,34 @@ unrelated warnings, 0 errors). Not verified: the 0025 migration has not
 been applied to any live database (no local Supabase CLI in this
 environment — matches the plan's documented fallback for Task 1/Step 3);
 no manual in-browser verification of the scrape pipeline.
+
+## Knowledge-base "Re-scrape all" button (2026-08-04, inline, no commits)
+
+Bulk re-scrape for a client's website-page knowledge sources, added
+directly (not part of the hybrid-search plan) since existing re-scrape
+was per-source only, one click at a time.
+
+- New `src/app/api/clients/[clientId]/knowledge/rescrape-all/route.ts`
+  (operator-only, same auth/idempotency contract as the existing
+  per-source `[sourceId]/rescrape` route): lists the client's sources,
+  filters to `source_type === 'website_page'` and `status !== 'pending'`
+  (skips sources already mid-scrape rather than duplicating the queued
+  job), then per source calls `resetSourceToPending` +
+  `publishJson('/api/pipeline/knowledge-scrape', ...)`. A single
+  source's failure is caught, logged (`knowledge.rescrape_all_source_failed`),
+  and counted — it does not abort the rest of the batch. Logs one summary
+  event (`knowledge.rescrape_all_requested`) with `totalSources` /
+  `queued` / `failedSourceIds`. Returns `{ ok, queued, failed }`.
+  `route.test.ts`, 5/5 passing (403 for non-operators, full-batch success,
+  skips pdf/pending sources, partial-failure counting, zero-rescrapable
+  no-op).
+- New `src/app/(app)/clients/[id]/knowledge-rescrape-all-button.tsx`
+  (Client Component): renders nothing when there are zero website-page
+  sources; otherwise a confirm-gated button that POSTs to the new route
+  and toasts the queued/failed counts. Wired into `clients/[id]/page.tsx`'s
+  Knowledge tab header, next to the existing file-upload button.
+
+Verified: `pnpm test` fully green (178 files / 1823 tests, up from
+177/1818), `pnpm typecheck` clean, `pnpm lint` clean (same 6 pre-existing
+unrelated warnings, 0 errors). No manual in-browser click-through — no
+dev server / live Supabase session in this environment.

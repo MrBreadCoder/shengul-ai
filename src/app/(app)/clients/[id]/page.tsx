@@ -36,6 +36,7 @@ import { WarmupTab } from './warmup-tab'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
 import { KnowledgeSourcesList } from './knowledge-sources-list'
+import { KnowledgeRescrapeAllButton } from './knowledge-rescrape-all-button'
 import { KnowledgeRealtimeRefresher } from './knowledge-realtime-refresher'
 import { ResourcesSection } from './resources-section'
 
@@ -278,7 +279,13 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
                 replies in for this client. This client&apos;s own logins can see these
                 and curate their own on /knowledge.
               </p>
-              <KnowledgeFileUpload clientId={client.id} />
+              <div className="flex items-center gap-2">
+                <KnowledgeRescrapeAllButton
+                  clientId={client.id}
+                  websitePageCount={knowledgeSources.filter((s) => s.source_type === 'website_page').length}
+                />
+                <KnowledgeFileUpload clientId={client.id} />
+              </div>
             </div>
             <KnowledgeSitemapPicker clientId={client.id} />
             <KnowledgeSourcesList clientId={client.id} sources={knowledgeSources} now={now} />
