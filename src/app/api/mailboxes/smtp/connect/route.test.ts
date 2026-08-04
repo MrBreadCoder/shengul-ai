@@ -5,7 +5,7 @@ const requireUserMock = vi.fn()
 const verifySmtpConnectionMock = vi.fn()
 const verifyImapConnectionMock = vi.fn()
 const insertMailboxMock = vi.fn()
-const getOrCreateOperatorClientMock = vi.fn()
+const resolveMailboxClientIdMock = vi.fn()
 const getClientByIdMock = vi.fn()
 const logEventMock = vi.fn()
 
@@ -17,7 +17,7 @@ vi.mock('@/lib/mailbox/smtp-connection', () => ({
 }))
 vi.mock('@/lib/db/mailboxes', () => ({ insertMailbox: (...a: unknown[]) => insertMailboxMock(...a) }))
 vi.mock('@/lib/db/clients', () => ({
-  getOrCreateOperatorClient: (...a: unknown[]) => getOrCreateOperatorClientMock(...a),
+  resolveMailboxClientId: (...a: unknown[]) => resolveMailboxClientIdMock(...a),
   getClientById: (...a: unknown[]) => getClientByIdMock(...a),
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
@@ -46,22 +46,33 @@ function req(body: unknown): Request {
 }
 
 beforeEach(() => {
-  requireUserMock.mockReset().mockResolvedValue({ appUser: { id: 'op1', role: 'operator' } })
+  requireUserMock.mockReset().mockResolvedValue({ appUser: { id: 'op1', role: 'operator', client_id: null } })
   verifySmtpConnectionMock.mockReset().mockResolvedValue(undefined)
   verifyImapConnectionMock.mockReset().mockResolvedValue(undefined)
   insertMailboxMock.mockReset().mockResolvedValue({ id: 'mb1' })
-  getOrCreateOperatorClientMock.mockReset().mockResolvedValue('client-1')
+  resolveMailboxClientIdMock.mockReset().mockResolvedValue('client-1')
   getClientByIdMock.mockReset().mockResolvedValue({ id: 'client-1', warmup_profile: 'standard' })
   logEventMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('POST /api/mailboxes/smtp/connect', () => {
-  it('should return 403 when the caller is not an operator', async () => {
-    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client' } })
+  it('should return 403 when the caller is a client with no client_id', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: null } })
     const res = await POST(req(validBody))
     expect(res.status).toBe(403)
     expect(verifySmtpConnectionMock).not.toHaveBeenCalled()
     expect(insertMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should allow a client-role caller with a client_id to connect a mailbox', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'client-1' } })
+    const res = await POST(req(validBody))
+    expect(res.status).toBe(200)
+    expect(resolveMailboxClientIdMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ role: 'client', client_id: 'client-1' }),
+    )
+    expect(insertMailboxMock).toHaveBeenCalled()
   })
 
   it('should return 400 when the body is not valid JSON', async () => {

@@ -3,7 +3,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { outlookProvider } from '@/lib/mailbox/outlook-provider'
 import { insertMailbox } from '@/lib/db/mailboxes'
-import { getOrCreateOperatorClient, getClientById } from '@/lib/db/clients'
+import { resolveMailboxClientId, getClientById } from '@/lib/db/clients'
 import { logEvent } from '@/lib/events/log-event'
 import { env } from '@/lib/env'
 import { isAppError } from '@/lib/errors/app-error'
@@ -22,7 +22,11 @@ function redirectAndClearState(path: string): NextResponse {
 
 export async function GET(request: Request) {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Both roles may connect a mailbox; a client-role account only lacks
+  // `client_id` in a state the UI should never let reach here.
+  if (appUser.role === 'client' && appUser.client_id === null) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
 
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
@@ -45,7 +49,7 @@ export async function GET(request: Request) {
   try {
     const exchange = await outlookProvider.exchangeCode(code)
     const admin = createAdminClient()
-    const clientId = await getOrCreateOperatorClient(admin)
+    const clientId = await resolveMailboxClientId(admin, appUser)
     // A newly connected mailbox starts at the client's configured ramp. Clients
     // whose addresses are already warm are set to 'none' and skip the ramp.
     const client = await getClientById(admin, clientId)

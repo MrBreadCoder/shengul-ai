@@ -2201,3 +2201,43 @@ Verified: `pnpm test` fully green (178 files / 1823 tests, up from
 177/1818), `pnpm typecheck` clean, `pnpm lint` clean (same 6 pre-existing
 unrelated warnings, 0 errors). No manual in-browser click-through — no
 dev server / live Supabase session in this environment.
+
+## Mailbox connect opened to client-role users (2026-08-04, inline, no commits)
+
+All three mailbox-connect flows (Gmail OAuth, Outlook OAuth, generic
+SMTP/IMAP) were hard-gated to `role === 'operator'`, so a client-role
+login got a bare 403 from `/api/mailboxes/smtp/connect` (reported via a
+Yandex-mail SMTP connection attempt) and from the two OAuth `/connect`
++ `/callback` routes. Every mailbox was also unconditionally attached to
+the single "Demo Client" row via `getOrCreateOperatorClient`, which was
+never going to be right for a client-role connect anyway.
+
+- New `resolveMailboxClientId(supabase, appUser)` in `src/lib/db/clients.ts`:
+  exhaustive switch on `appUser.role` — `operator` still resolves the
+  shared demo client via the existing `getOrCreateOperatorClient`;
+  `client` returns `appUser.client_id` directly, throwing `AppError`
+  `FORBIDDEN` if it's null (defense-in-depth only — the routes below
+  reject that case before doing any work) and `INVARIANT_VIOLATION` via
+  `assertNever` on any future role value.
+- `src/app/api/mailboxes/{google,outlook}/connect/route.ts`,
+  `{google,outlook}/callback/route.ts`, `smtp/connect/route.ts`: replaced
+  the `role !== 'operator'` 403 with a narrower guard
+  (`role === 'client' && client_id === null`) and swapped
+  `getOrCreateOperatorClient` for `resolveMailboxClientId` in the three
+  routes that insert a mailbox row (callbacks + smtp connect) so a
+  client-role connect lands on the caller's own client, not the demo one.
+- `src/lib/db/clients.test.ts` +3 tests for `resolveMailboxClientId`
+  (operator path, client path, FORBIDDEN-on-null path).
+  `smtp/connect/route.test.ts`: replaced the stale "403 for non-operator"
+  test with a 403-on-null-client_id test plus a new success test for a
+  client-role caller with a `client_id`.
+- Not touched: MailReach connect/disconnect routes (a separate
+  operator-managed warmup service, not "connect a mailbox") and
+  `MailboxRow`'s `viewerRole === 'operator'` gate on warmup/MailReach
+  controls — out of scope for this change.
+
+Verified: `pnpm test` fully green (178 files / 1827 tests, up from
+178/1823), `pnpm typecheck` clean, `pnpm lint` clean (same 6 pre-existing
+unrelated warnings, 0 errors). Not verified: no manual in-browser
+click-through as a client-role login — no dev server / live Supabase
+session in this environment.

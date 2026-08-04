@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertMailbox } from '@/lib/db/mailboxes'
-import { getClientById, getOrCreateOperatorClient } from '@/lib/db/clients'
+import { getClientById, resolveMailboxClientId } from '@/lib/db/clients'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { encryptMailboxTokens } from '@/lib/mailbox/tokens'
@@ -50,7 +50,9 @@ function verificationFailure(error: unknown): NextResponse {
 
 export async function POST(request: Request) {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
+  // Both roles may connect a mailbox; a client-role account only lacks
+  // `client_id` in a state the UI should never let reach here.
+  if (appUser.role === 'client' && appUser.client_id === null) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
@@ -91,7 +93,7 @@ export async function POST(request: Request) {
 
   try {
     const admin = createAdminClient()
-    const clientId = await getOrCreateOperatorClient(admin)
+    const clientId = await resolveMailboxClientId(admin, appUser)
     // A newly connected mailbox starts at the client's configured ramp, the
     // same as an OAuth one.
     const client = await getClientById(admin, clientId)

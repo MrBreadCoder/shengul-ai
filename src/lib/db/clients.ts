@@ -86,6 +86,35 @@ export async function getOrCreateOperatorClient(
   return created.id
 }
 
+// Mailbox-connect routes call this instead of `getOrCreateOperatorClient`
+// directly so the same connect/callback code path works for both roles: an
+// operator's mailboxes land on the shared demo client, a client-role user's
+// land on their own. `client_id` is nullable on `app_users` only because the
+// column is shared with the `operator` role — a `client`-role row is always
+// provisioned with one (see the invite flow), so a null here means the
+// account is in a state the UI should never have allowed to reach this call.
+export async function resolveMailboxClientId(
+  supabase: SupabaseClient<Database>,
+  appUser: Pick<AppUserRow, 'role' | 'client_id'>,
+): Promise<string> {
+  switch (appUser.role) {
+    case 'operator':
+      return getOrCreateOperatorClient(supabase)
+    case 'client': {
+      if (appUser.client_id === null) {
+        throw new AppError('FORBIDDEN', 'Client user has no client_id assigned', {
+          role: appUser.role,
+        })
+      }
+      return appUser.client_id
+    }
+    default: {
+      const exhaustive: never = appUser.role
+      throw new AppError('INVARIANT_VIOLATION', `Unknown app user role: ${String(exhaustive)}`, {})
+    }
+  }
+}
+
 export async function updateClientName(
   supabase: SupabaseClient<Database>,
   id: string,

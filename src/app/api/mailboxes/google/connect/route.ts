@@ -13,7 +13,9 @@ export const runtime = 'nodejs'
 
 export async function GET() {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
+  // Both roles may connect a mailbox; a client-role account only lacks
+  // `client_id` in a state the UI should never let reach here.
+  if (appUser.role === 'client' && appUser.client_id === null) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
   // A random, single-use nonce (not the user id) — the callback validates it

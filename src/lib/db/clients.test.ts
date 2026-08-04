@@ -15,6 +15,7 @@ import {
   updateClientLogoUrl,
   updateClientMailreachEnabled,
   updateClientReplyMode,
+  resolveMailboxClientId,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -291,6 +292,34 @@ describe('updateClientMailreachEnabled', () => {
       from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }) }),
     } as never
     await expect(updateClientMailreachEnabled(supabase, 'c1', true)).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('resolveMailboxClientId', () => {
+  it('should resolve the shared demo client for an operator', async () => {
+    const supabase = {
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: 'demo-1' }, error: null }) }) }),
+      }),
+    } as never
+    const result = await resolveMailboxClientId(supabase, { role: 'operator', client_id: null })
+    expect(result).toBe('demo-1')
+  })
+
+  it('should resolve the caller\'s own client_id for a client-role user', async () => {
+    const supabase = {} as never
+    const result = await resolveMailboxClientId(supabase, { role: 'client', client_id: 'client-1' })
+    expect(result).toBe('client-1')
+  })
+
+  it('should throw FORBIDDEN when a client-role user has no client_id', async () => {
+    const supabase = {} as never
+    await expect(resolveMailboxClientId(supabase, { role: 'client', client_id: null })).rejects.toBeInstanceOf(
+      AppError,
+    )
+    await expect(
+      resolveMailboxClientId(supabase, { role: 'client', client_id: null }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 })
 
