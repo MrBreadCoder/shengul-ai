@@ -331,6 +331,9 @@ function buildMailboxes(acc: Accumulator): void {
       },
       daily_cap: fixture.dailyCap,
       sent_today: fixture.sentToday,
+      // No column default (see migration 0024): mirror its own backfill,
+      // which set every existing mailbox's target cap to its current cap.
+      warmup_target_cap: fixture.dailyCap,
       warmup_profile: fixture.health === 'ok' ? 'none' : 'standard',
       warmup_started_at: fixture.health === 'ok' ? null : createdAt,
       health: fixture.health,
