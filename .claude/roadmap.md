@@ -2300,3 +2300,84 @@ and checks `mailreach_status`/`mailreach_account_id` plus Mailreach's own
 `GET /v1/accounts` — the `provider: 'custom'` enum value in particular
 was reasoned from the OpenAPI spec's endpoint description, not
 live-tested end to end.
+
+---
+
+## Discovery pipeline precision & cost-efficiency — DONE (Tasks 1-6 of 6, 2026-08-05, inline, no commits)
+
+**Plan:** `docs/superpowers/plans/2026-08-05-discovery-pipeline-precision.md`
+**Spec:** `docs/superpowers/specs/2026-08-05-discovery-pipeline-precision-design.md`
+
+Stops paying for Apollo/Emailable work on people already suppressed or
+excluded for a client, dedups Apollo reveals per client instead of per
+campaign, and exposes the two previously-dead `personSeniorities`/
+`contactEmailStatuses` Apollo ICP filters end to end.
+
+- **Task 1** (uncommitted) — `src/lib/db/suppressions.ts`: new
+  `getSuppressions(supabase, clientId, emails[])` — one bulk
+  `.in('email', ...)` lookup scoped by `client_id`, same
+  trim/lowercase normalization as the existing single-email
+  `getSuppression`. `suppressions.test.ts` +4 tests.
+- **Task 2** (uncommitted) — `src/lib/apollo/exclude-keywords.ts`:
+  `matchesExcludedKeywords`'s candidate shape gains optional
+  `organizationIndustry`/`organizationDescription` (only available
+  post-enrich), folded into the same whole-word keyword match as
+  `title`/`organizationName`. Fully backward compatible — every
+  pre-enrich call site keeps working unchanged. `exclude-keywords.test.ts`
+  +3 tests.
+- **Task 3** (uncommitted) — `src/lib/db/leads.ts`: `getKnownSourceIds`
+  now takes `clientId` and queries `.eq('client_id', ...)` instead of
+  `.eq('campaign_id', ...)` — a person revealed by one campaign for a
+  client is never re-enriched by another campaign of the same client.
+  `getVerifiedLeadCompanies` (pass-2 company targeting) stays
+  campaign-scoped, unaffected. `leads.test.ts` +1 test.
+- **Task 4** (uncommitted) — `src/lib/pipeline/discover.ts`:
+  `enrichCandidates` now takes `supabase` and, right after building each
+  batch's rows from Apollo's enrich response and before `verifyBatch`
+  runs, checks each row against (a) the post-enrich exclude-keyword match
+  (industry/description) and (b) a bulk `getSuppressions` lookup — a
+  match on either parks the row (`status: 'parked'`) and skips the
+  Emailable call entirely, logging
+  `pipeline.discover.excluded_post_enrich` /
+  `pipeline.discover.suppressed_skipped` events. **Correctness fix
+  required by this change**: three call sites (`groupVerifiedLead` gate,
+  `verifiedApolloIds`, the `verified` counter) switched from reading
+  `row.email_status === 'verified'` to `row.status === 'active'` — a
+  parked row keeps Apollo's raw `email_status: 'verified'` (that's why it
+  matched) but must not be treated as send-eligible. `DiscoverySummary`/
+  `EnrichResult` gain `suppressedSkipped`/`excludedPostEnrich` counters.
+  `discover.test.ts` +7 tests (new describe block) plus 3 pre-existing
+  row-mocking helpers fixed to carry `status` so they don't silently stop
+  matching after the gating change.
+- **Task 5** (uncommitted) — `src/components/ui/checkbox.tsx`: new
+  `Checkbox` primitive, same construction pattern as `select.tsx`
+  (`radix-ui`'s combined package, `cn`, `data-slot` attrs, shadcn token
+  classes). No colocated test — this project has no jsdom/component-test
+  setup, per the plan's Global Constraints; verified via typecheck/lint.
+- **Task 6** (uncommitted) — two previously-dead ICP filters wired end to
+  end:
+  - `src/app/api/campaigns/route.ts`: `createCampaignSchema` gains
+    `personSeniorities`/`contactEmailStatuses` (validated against
+    `apolloPersonSeniorities`/`apolloContactEmailStatuses`), forwarded
+    into the `apolloIcpSchema.parse({...})` call — previously silently
+    dropped even if the client sent them. `route.test.ts` +3 tests
+    (pass-through, default-to-empty, 400 on an unrecognized value).
+  - `src/app/(app)/campaigns/new-campaign-form.tsx`: two checkbox groups
+    added to the ICP fieldset — "Target seniority" (none checked by
+    default) and "Contact email status" (`verified` pre-checked),
+    reading via `formData.getAll(name)`. No campaign-edit UI exists, so
+    this is creation-time-only, matching every other ICP field.
+
+Verified: `npm run test && npm run typecheck && npm run lint` all
+clean — 180 files / 1881 tests passing, 0 type errors, 0 new lint
+errors (same 7 pre-existing unrelated warnings). Two TS errors surfaced
+during Task 4's typecheck (optional `source_id`/`company_domain`/
+`company_name` on the `LeadInsert` insert type not narrowing the way the
+plan's snippet assumed) and were fixed with a `!= null` guard and
+`?? null` coalescing respectively. A third, in Task 6, wasn't
+anticipated by the plan either: Radix's `Checkbox.Root` renders a
+`<button>`, but `toolparamdescription` (the declarative-WebMCP field
+hint) was only typed onto `Input`/`Textarea`/`Select` HTML attributes in
+`src/types/webmcp.ts` — extended that module augmentation to
+`ButtonHTMLAttributes` too, so it now also covers Radix's other
+button-based form controls, not just this one.
