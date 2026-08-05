@@ -6,6 +6,7 @@ import { mapApolloEmailStatus } from '@/lib/apollo/map-email-status'
 import { matchesExcludedKeywords } from '@/lib/apollo/exclude-keywords'
 import type { ApolloIcpFilters, ApolloSearchCandidate } from '@/lib/apollo/types'
 import { getKnownSourceIds, insertLeads, getVerifiedLeadCompanies, type LeadInsert, type LeadRow } from '@/lib/db/leads'
+import { getSuppressions } from '@/lib/db/suppressions'
 import { groupVerifiedLead, computeCompanyKey } from './group-lead'
 import { logEvent } from '@/lib/events/log-event'
 import { withExternalLogging, type ExternalCallContext } from '@/lib/events/with-external-logging'
@@ -39,12 +40,16 @@ export interface DiscoverySummary {
   firstPassCandidates: number
   secondPassCandidates: number
   enriched: number
-  /** Leads that ended at `email_status: 'verified'` — i.e. cleared for sending. */
+  /** Leads that ended at `status: 'active'` — i.e. cleared for sending. */
   verified: number
   emailableChecked: number
   emailableDeliverable: number
   emailableRejected: number
   emailableFailedOpen: number
+  /** Apollo-verified leads parked without an Emailable call: suppressed for this client. */
+  suppressedSkipped: number
+  /** Apollo-verified leads parked without an Emailable call: matched an exclude keyword post-enrich. */
+  excludedPostEnrich: number
   inserted: number
 }
 
@@ -231,17 +236,21 @@ async function verifyRow(
  * Runs the deliverability guard over one enrichment batch and returns the rows
  * with their final status applied.
  *
- * Emailable is called only for rows Apollo already marked `verified` that carry
- * a real address: it can never promote anything else, so verifying them would
- * only spend credits. Untouched rows keep the verdict Apollo gave them.
+ * Emailable is called only for rows Apollo already marked `verified`, that
+ * carry a real address, and that are not in `skipVerification` (already
+ * parked upstream as suppressed or post-enrich excluded — see
+ * enrichCandidates). Untouched rows keep the verdict Apollo (or the upstream
+ * filter) gave them.
  */
 async function verifyBatch(
   campaign: CampaignForDiscovery,
   batchRows: LeadInsert[],
+  skipVerification: Set<string>,
 ): Promise<VerifyBatchResult> {
   const verifiable: VerifiableRow[] = []
   batchRows.forEach((row, index) => {
     if (row.email_status !== 'verified') return
+    if (row.source_id && skipVerification.has(row.source_id)) return
     const { email } = row
     if (typeof email !== 'string' || email.length === 0) return
     verifiable.push({ index, row, email })
@@ -287,24 +296,53 @@ async function verifyBatch(
 
 interface EnrichResult {
   rows: LeadInsert[]
-  /** Rows that ended at `email_status: 'verified'` — i.e. actually activated. */
+  /** Rows that ended at `status: 'active'` — i.e. actually cleared to send. */
   verifiedCount: number
   emailableChecked: number
   emailableDeliverable: number
   emailableRejected: number
   emailableFailedOpen: number
+  suppressedSkipped: number
+  excludedPostEnrich: number
+}
+
+// Best-effort, same reasoning as the pipeline.discover.group_lead_failed
+// logging further down: a logging failure must never turn an
+// already-decided filter outcome (the row is parked either way) into a
+// failed discovery run.
+async function logDiscoveryFilterEvent(
+  campaign: CampaignForDiscovery,
+  type: 'pipeline.discover.suppressed_skipped' | 'pipeline.discover.excluded_post_enrich',
+  leadSourceId: string,
+  companyKey: string,
+): Promise<void> {
+  try {
+    await logEvent({
+      clientId: campaign.clientId,
+      actor: 'system',
+      type,
+      source: 'pipeline',
+      payload: { campaignId: campaign.id, leadSourceId, companyKey },
+    })
+  } catch {
+    // Audit logging is best-effort.
+  }
 }
 
 async function enrichCandidates(
   candidates: FreshCandidate[],
   campaign: CampaignForDiscovery,
+  supabase: SupabaseClient<Database>,
 ): Promise<EnrichResult> {
+  const { icp } = campaign
   const rows: LeadInsert[] = []
   let verifiedCount = 0
   let emailableChecked = 0
   let emailableDeliverable = 0
   let emailableRejected = 0
   let emailableFailedOpen = 0
+  let suppressedSkipped = 0
+  let excludedPostEnrich = 0
 
   for (let i = 0; i < candidates.length; i += ENRICH_BATCH_SIZE) {
     const batch = candidates.slice(i, i + ENRICH_BATCH_SIZE)
@@ -325,18 +363,56 @@ async function enrichCandidates(
     )
 
     const batchRows: LeadInsert[] = []
+    // Apollo person ids parked without ever reaching Emailable — either the
+    // post-enrich exclude-keyword check below matched, or the suppression
+    // check further down matched. Apollo's raw email_status stays on the row
+    // untouched (it may still read 'verified' — that is Apollo's true
+    // verdict, not a lie), but `status` is forced to 'parked' so nothing
+    // downstream mistakes these for send-eligible. `status`, not
+    // `email_status`, is what every caller below and in
+    // runDiscoveryForCampaign now checks for exactly this reason.
+    const skipVerification = new Set<string>()
+
     for (const person of enrichedPeople) {
       const emailStatus = mapApolloEmailStatus(person.emailStatus)
       const source = batch.find((b) => b.apolloId === person.apolloId)
       const fullName = [person.firstName, person.lastName].filter(Boolean).join(' ') || source?.firstName || 'Unknown'
+      const title = person.title ?? source?.title ?? null
+      const companyName = person.organizationName ?? source?.organizationName ?? null
+      const companyDomain = person.organizationDomain ?? source?.organizationDomain ?? null
+
+      // Post-enrich exclude check: catches companies the pre-enrich pass-1/
+      // pass-2 title+org-name check couldn't see, because industry and
+      // description only exist after this enrich call.
+      if (
+        matchesExcludedKeywords(
+          {
+            title,
+            organizationName: companyName,
+            organizationIndustry: person.organizationIndustry,
+            organizationDescription: person.organizationDescription,
+          },
+          icp.excludeKeywords,
+        )
+      ) {
+        skipVerification.add(person.apolloId)
+        excludedPostEnrich += 1
+        await logDiscoveryFilterEvent(
+          campaign,
+          'pipeline.discover.excluded_post_enrich',
+          person.apolloId,
+          computeCompanyKey(companyDomain, companyName),
+        )
+      }
+
       batchRows.push({
         client_id: campaign.clientId,
         campaign_id: campaign.id,
         source_id: person.apolloId,
         full_name: fullName,
-        title: person.title ?? source?.title ?? null,
-        company_name: person.organizationName ?? source?.organizationName ?? null,
-        company_domain: person.organizationDomain ?? source?.organizationDomain ?? null,
+        title,
+        company_name: companyName,
+        company_domain: companyDomain,
         linkedin_url: person.linkedinUrl ?? source?.linkedinUrl ?? null,
         source: 'apollo',
         raw: { ...person },
@@ -348,19 +424,53 @@ async function enrichCandidates(
       })
     }
 
-    // The deliverability guard, not Apollo, has the final say on activation.
-    const verified = await verifyBatch(campaign, batchRows)
+    // Suppression check: one bulk lookup per batch, client-scoped, for every
+    // row not already parked above — a contact who already bounced or
+    // unsubscribed for this client must never reach Emailable spend or case
+    // grouping, no matter which campaign rediscovers them.
+    const emailsToCheck = batchRows
+      .filter((row) => row.source_id != null && !skipVerification.has(row.source_id))
+      .map((row) => row.email)
+      .filter((email): email is string => typeof email === 'string' && email.length > 0)
+    if (emailsToCheck.length > 0) {
+      const suppressed = await getSuppressions(supabase, campaign.clientId, emailsToCheck)
+      for (const row of batchRows) {
+        if (row.source_id && row.email && suppressed.has(row.email.trim().toLowerCase())) {
+          skipVerification.add(row.source_id)
+          suppressedSkipped += 1
+          await logDiscoveryFilterEvent(
+            campaign,
+            'pipeline.discover.suppressed_skipped',
+            row.source_id,
+            computeCompanyKey(row.company_domain ?? null, row.company_name ?? null),
+          )
+        }
+      }
+    }
+
+    // The deliverability guard, not Apollo, has the final say on activation —
+    // for every row not already parked above.
+    const verified = await verifyBatch(campaign, batchRows, skipVerification)
     emailableChecked += verified.checked
     emailableDeliverable += verified.deliverable
     emailableRejected += verified.rejected
     emailableFailedOpen += verified.failedOpen
     for (const row of verified.rows) {
-      if (row.email_status === 'verified') verifiedCount += 1
+      if (row.status === 'active') verifiedCount += 1
       rows.push(row)
     }
   }
 
-  return { rows, verifiedCount, emailableChecked, emailableDeliverable, emailableRejected, emailableFailedOpen }
+  return {
+    rows,
+    verifiedCount,
+    emailableChecked,
+    emailableDeliverable,
+    emailableRejected,
+    emailableFailedOpen,
+    suppressedSkipped,
+    excludedPostEnrich,
+  }
 }
 
 export async function runDiscoveryForCampaign(
@@ -369,7 +479,7 @@ export async function runDiscoveryForCampaign(
 ): Promise<DiscoverySummary> {
   try {
     const quota = campaign.dailyTarget > 0 ? campaign.dailyTarget : DEFAULT_DAILY_QUOTA
-    const known = await getKnownSourceIds(supabase, campaign.id)
+    const known = await getKnownSourceIds(supabase, campaign.clientId)
     const existingCompanies = await getVerifiedLeadCompanies(supabase, campaign.id)
 
     const priorCompanyCounts = new Map<string, number>()
@@ -389,7 +499,7 @@ export async function runDiscoveryForCampaign(
 
     // Enrich pass-1 picks before deciding pass-2 targets: only a company
     // whose pass-1 contact actually verified is worth a second-contact search.
-    const firstPassEnriched = await enrichCandidates(firstPass.picks, campaign)
+    const firstPassEnriched = await enrichCandidates(firstPass.picks, campaign, supabase)
 
     // Persist pass-1 results now rather than batching with pass 2 at the end:
     // if pass 2 (or its Apollo/Emailable calls) throws after retries are
@@ -403,7 +513,7 @@ export async function runDiscoveryForCampaign(
     // returned org fields — bulkMatchPeople may resolve a slightly
     // different canonical org name/domain than the original search result.
     const verifiedApolloIds = new Set(
-      firstPassEnriched.rows.filter((row) => row.email_status === 'verified').map((row) => row.source_id),
+      firstPassEnriched.rows.filter((row) => row.status === 'active').map((row) => row.source_id),
     )
     const verifiedCompanyCounts = new Map(priorCompanyCounts)
     for (const pick of firstPass.picks) {
@@ -421,7 +531,7 @@ export async function runDiscoveryForCampaign(
       ? await runSecondPass(campaign, secondPassQuota, known, firstPass.picks, targetDomains, verifiedCompanyCounts)
       : { picks: [] as FreshCandidate[], candidatesSeen: 0 }
 
-    const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign)
+    const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign, supabase)
     const secondInserted = await insertLeads(supabase, secondPassEnriched.rows)
 
     const fresh = [...firstPass.picks, ...secondPass.picks]
@@ -432,7 +542,7 @@ export async function runDiscoveryForCampaign(
     const inserted: LeadRow[] = [...firstInserted, ...secondInserted]
 
     for (const lead of inserted) {
-      if (lead.email_status !== 'verified') continue
+      if (lead.status !== 'active') continue
       try {
         await groupVerifiedLead(supabase, {
           id: lead.id,
@@ -476,6 +586,8 @@ export async function runDiscoveryForCampaign(
       emailableDeliverable: firstPassEnriched.emailableDeliverable + secondPassEnriched.emailableDeliverable,
       emailableRejected: firstPassEnriched.emailableRejected + secondPassEnriched.emailableRejected,
       emailableFailedOpen: firstPassEnriched.emailableFailedOpen + secondPassEnriched.emailableFailedOpen,
+      suppressedSkipped: firstPassEnriched.suppressedSkipped + secondPassEnriched.suppressedSkipped,
+      excludedPostEnrich: firstPassEnriched.excludedPostEnrich + secondPassEnriched.excludedPostEnrich,
       inserted: inserted.length,
     }
 

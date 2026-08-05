@@ -9,6 +9,7 @@ const mockGroupVerifiedLead = vi.hoisted(() => vi.fn())
 const mockLogEvent = vi.hoisted(() => vi.fn())
 const mockLogError = vi.hoisted(() => vi.fn())
 const mockVerifyEmail = vi.hoisted(() => vi.fn())
+const mockGetSuppressions = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/apollo/client', () => ({ searchPeople: mockSearchPeople, bulkMatchPeople: mockBulkMatchPeople }))
 vi.mock('@/lib/db/leads', () => ({
@@ -22,6 +23,7 @@ vi.mock('./group-lead', async (importOriginal) => {
 })
 vi.mock('@/lib/events/log-event', () => ({ logEvent: mockLogEvent, logError: mockLogError }))
 vi.mock('@/lib/emailable/client', () => ({ verifyEmail: mockVerifyEmail }))
+vi.mock('@/lib/db/suppressions', () => ({ getSuppressions: mockGetSuppressions }))
 
 import { runDiscoveryForCampaign } from './discover'
 import type { ApolloIcpFilters } from '@/lib/apollo/types'
@@ -45,10 +47,11 @@ function enriched(apolloId: string, emailStatus: string) {
   }
 }
 
-function insertedRows(rows: { source_id: string | null | undefined; email_status?: string }[]) {
+function insertedRows(rows: { source_id: string | null | undefined; email_status?: string; status?: string }[]) {
   return rows.map((r, i) => ({
     id: `lead-${i}`, client_id: 'client1', campaign_id: 'camp1', source_id: r.source_id,
     email_status: r.email_status ?? 'verified',
+    status: r.status ?? 'active',
   }))
 }
 
@@ -67,9 +70,11 @@ describe('runDiscoveryForCampaign', () => {
     mockLogEvent.mockReset()
     mockLogError.mockReset()
     mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
     mockVerifyEmail.mockResolvedValue(verification('deliverable'))
     mockGetKnownSourceIds.mockResolvedValue(new Set())
     mockGetVerifiedLeadCompanies.mockResolvedValue([])
+    mockGetSuppressions.mockResolvedValue(new Set())
   })
 
   it('should fill the daily quota across both search phases: new companies, then a second contact for each', async () => {
@@ -113,7 +118,7 @@ describe('runDiscoveryForCampaign', () => {
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       rows.map((r, i) => ({
         id: `lead-${i}`, client_id: 'client1', campaign_id: 'camp1', source_id: r.source_id,
-        email_status: 'verified', raw: rawPayload,
+        email_status: 'verified', status: 'active', raw: rawPayload,
       })),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
@@ -226,7 +231,8 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       rows.map((r, i) => ({
-        id: `lead-${i}`, client_id: 'client1', campaign_id: 'camp1', source_id: r.source_id, email_status: 'verified',
+        id: `lead-${i}`, client_id: 'client1', campaign_id: 'camp1', source_id: r.source_id,
+        email_status: 'verified', status: 'active',
       })),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
@@ -450,9 +456,11 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     mockLogEvent.mockReset()
     mockLogError.mockReset()
     mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
     mockGetKnownSourceIds.mockResolvedValue(new Set())
     mockGetVerifiedLeadCompanies.mockResolvedValue([])
     mockGroupVerifiedLead.mockResolvedValue('case1')
+    mockGetSuppressions.mockResolvedValue(new Set())
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
     )
@@ -614,9 +622,11 @@ describe('apollo failure attribution', () => {
     mockLogEvent.mockReset()
     mockLogError.mockReset()
     mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
     mockVerifyEmail.mockResolvedValue(verification('deliverable'))
     mockGetKnownSourceIds.mockResolvedValue(new Set())
     mockGetVerifiedLeadCompanies.mockResolvedValue([])
+    mockGetSuppressions.mockResolvedValue(new Set())
   })
 
   it('should log an apollo.search.failed event against the client when the search throws', async () => {
@@ -650,5 +660,140 @@ describe('apollo failure attribution', () => {
       source: 'apollo',
       payload: { campaignId: 'camp1', batchSize: 1 },
     })
+  })
+})
+
+describe('runDiscoveryForCampaign — suppression and post-enrich exclude filters', () => {
+  beforeEach(() => {
+    mockSearchPeople.mockReset()
+    mockBulkMatchPeople.mockReset()
+    mockGetKnownSourceIds.mockReset()
+    mockInsertLeads.mockReset()
+    mockGetVerifiedLeadCompanies.mockReset()
+    mockGroupVerifiedLead.mockReset()
+    mockLogEvent.mockReset()
+    mockLogError.mockReset()
+    mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
+    mockGetKnownSourceIds.mockResolvedValue(new Set())
+    mockGetVerifiedLeadCompanies.mockResolvedValue([])
+    mockGetSuppressions.mockResolvedValue(new Set())
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+  })
+
+  function singleCandidateRun() {
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+  }
+
+  it('should park a suppressed lead without calling Emailable, and never group it', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled()
+    expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+    const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
+    expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
+    expect(summary.suppressedSkipped).toBe(1)
+    expect(summary.verified).toBe(0)
+  })
+
+  it('should log a pipeline.discover.suppressed_skipped event for a suppressed lead', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
+
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+
+    expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client1',
+      type: 'pipeline.discover.suppressed_skipped',
+      source: 'pipeline',
+      payload: expect.objectContaining({ campaignId: 'camp1', leadSourceId: 'p1' }),
+    }))
+  })
+
+  it('should park a lead that only matches an exclude keyword in post-enrich firmographics, without calling Emailable', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationIndustry: 'Staffing & Recruiting' })),
+    )
+    const icpWithExclude: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: icpWithExclude },
+    )
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled()
+    expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+    const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
+    expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
+    expect(summary.excludedPostEnrich).toBe(1)
+    expect(summary.verified).toBe(0)
+  })
+
+  it('should not double-count a lead that is both suppressed and post-enrich excluded', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationIndustry: 'Staffing & Recruiting' })),
+    )
+    mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
+    const icpWithExclude: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: icpWithExclude },
+    )
+
+    // Post-enrich exclude runs first and already parks the row, so the
+    // suppression check (scoped to not-yet-skipped rows) never re-checks it.
+    expect(summary.excludedPostEnrich).toBe(1)
+    expect(summary.suppressedSkipped).toBe(0)
+    expect(mockGetSuppressions).not.toHaveBeenCalled()
+  })
+
+  it('should never call getSuppressions with an empty email list', async () => {
+    mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+
+    expect(mockGetSuppressions).not.toHaveBeenCalled()
+  })
+
+  it('should still activate and group a lead that is neither suppressed nor excluded', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockVerifyEmail.mockResolvedValue(verification('deliverable'))
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+
+    expect(mockVerifyEmail).toHaveBeenCalledTimes(1)
+    expect(mockGroupVerifiedLead).toHaveBeenCalledTimes(1)
+    expect(summary.suppressedSkipped).toBe(0)
+    expect(summary.excludedPostEnrich).toBe(0)
+    expect(summary.verified).toBe(1)
+  })
+
+  it('should pass campaign.clientId, not campaign.id, to getKnownSourceIds', async () => {
+    mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+
+    expect(mockGetKnownSourceIds).toHaveBeenCalledWith({}, 'client1')
   })
 })
