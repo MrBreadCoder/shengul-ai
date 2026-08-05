@@ -2688,23 +2688,26 @@ and fixing them is out of scope here.
 
 Executed inline in the main session per user instruction (no worktree, no
 per-task git commits — this repo's `git add`+`commit` steps in the plan
-were skipped throughout the whole feature; nothing from this feature has
-been committed). Verified after every task: `pnpm typecheck && pnpm
-vitest run` clean throughout, **190 files / 1969 tests passing**
-(unchanged since Task 13 — Tasks 14-18 were pure string-extraction, same
-as 11-13, adding no new testable logic or test files). `pnpm build`
-confirmed green after Tasks 5, 10, 11, 12, 13, and again after 18 (full
-final build, all ~53 routes compiled clean, including the two new async
-Server Components — `case-row.tsx`, `sparkline-chart.tsx`). Manual `pnpm
-dev` verification (every task's "Manually verify" step) not run in this
-session, per this codebase's convention of leaving `.tsx`/browser
-behavior to manual QA.
+were skipped throughout the whole feature and squashed into one commit at
+the end instead, per a later explicit "push all"). Verified after every
+task: `pnpm typecheck && pnpm vitest run` clean throughout, **190 files /
+1969 tests passing** (unchanged since Task 13 — Tasks 14-18 were pure
+string-extraction, same as 11-13, adding no new testable logic or test
+files). `pnpm build` confirmed green after Tasks 5, 10, 11, 12, 13, and
+again after 18 (full final build, all ~53 routes compiled clean,
+including the two new async Server Components — `case-row.tsx`,
+`sparkline-chart.tsx`). Manual `pnpm dev` verification (every task's
+"Manually verify" step) not run in this session, per this codebase's
+convention of leaving `.tsx`/browser behavior to manual QA.
 
-**Feature complete: all 18 tasks done.** Every static UI string across the
-`(app)` route group, the shell/nav, and `/login`+`/set-password` is now
-extracted to `messages/{en,tr}.json` and rendered through `t(...)`, with
-real (non-machine-placeholder) Turkish throughout. Remaining before this
-can ship: review and commit the accumulated uncommitted diff (nothing
-staged/committed during this whole feature per instruction), then the
-plan's manual `pnpm dev` walk-through of every route in both languages
-(§Task 18 Step 5) as a final regression pass.
+**Feature complete: all 18 tasks done, committed and pushed to
+`origin/master`** — commit `e2b2341` ("feat(i18n): dashboard
+English/Turkish translation (all 18 tasks)"), 108 files changed
+(+4072/−917). Every static UI string across the `(app)` route group, the
+shell/nav, and `/login`+`/set-password` is now extracted to
+`messages/{en,tr}.json` and rendered through `t(...)`, with real
+(non-machine-placeholder) Turkish throughout. Remaining before this is
+fully signed off: the plan's manual `pnpm dev` walk-through of every
+route in both languages (§Task 18 Step 5) as a final regression pass —
+not yet done, per this codebase's convention of leaving that to manual
+QA rather than this session.
