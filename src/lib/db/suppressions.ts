@@ -34,6 +34,30 @@ export async function getSuppression(
   return data
 }
 
+// Bulk variant of getSuppression, used by discovery (src/lib/pipeline/discover.ts)
+// to check every revealed email in one enrich batch with a single round trip
+// instead of one query per candidate. Same case-insensitive normalization,
+// same client scope. Returns the normalized emails that ARE suppressed —
+// callers compare against their own normalized email to decide membership.
+export async function getSuppressions(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+  emails: string[],
+): Promise<Set<string>> {
+  const normalized = emails.map(normalizeEmail)
+  const { data, error } = await supabase
+    .from('suppressions')
+    .select('email')
+    .eq('client_id', clientId)
+    .in('email', normalized)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to bulk-check suppressions', {
+      clientId, count: emails.length, cause: error.message,
+    })
+  }
+  return new Set((data ?? []).map((r) => r.email))
+}
+
 export async function isSuppressed(
   supabase: SupabaseClient<Database>,
   clientId: string,
