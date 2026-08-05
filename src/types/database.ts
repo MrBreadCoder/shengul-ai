@@ -18,6 +18,7 @@ export interface Database {
           warmup_profile: Database['public']['Enums']['warmup_profile']
           mailreach_enabled: boolean
           reply_mode: Database['public']['Enums']['reply_mode']
+          followup_delays_days: number[]
           domain: string | null
           logo_url: string | null
           created_at: string
@@ -31,6 +32,7 @@ export interface Database {
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           mailreach_enabled?: boolean
           reply_mode?: Database['public']['Enums']['reply_mode']
+          followup_delays_days?: number[]
           domain?: string | null
           logo_url?: string | null
           created_at?: string
@@ -526,6 +528,7 @@ export interface Database {
           next_action_at: string | null
           qstash_message_id: string | null
           skip_next_step: boolean
+          followup_delays_days: number[]
           created_at: string
           updated_at: string
         }
@@ -539,6 +542,7 @@ export interface Database {
           next_action_at?: string | null
           qstash_message_id?: string | null
           skip_next_step?: boolean
+          followup_delays_days?: number[]
           created_at?: string
           updated_at?: string
         }
