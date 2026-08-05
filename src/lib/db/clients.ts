@@ -211,6 +211,27 @@ export async function updateClientReplyMode(
   return data
 }
 
+// The client-level default. Sequences snapshot it at creation time rather
+// than reading it live (see scheduleFirstFollowup in lib/pipeline/followup.ts),
+// so changing this never retroactively reschedules a sequence already
+// running — a per-lead override on that sequence's own row does that.
+export async function updateClientFollowupDelays(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  delaysDays: number[],
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ followup_delays_days: delaysDays })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client follow-up delays', { id, cause: error?.message })
+  }
+  return data
+}
+
 export async function updateClientStatus(
   supabase: SupabaseClient<Database>,
   id: string,

@@ -15,6 +15,7 @@ import {
   updateClientLogoUrl,
   updateClientMailreachEnabled,
   updateClientReplyMode,
+  updateClientFollowupDelays,
   resolveMailboxClientId,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
@@ -340,6 +341,27 @@ describe('updateClientReplyMode', () => {
     })
     await expect(
       updateClientReplyMode({ from: () => ({ update }) } as never, 'c1', 'auto_send'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientFollowupDelays', () => {
+  it('should persist the cadence and return the updated row', async () => {
+    const row = { id: 'c1', followup_delays_days: [2, 5, 9] }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateClientFollowupDelays({ from: () => ({ update }) } as never, 'c1', [2, 5, 9])
+    expect(update).toHaveBeenCalledWith({ followup_delays_days: [2, 5, 9] })
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateClientFollowupDelays({ from: () => ({ update }) } as never, 'c1', [3, 7, 14]),
     ).rejects.toBeInstanceOf(AppError)
   })
 })
