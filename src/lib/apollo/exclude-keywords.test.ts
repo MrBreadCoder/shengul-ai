@@ -35,4 +35,38 @@ describe('matchesExcludedKeywords', () => {
     expect(matchesExcludedKeywords({ title: 'VP Sales', organizationName: 'Acme Staffing' }, ['  staffing  '])).toBe(true)
     expect(matchesExcludedKeywords({ title: 'VP Sales', organizationName: 'Acme Fintech' }, ['', '   '])).toBe(false)
   })
+
+  it('should match a keyword that only appears in organizationIndustry', () => {
+    expect(
+      matchesExcludedKeywords(
+        { title: 'VP Sales', organizationName: 'Acme Corp', organizationIndustry: 'Staffing & Recruiting' },
+        ['staffing'],
+      ),
+    ).toBe(true)
+  })
+
+  it('should match a keyword that only appears in organizationDescription', () => {
+    expect(
+      matchesExcludedKeywords(
+        {
+          title: 'VP Sales',
+          organizationName: 'Acme Corp',
+          organizationDescription: 'We are a staffing agency for finance teams.',
+        },
+        ['staffing agency'],
+      ),
+    ).toBe(true)
+  })
+
+  it('should treat missing organizationIndustry and organizationDescription as empty strings rather than throwing', () => {
+    expect(
+      matchesExcludedKeywords({ title: 'VP Sales', organizationName: 'Acme Fintech' }, ['staffing']),
+    ).toBe(false)
+    expect(
+      matchesExcludedKeywords(
+        { title: 'VP Sales', organizationName: 'Acme Fintech', organizationIndustry: null, organizationDescription: null },
+        ['staffing'],
+      ),
+    ).toBe(false)
+  })
 })
