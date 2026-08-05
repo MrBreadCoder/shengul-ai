@@ -69,3 +69,24 @@ export function truncate(text: string, max: number): string {
   if (text.length <= max) return text
   return `${text.slice(0, max - 1).trimEnd()}…`
 }
+
+/**
+ * "3d" / "today" for a future timestamp; null when nothing is scheduled
+ * (sequence paused, exhausted, or no next follow-up yet). `now` is explicit
+ * for the same server/client hydration reason as formatRelative.
+ */
+export function formatFollowupCountdown(nextActionAtIso: string | null, now: Date): string | null {
+  if (!nextActionAtIso) return null
+  const next = new Date(nextActionAtIso)
+  const remainingMs = next.getTime() - now.getTime()
+  if (Number.isNaN(remainingMs)) return null
+  if (remainingMs <= 0) return 'today'
+  return `${Math.ceil(remainingMs / DAY_MS)}d`
+}
+
+/** e.g. "1/3 follow-ups sent · next in 3d" — the countdown clause is omitted
+ *  when nothing is currently scheduled. */
+export function formatFollowupStatus(currentStep: number, totalSteps: number, countdown: string | null): string {
+  const sent = `${currentStep}/${totalSteps} follow-up${totalSteps === 1 ? '' : 's'} sent`
+  return countdown ? `${sent} · next in ${countdown}` : sent
+}
