@@ -13,7 +13,8 @@ import { publishJson } from '@/lib/qstash/client'
 import { logEventSafe } from '@/lib/events/log-event'
 
 const ACTOR = 'collision_notify'
-// Regular cadence steps (followup.ts/write.ts) are 0..MAX_FOLLOWUP_STEP.
+// Regular cadence steps (followup.ts/write.ts) are 0..sequence.followup_delays_days.length,
+// a per-sequence value now rather than a fixed constant.
 // A negative sentinel can never collide with a real step, so this notice
 // gets its own slot in the existing (lead_id, sequence_step, direction)
 // unique-index claim on `emails` instead of a new dedup mechanism.

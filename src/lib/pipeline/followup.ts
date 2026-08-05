@@ -16,6 +16,7 @@ import {
   markEmailFailed,
 } from '@/lib/db/emails'
 import { getLeadById } from '@/lib/db/leads'
+import { getClientById } from '@/lib/db/clients'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { updateCaseStatus } from '@/lib/db/cases'
@@ -27,43 +28,50 @@ import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
+import { DEFAULT_FOLLOWUP_DELAYS_DAYS } from '@/lib/validation/followup-limits'
 
 const DAY_SECONDS = 86_400
-export const FOLLOWUP_DELAYS_SECONDS: readonly number[] = [3 * DAY_SECONDS, 7 * DAY_SECONDS, 14 * DAY_SECONDS]
-export const MAX_FOLLOWUP_STEP = 3
 export const FIRST_TOUCH_STEP = 0
 const MAX_OUTPUT_TOKENS = 1_000
 const ACTOR = 'email_writer_agent'
 
 // How long before retrying a followup step that was skipped because the
 // campaign was paused/archived at the time. Independent of the normal
-// step-to-step cadence in FOLLOWUP_DELAYS_SECONDS.
+// step-to-step cadence in sequence.followup_delays_days.
 const PAUSED_CAMPAIGN_RETRY_SECONDS = DAY_SECONDS
 
-// Shared post-first-touch bookkeeping: create the sequence row and enqueue the
-// step-1 follow-up (3-day delay). Idempotent — createSequence returns null when
-// a sequence already exists for the lead, so a retry never double-schedules.
-// Called by both the automated write path and the manual /inbox approval path.
+// Shared post-first-touch bookkeeping: create the sequence row — snapshotting
+// the client's current default cadence onto it, so a later change to that
+// default never reaches back into this sequence (see
+// docs/superpowers/specs/2026-08-05-configurable-followup-cadence-design.md §3)
+// — and enqueue the step-1 follow-up. Idempotent — createSequence returns null
+// when a sequence already exists for the lead, so a retry never
+// double-schedules. Called by both the automated write path and the manual
+// /inbox approval path.
 export async function scheduleFirstFollowup(
   supabase: SupabaseClient<Database>,
   input: { clientId: string; caseId: string; leadId: string },
 ): Promise<void> {
+  const client = await getClientById(supabase, input.clientId)
+  const delaysDays = client?.followup_delays_days ?? DEFAULT_FOLLOWUP_DELAYS_DAYS
   const sequence = await createSequence(supabase, {
     client_id: input.clientId,
     case_id: input.caseId,
     lead_id: input.leadId,
     current_step: FIRST_TOUCH_STEP,
     state: 'active',
+    followup_delays_days: delaysDays,
   })
   if (!sequence) return
+  const delaySeconds = delaysDays[0]! * DAY_SECONDS // array is never empty — schema floor is 1 (Task 2)
   const messageId = await publishJsonWithDelay(
     '/api/pipeline/followup',
     { sequenceId: sequence.id, step: 1 },
-    FOLLOWUP_DELAYS_SECONDS[0]!, // step 1 delay (3d); index 0 always exists
+    delaySeconds,
   )
   await advanceSequence(supabase, sequence.id, {
     currentStep: FIRST_TOUCH_STEP,
-    nextActionAt: null,
+    nextActionAt: new Date(Date.now() + delaySeconds * 1000).toISOString(),
     qstashMessageId: messageId,
   })
 }
@@ -100,11 +108,12 @@ function buildNudgePrompt(
   valueProp: string | null,
   bookingLink: string | null,
   step: number,
+  maxStep: number,
   clientKnowledge: string,
 ): string {
   const showBookingLink = bookingLink !== null && step >= BOOKING_LINK_ELIGIBLE_STEP
   return [
-    `This is follow-up number ${step} (of ${MAX_FOLLOWUP_STEP}).`,
+    `This is follow-up number ${step} (of ${maxStep}).`,
     `Original subject: ${priorSubject}`,
     `Original message:\n${priorBody}`,
     `Our value proposition: ${valueProp ?? 'n/a'}`,
@@ -123,9 +132,18 @@ export async function runFollowupStep(
   const sequence = await getSequenceById(supabase, input.sequenceId)
   if (!sequence) throw new AppError('NOT_FOUND', 'Sequence not found', { sequenceId: input.sequenceId })
 
+  const maxStep = sequence.followup_delays_days.length
+
   // Stale/duplicate QStash delivery guard: this message drives step N only when
   // the sequence is still active and sitting at step N-1.
   if (sequence.state !== 'active' || sequence.current_step !== input.step - 1) {
+    return { sequenceId: sequence.id, action: 'skipped' }
+  }
+
+  // The cadence may have been shrunk (fewer follow-ups) since this step was
+  // enqueued — its QStash delay was fixed at publish time and can't be pulled
+  // back. A step beyond the current array length is stale and must not send.
+  if (input.step > maxStep) {
     return { sequenceId: sequence.id, action: 'skipped' }
   }
 
@@ -187,7 +205,7 @@ export async function runFollowupStep(
   // also makes this the race-loser check for duplicate QStash deliveries.
   const consumedSkip = await consumeFollowupSkip(supabase, sequence.id)
   if (consumedSkip) {
-    if (input.step >= MAX_FOLLOWUP_STEP) {
+    if (input.step >= maxStep) {
       await stopSequence(supabase, sequence.id, 'stopped')
       // Deliberately NOT updateCaseStatus('dead'), unlike the send path below:
       // a human is in this thread, so the case is not a cold lead that ran out
@@ -199,14 +217,16 @@ export async function runFollowupStep(
       return { sequenceId: sequence.id, action: 'skipped' }
     }
 
+    // Same index rule as the send path below (Step 9): always in range for step < maxStep.
+    const skipDelaySeconds = sequence.followup_delays_days[input.step]! * DAY_SECONDS
     const skipMessageId = await publishJsonWithDelay(
       '/api/pipeline/followup',
       { sequenceId: sequence.id, step: input.step + 1 },
-      FOLLOWUP_DELAYS_SECONDS[input.step]!, // same index rule as the send path; always in range for step < MAX
+      skipDelaySeconds,
     )
     await advanceSequence(supabase, sequence.id, {
       currentStep: input.step,
-      nextActionAt: null,
+      nextActionAt: new Date(Date.now() + skipDelaySeconds * 1000).toISOString(),
       qstashMessageId: skipMessageId,
     })
     await logEventSafe({
@@ -232,6 +252,7 @@ export async function runFollowupStep(
       campaign.value_prop,
       campaign.booking_link,
       input.step,
+      maxStep,
       clientKnowledge,
     ),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -284,7 +305,7 @@ export async function runFollowupStep(
   // Final step? Stop the sequence and mark the case dead. Otherwise advance and
   // enqueue the next delay (index step-1 → step's own delay; step 1 used index 0
   // at first-touch, so step N enqueues index N).
-  if (input.step >= MAX_FOLLOWUP_STEP) {
+  if (input.step >= maxStep) {
     await advanceSequence(supabase, sequence.id, { currentStep: input.step, nextActionAt: null, qstashMessageId: null })
     await stopSequence(supabase, sequence.id, 'stopped')
     await updateCaseStatus(supabase, sequence.case_id, 'dead')
@@ -297,14 +318,16 @@ export async function runFollowupStep(
   }
 
   const nextStep = input.step + 1
+  // Index = current step → delay before nextStep; always in range for step < maxStep.
+  const nextDelaySeconds = sequence.followup_delays_days[input.step]! * DAY_SECONDS
   const messageId = await publishJsonWithDelay(
     '/api/pipeline/followup',
     { sequenceId: sequence.id, step: nextStep },
-    FOLLOWUP_DELAYS_SECONDS[input.step]!, // index = current step → delay before nextStep; always in range for step < MAX
+    nextDelaySeconds,
   )
   await advanceSequence(supabase, sequence.id, {
     currentStep: input.step,
-    nextActionAt: null,
+    nextActionAt: new Date(Date.now() + nextDelaySeconds * 1000).toISOString(),
     qstashMessageId: messageId,
   })
   await logEventSafe({

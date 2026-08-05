@@ -6,6 +6,7 @@ const hasInboundReplyMock = vi.fn()
 const stopSequenceMock = vi.fn()
 const advanceSequenceMock = vi.fn()
 const getLeadByIdMock = vi.fn()
+const getClientByIdMock = vi.fn()
 const listThreadEmailsMock = vi.fn()
 const claimOutboundEmailMock = vi.fn()
 const markEmailSentMock = vi.fn()
@@ -18,9 +19,11 @@ const updateCaseStatusMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
+const createSequenceMock = vi.fn()
 
 vi.mock('@/lib/db/sequences', () => ({
   getSequenceById: (...a: unknown[]) => getSequenceByIdMock(...a),
+  createSequence: (...a: unknown[]) => createSequenceMock(...a),
   stopSequence: (...a: unknown[]) => stopSequenceMock(...a),
   advanceSequence: (...a: unknown[]) => advanceSequenceMock(...a),
   consumeFollowupSkip: (...a: unknown[]) => consumeFollowupSkipMock(...a),
@@ -33,6 +36,7 @@ vi.mock('@/lib/db/emails', () => ({
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
 }))
 vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/suppressions', () => ({ isSuppressed: (...a: unknown[]) => isSuppressedMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
 vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
@@ -43,26 +47,85 @@ vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEve
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
-import { runFollowupStep, FOLLOWUP_DELAYS_SECONDS } from './followup'
+import { runFollowupStep, scheduleFirstFollowup } from './followup'
 
-const sequence = { id: 'seq1', client_id: 'c1', case_id: 'case1', lead_id: 'lead1', current_step: 0, state: 'active' }
+const DAY_SECONDS = 86_400
+
+// 3/7/14 default cadence, snapshotted onto the sequence — matches every
+// existing sequence row until a client or per-lead edit changes it.
+const sequence = {
+  id: 'seq1', client_id: 'c1', case_id: 'case1', lead_id: 'lead1',
+  current_step: 0, state: 'active', followup_delays_days: [3, 7, 14],
+}
 const lead = { id: 'lead1', email: 'jane@acme.com', full_name: 'Jane', title: 'CTO' }
 
 beforeEach(() => {
   for (const m of [getSequenceByIdMock, hasInboundReplyMock, stopSequenceMock, advanceSequenceMock,
-    getLeadByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock, markEmailFailedMock,
-    isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock, updateCaseStatusMock,
-    publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock]) m.mockReset()
+    getLeadByIdMock, getClientByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock,
+    markEmailFailedMock, isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock,
+    updateCaseStatusMock, publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock,
+    createSequenceMock]) m.mockReset()
   getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
   getLeadByIdMock.mockResolvedValue(lead)
+  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14] })
   isSuppressedMock.mockResolvedValue(false)
   listThreadEmailsMock.mockResolvedValue([
     { direction: 'outbound', subject: 'Quick idea', body: 'Hi', thread_id: 'thr1', provider_message_id: '<a@mail>' },
   ])
   getCampaignForCaseMock.mockResolvedValue({ mailbox_ids: ['m1'], value_prop: 'v', status: 'active' })
   generateTextMock.mockResolvedValue('Just following up, Jane.')
+})
+
+describe('scheduleFirstFollowup', () => {
+  it('should snapshot the client default cadence onto the new sequence and schedule step 1', async () => {
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await scheduleFirstFollowup({} as never, { clientId: 'c1', caseId: 'case1', leadId: 'lead1' })
+
+    expect(createSequenceMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      client_id: 'c1', case_id: 'case1', lead_id: 'lead1', followup_delays_days: [3, 7, 14],
+    }))
+    expect(publishDelayMock).toHaveBeenCalledWith(
+      '/api/pipeline/followup', { sequenceId: 'seq1', step: 1 }, 3 * DAY_SECONDS,
+    )
+    expect(advanceSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', {
+      currentStep: 0, nextActionAt: expect.any(String), qstashMessageId: 'qmsg1',
+    })
+  })
+
+  it('should fall back to the default cadence when the client lookup returns null', async () => {
+    getClientByIdMock.mockResolvedValue(null)
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await scheduleFirstFollowup({} as never, { clientId: 'c1', caseId: 'case1', leadId: 'lead1' })
+
+    expect(createSequenceMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      followup_delays_days: [3, 7, 14],
+    }))
+  })
+
+  it('should no-op when a sequence already exists for the lead', async () => {
+    createSequenceMock.mockResolvedValue(null)
+    await scheduleFirstFollowup({} as never, { clientId: 'c1', caseId: 'case1', leadId: 'lead1' })
+    expect(publishDelayMock).not.toHaveBeenCalled()
+  })
+
+  it('should use a client cadence other than the default', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [1, 4] })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await scheduleFirstFollowup({} as never, { clientId: 'c1', caseId: 'case1', leadId: 'lead1' })
+
+    expect(createSequenceMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      followup_delays_days: [1, 4],
+    }))
+    expect(publishDelayMock).toHaveBeenCalledWith('/api/pipeline/followup', { sequenceId: 'seq1', step: 1 }, 1 * DAY_SECONDS)
+  })
 })
 
 describe('runFollowupStep', () => {
@@ -72,8 +135,12 @@ describe('runFollowupStep', () => {
     publishDelayMock.mockResolvedValue('qmsg2')
     const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
     expect(result.action).toBe('sent')
-    expect(advanceSequenceMock).toHaveBeenCalled()
-    expect(publishDelayMock).toHaveBeenCalled() // step 2 enqueued
+    expect(advanceSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', {
+      currentStep: 1, nextActionAt: expect.any(String), qstashMessageId: 'qmsg2',
+    })
+    expect(publishDelayMock).toHaveBeenCalledWith(
+      '/api/pipeline/followup', { sequenceId: 'seq1', step: 2 }, 7 * DAY_SECONDS,
+    )
   })
 
   it('should complete the sequence when a reply exists', async () => {
@@ -85,7 +152,7 @@ describe('runFollowupStep', () => {
   })
 
   it('should stop the sequence and mark the case dead after the final step', async () => {
-    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2 }) // sitting at step 2, driving step 3
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2 }) // sitting at step 2, driving step 3 (of 3)
     claimOutboundEmailMock.mockResolvedValue({ id: 'e4' })
     sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<d@mail>', threadId: 'thr1' })
     const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
@@ -100,6 +167,32 @@ describe('runFollowupStep', () => {
     const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
     expect(result.action).toBe('skipped')
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should skip without sending when a shrunk cadence no longer has this step', async () => {
+    // Cadence was 3 steps when step 3 was enqueued; a client edit since then
+    // shrank it to 1. QStash still delivers the old step-3 message on its
+    // original timer — it must no-op, not send an unwanted extra nudge.
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2, followup_delays_days: [3] })
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
+    expect(result.action).toBe('skipped')
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(stopSequenceMock).not.toHaveBeenCalled()
+    expect(publishDelayMock).not.toHaveBeenCalled()
+  })
+
+  it('should keep going past the old 3-step ceiling when the cadence was grown', async () => {
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2, followup_delays_days: [3, 7, 14, 21, 28] })
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e4' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<d@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg4')
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
+    expect(result.action).toBe('sent')
+    expect(stopSequenceMock).not.toHaveBeenCalled()
+    expect(publishDelayMock).toHaveBeenCalledWith(
+      '/api/pipeline/followup', { sequenceId: 'seq1', step: 4 }, 21 * DAY_SECONDS,
+    )
   })
 
   it('should mark the email failed and return skipped when every mailbox is rate limited', async () => {
@@ -153,10 +246,10 @@ describe('runFollowupStep — manual-send skip', () => {
     expect(publishDelayMock).toHaveBeenCalledWith(
       '/api/pipeline/followup',
       { sequenceId: 'seq1', step: 2 },
-      FOLLOWUP_DELAYS_SECONDS[1],
+      7 * DAY_SECONDS,
     )
     expect(advanceSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', {
-      currentStep: 1, nextActionAt: null, qstashMessageId: 'qmsg-next',
+      currentStep: 1, nextActionAt: expect.any(String), qstashMessageId: 'qmsg-next',
     })
   })
 
