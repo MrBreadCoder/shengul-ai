@@ -2446,3 +2446,105 @@ Server Actions and pipeline underneath, which hold all the logic, are
 fully covered. Manual verification (run `pnpm dev`, exercise Edit →
 Redesign → Save → Approve, the race-lost "already sent" case) was not
 run in this session — left for the user per the plan's Step 5.
+
+---
+
+## Configurable follow-up cadence — all 10/10 tasks DONE (2026-08-05, inline, no commits)
+
+Plan: `docs/superpowers/plans/2026-08-05-configurable-followup-cadence.md`
+Design: `docs/superpowers/specs/2026-08-05-configurable-followup-cadence-design.md`
+
+Lets a client choose how many follow-up nudges go out after a first-touch
+email and how many days apart they are, replacing the hardcoded 3/7/14-day,
+3-step cadence in `followup.ts` — a client-wide default on `/settings` and
+a per-contact override on `/cases/[id]`. Landed in two inline batches
+(Tasks 1–5 data layer, then Tasks 6–10 pipeline + both UIs), no commits
+made either time — working tree left dirty for the user to review.
+
+- **Task 1** — `supabase/migrations/0028_configurable_followup_cadence.sql`
+  (new): `followup_delays_days integer[] not null default '{3,7,14}'` added
+  to both `clients` and `sequences`. `src/types/database.ts` hand-edited to
+  match (`ClientRow`/`ClientInsert`/`SequenceRow`/`SequenceInsert`).
+- **Task 2** — `src/lib/validation/followup-limits.ts` (new):
+  `MIN/MAX_FOLLOWUP_STEPS` (1–10), `MIN/MAX_FOLLOWUP_DELAY_DAYS` (1–90),
+  `DEFAULT_FOLLOWUP_DELAYS_DAYS = [3, 7, 14]`, and `followupDelaysSchema`
+  (`z.coerce.number()` per element, for FormData string inputs) — the one
+  shared bounds schema both the Settings and per-lead forms will validate
+  against.
+- **Task 3** — `updateClientFollowupDelays` in `src/lib/db/clients.ts`,
+  same shape as `updateClientReplyMode`.
+- **Task 4** — `listSequencesForCase` and `updateSequenceFollowupDelays` in
+  `src/lib/db/sequences.ts`. The latter is guarded to
+  `.in('state', ['active', 'paused'])` and returns `null` on a
+  stopped/completed sequence — nothing left to reschedule.
+- **Task 5** — `formatFollowupCountdown` and `formatFollowupStatus` in
+  `src/lib/format.ts`, for the case-page status line Task 10 will render
+  (`"1/3 follow-ups sent · next in 3d"`).
+
+- **Task 6** — `src/lib/pipeline/followup.ts` rewritten: `FOLLOWUP_DELAYS_SECONDS`/
+  `MAX_FOLLOWUP_STEP` module constants deleted. `scheduleFirstFollowup` now
+  loads the client via `getClientById` and snapshots
+  `client.followup_delays_days` (falling back to
+  `DEFAULT_FOLLOWUP_DELAYS_DAYS` on a null lookup) onto the new `sequences`
+  row; `runFollowupStep` computes `maxStep = sequence.followup_delays_days.length`
+  fresh on every invocation and indexes into that array instead of the old
+  constant. New guard: `input.step > maxStep` short-circuits to `skipped`
+  with no send — the fix that makes shrinking an active sequence's array
+  safe when a stale QStash message for a since-deleted step still fires.
+  Every `advanceSequence` call on a step that schedules a next fire now
+  passes a real `nextActionAt` (`Date.now() + delaySeconds * 1000`) instead
+  of the always-`null` placeholder, powering Task 10's countdown line.
+  `collision-notify.ts`'s comment updated to match (no behavior change
+  there). `followup.test.ts` fully rewritten per the plan — 19 tests,
+  including a shrink-mid-flight skip case and a grow-mid-flight continue
+  case.
+- **Task 7** — `src/app/api/pipeline/followup/route.ts`: the webhook's
+  `bodySchema` step bound moved from the deleted `MAX_FOLLOWUP_STEP` (3) to
+  the shared `MAX_FOLLOWUP_STEPS` (10) — a payload sanity ceiling only; the
+  authoritative last-step check now lives inside `runFollowupStep` against
+  that sequence's own array.
+- **Task 8** — `src/components/followup-delays-editor.tsx` (new): the one
+  `FollowupDelaysEditor` component both UIs below share — controlled
+  add/remove/edit rows bounded by the Task 2 schema, no save logic of its
+  own. Rows use a monotonic generated key (never array index), so removing
+  a middle row can't cause React to reuse a later row's `<input>` for an
+  earlier value.
+- **Task 9** — `/settings` gains a "Follow-up cadence" section: new
+  `updateFollowupCadence` Server Action (client-role only, same
+  `AppError('FORBIDDEN', ...)` shape as `updateReplyMode`) and
+  `FollowupCadenceSection` (save-on-click with a Reset-if-dirty affordance,
+  remounting the editor via a `key` bump so its row keys reseed). Wired
+  into `page.tsx` right after the existing Reply mode section. Deliberately
+  does **not** bulk-sync onto existing `sequences` rows, unlike `reply_mode`
+  — a client's default change should never silently reschedule an
+  in-flight contact.
+- **Task 10** — `/cases/[id]` gains a per-lead override: new
+  `updateLeadFollowupDelays` Server Action (same auth shape as `stopLead`
+  — both roles, RLS-scoped read + `client_id` re-check) and
+  `LeadFollowupControl` (status line + pencil-icon inline editor, using the
+  Task 5 formatters — `"1/3 follow-ups sent · next in 3d"`). `page.tsx`
+  now also fetches `listSequencesForCase` and renders the control only for
+  a lead with an active/paused sequence — nothing shows for a
+  parked/no-sequence contact. The `leads.map` callback was converted from
+  an implicit-return arrow to a block body so `const sequence = ...` could
+  be looked up once and narrowed by a plain `{sequence ? ... : null}`
+  check, avoiding three repeated non-null assertions.
+
+**Regression caught and fixed along the way:** `write.test.ts` broke
+because `runWriteForCase` calls the real (unmocked) `scheduleFirstFollowup`,
+which now calls `getClientById` — not part of that test's mock set before
+this change. Added `vi.mock('@/lib/db/clients', ...)` there with a
+`followup_delays_days: [3, 7, 14]` default so every existing timing
+assertion (3-day first follow-up) stayed unchanged.
+
+Verified: `pnpm typecheck && pnpm exec vitest run && pnpm lint` all clean —
+**185 files / 1945 tests passing** (was 180/1881 before this feature
+started — +5 files: `followup-limits.test.ts`, `format.test.ts`,
+`followup-cadence-actions.test.ts` new, plus new describe blocks in
+`clients.test.ts`/`sequences.test.ts`/`actions.test.ts`; +64 tests total),
+0 type errors, 0 new lint errors (same 7 pre-existing unrelated warnings).
+No commits made per instruction — working tree left dirty for the user to
+review. Manual verification (Tasks 9 Step 9 and 10 Step 10 in the plan —
+exercising `/settings` and a case page's contact cards in `pnpm dev`) was
+not run in this session, per this codebase's convention of leaving
+`.tsx` component behavior to manual QA (no jsdom/testing-library setup).
