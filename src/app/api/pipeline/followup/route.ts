@@ -2,16 +2,20 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { verifyQstashSignature } from '@/lib/qstash/verify'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { runFollowupStep, MAX_FOLLOWUP_STEP } from '@/lib/pipeline/followup'
+import { runFollowupStep } from '@/lib/pipeline/followup'
+import { MAX_FOLLOWUP_STEPS } from '@/lib/validation/followup-limits'
 import { isAppError } from '@/lib/errors/app-error'
 import { getSequenceById } from '@/lib/db/sequences'
 import { logError } from '@/lib/events/log-event'
 
 export const runtime = 'nodejs'
 
+// A sanity ceiling on the webhook payload — not the authoritative last-step
+// check, which lives inside runFollowupStep against that sequence's own
+// followup_delays_days array (a per-sequence value, not a fixed constant).
 const bodySchema = z.object({
   sequenceId: z.string().uuid(),
-  step: z.number().int().min(1).max(MAX_FOLLOWUP_STEP),
+  step: z.number().int().min(1).max(MAX_FOLLOWUP_STEPS),
 })
 
 export async function POST(request: Request) {

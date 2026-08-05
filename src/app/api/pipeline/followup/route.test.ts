@@ -7,7 +7,6 @@ vi.mock('@/lib/qstash/verify', () => ({ verifyQstashSignature: (...a: unknown[])
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/pipeline/followup', () => ({
   runFollowupStep: (...a: unknown[]) => runFollowupMock(...a),
-  MAX_FOLLOWUP_STEP: 3,
 }))
 const getSequenceByIdMock = vi.fn()
 const logErrorMock = vi.fn()
@@ -45,7 +44,7 @@ describe('POST /api/pipeline/followup', () => {
   })
 
   it('should return 400 when the step is out of range', async () => {
-    verifyMock.mockResolvedValue(JSON.stringify({ sequenceId: SEQUENCE_ID, step: 9 }))
+    verifyMock.mockResolvedValue(JSON.stringify({ sequenceId: SEQUENCE_ID, step: 11 }))
     const res = await POST(req({}))
     expect(res.status).toBe(400)
   })
