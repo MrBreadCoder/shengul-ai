@@ -161,6 +161,29 @@ export async function claimDraftForSend(
   return data && data.length > 0 ? data[0]! : null
 }
 
+// Same atomic-claim shape as claimDraftForSend: the `.eq('status','draft')`
+// guard means a concurrent approval (double-click, two tabs, an approval that
+// landed while this edit was in flight) makes this a no-op that returns null
+// instead of silently overwriting a row that has already gone out. Used by
+// both a manual Save and an AI Redesign in /inbox — one write path for both.
+export async function updateDraftContent(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  patch: { subject: string; body: string },
+): Promise<EmailRow | null> {
+  const { data, error } = await supabase
+    .from('emails')
+    .update({ subject: patch.subject, body: patch.body })
+    .eq('id', id)
+    .eq('status', 'draft')
+    .select('*')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to update draft content', { id, cause: error.message })
+  }
+  // length check guarantees index 0 exists.
+  return data && data.length > 0 ? data[0]! : null
+}
+
 export async function markEmailSent(
   supabase: SupabaseClient<Database>,
   id: string,

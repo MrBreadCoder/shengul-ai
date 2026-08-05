@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { z } from 'zod'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
@@ -15,21 +14,12 @@ import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
+import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 
 const MAX_OUTPUT_TOKENS = 1_400
 const ACTOR = 'email_writer_agent'
-// Best-practice target for full display without mobile truncation.
-const SUBJECT_TARGET_CHARS = 40
-// Hard ceiling enforced on the model's structured output — a guardrail against
-// runaway generation, well above SUBJECT_TARGET_CHARS so normal output never hits it.
-const SUBJECT_HARD_LIMIT = 78
 
 export type ReplyMode = Database['public']['Enums']['reply_mode']
-
-const draftSchema = z.object({
-  subject: z.string().min(1).max(SUBJECT_HARD_LIMIT),
-  body: z.string().min(1),
-})
 
 export interface RunWriteInput {
   clientId: string

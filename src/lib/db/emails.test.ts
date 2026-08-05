@@ -3,6 +3,7 @@ import {
   claimOutboundEmail,
   insertManualEmail,
   claimDraftForSend,
+  updateDraftContent,
   markEmailSent,
   markEmailFailed,
   listThreadEmails,
@@ -187,6 +188,31 @@ describe('claimDraftForSend', () => {
   it('should throw DB_ERROR when the update errors', async () => {
     await expect(
       claimDraftForSend(mockClaimDraft({ data: null, error: { message: 'boom' } }), 'e1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateDraftContent', () => {
+  it('should persist the subject and body and return the updated row', async () => {
+    const row = { id: 'e1', status: 'draft', subject: 'New subject', body: 'New body' }
+    const result = await updateDraftContent(
+      mockClaimDraft({ data: [row], error: null }), 'e1', { subject: 'New subject', body: 'New body' },
+    )
+    expect(result).toEqual(row)
+  })
+
+  it('should return null when the row is no longer a draft', async () => {
+    const result = await updateDraftContent(
+      mockClaimDraft({ data: [], error: null }), 'e1', { subject: 'New subject', body: 'New body' },
+    )
+    expect(result).toBeNull()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(
+      updateDraftContent(
+        mockClaimDraft({ data: null, error: { message: 'boom' } }), 'e1', { subject: 'x', body: 'y' },
+      ),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

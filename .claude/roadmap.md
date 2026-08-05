@@ -2381,3 +2381,68 @@ hint) was only typed onto `Input`/`Textarea`/`Select` HTML attributes in
 `src/types/webmcp.ts` — extended that module augmentation to
 `ButtonHTMLAttributes` too, so it now also covers Radix's other
 button-based form controls, not just this one.
+
+---
+
+## Inbox draft: AI redesign box + manual editing — DONE (all 5 tasks, 2026-08-05, inline, no commits)
+
+Plan: `docs/superpowers/plans/2026-08-05-inbox-draft-redesign.md`
+Design: `docs/superpowers/specs/2026-08-05-inbox-draft-redesign-design.md`
+
+`/inbox` → "Drafts awaiting approval" (`DraftRow`) gains two things: an
+operator can (1) type a freeform instruction and have the AI rewrite a
+queued draft, re-grounded in the same case dossier/thread the original
+draft used, and (2) hand-edit or fully rewrite the subject/body
+themselves before approving. `cases/[id]/compose-form.tsx` untouched.
+
+- **Task 1** — `src/lib/pipeline/draft-schema.ts` (new): `draftSchema`,
+  `SUBJECT_TARGET_CHARS`, `SUBJECT_HARD_LIMIT` extracted out of
+  `write.ts` so a new redesign pipeline validates against the exact same
+  shape instead of a second, possibly-drifting copy. `write.ts` now
+  imports from it; no behavior change, existing `write.test.ts` still
+  green.
+- **Task 2** — `updateDraftContent` in `src/lib/db/emails.ts`: same
+  atomic-claim shape as `claimDraftForSend` (`.eq('status','draft')`
+  guard) — a concurrent approval makes a manual Save or an AI Redesign a
+  no-op returning `null` instead of silently overwriting a row that
+  already went out. One write path for both.
+- **Task 3** — `src/lib/pipeline/redesign.ts` (new):
+  `regenerateDraftContent(supabase, { emailId, instruction })`. Loads
+  the draft, re-fetches `case_knowledge` + (for a reply draft,
+  `in_reply_to_email_id` set) the prior thread via `listThreadEmails`,
+  calls `generateJson` against the shared `draftSchema` with a system
+  prompt that forbids inventing facts beyond the dossier/thread, logs
+  `inbox.draft_regenerated` via `logEventSafe`. Does not write to the
+  DB itself — returns `{ subject, body }` for the caller to persist
+  through `updateDraftContent`.
+- **Task 4** — `MAX_INSTRUCTION_CHARS = 500` added to
+  `src/lib/validation/email-limits.ts`; two new operator-only Server
+  Actions in `src/app/(app)/inbox/actions.ts`:
+  `updateDraftContent(formData)` (manual Save, throws
+  `VALIDATION_ERROR` if the DB call returns `null`) and
+  `regenerateDraftContent(formData)` (AI Redesign, returns a typed
+  `RegenerateDraftResult` — `ok:false` with a `code` on an LLM failure
+  or a lost race to approval, not a throw — mirroring
+  `SendManualEmailResult`'s pattern).
+- **Task 5** — `src/app/(app)/inbox/draft-row.tsx` full rewrite: `Edit`
+  button reveals editable Subject/Body (`Input`/`Textarea`,
+  `maxLength` from the shared constants) plus a dashed-border "Redesign
+  with AI" box (instruction `Input` + `Redesign` button, inline error on
+  failure that preserves the instruction and any unsaved edits) and
+  Save/Clear/Cancel. "Approve and send" is disabled and the footer note
+  changes whenever the edit form is open, so an operator can never send
+  stale DB content while believing an in-progress edit already went
+  out. No `page.tsx` changes needed — `DraftRowProps` unchanged.
+
+Verified: `pnpm test && pnpm typecheck && pnpm lint` all clean — 182
+files / 1906 tests passing (was 180/1881 before this feature — +2 files,
++25 tests: `draft-schema.test.ts` new, `redesign.test.ts` new,
+`emails.test.ts` +3, `actions.test.ts` +9), 0 type errors, 0 new lint
+errors (same 7 pre-existing unrelated warnings). No component test file
+for `draft-row.tsx` — this codebase has no jsdom/testing-library setup
+(`vitest.config.ts` only runs `src/**/*.test.ts` in a `node`
+environment), matching every other `/inbox`/`/settings` component; the
+Server Actions and pipeline underneath, which hold all the logic, are
+fully covered. Manual verification (run `pnpm dev`, exercise Edit →
+Redesign → Save → Approve, the race-lost "already sent" case) was not
+run in this session — left for the user per the plan's Step 5.

@@ -10,6 +10,7 @@ import {
   markEmailSent,
   markEmailFailed,
   hasReplyForInbound,
+  updateDraftContent as updateDraftContentRow,
 } from '@/lib/db/emails'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { getLeadById } from '@/lib/db/leads'
@@ -24,6 +25,8 @@ import { listAttachmentsForEmail, replaceEmailAttachments } from '@/lib/db/email
 import { loadResourceAttachments } from '@/lib/resources/load-attachments'
 import { resolveSelectedResources } from '@/lib/resources/select'
 import { MAX_ATTACHMENTS_PER_EMAIL } from '@/lib/mailbox/attachments'
+import { regenerateDraftContent as regenerateDraftContentPipeline } from '@/lib/pipeline/redesign'
+import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS, MAX_INSTRUCTION_CHARS } from '@/lib/validation/email-limits'
 
 const approveSchema = z.object({ emailId: z.string().uuid() })
 
@@ -169,6 +172,76 @@ export async function updateDraftAttachments(formData: FormData): Promise<void> 
     clientId: email.client_id, emailId: email.id, resourceIds,
   })
   revalidatePath('/inbox')
+}
+
+const updateContentSchema = z.object({
+  emailId: z.string().uuid(),
+  subject: z.string().trim().min(1).max(MAX_SUBJECT_CHARS),
+  body: z.string().trim().min(1).max(MAX_BODY_CHARS),
+})
+
+// Persists a hand-edited (or just-redesigned) subject/body onto a draft.
+export async function updateDraftContent(formData: FormData): Promise<void> {
+  const { appUser } = await requireUser()
+  if (appUser.role !== 'operator') {
+    throw new AppError('UNAUTHORIZED', 'Only operators can edit drafts', { userId: appUser.id })
+  }
+  const { emailId, subject, body } = updateContentSchema.parse({
+    emailId: formData.get('emailId'),
+    subject: formData.get('subject'),
+    body: formData.get('body'),
+  })
+
+  const supabase = createAdminClient()
+  const updated = await updateDraftContentRow(supabase, emailId, { subject, body })
+  if (!updated) {
+    throw new AppError('VALIDATION_ERROR', 'Draft was already sent', { emailId })
+  }
+  revalidatePath('/inbox')
+}
+
+const regenerateSchema = z.object({
+  emailId: z.string().uuid(),
+  instruction: z.string().trim().min(1).max(MAX_INSTRUCTION_CHARS),
+})
+
+export type RegenerateDraftResult =
+  | { ok: true; subject: string; body: string }
+  | { ok: false; code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT' }
+
+// A redesign failure (LLM error/timeout, or the draft having just been
+// approved out from under the operator) is an expected, user-facing outcome
+// the operator retries — not a crash — so it is returned, not thrown.
+export async function regenerateDraftContent(formData: FormData): Promise<RegenerateDraftResult> {
+  const { appUser } = await requireUser()
+  if (appUser.role !== 'operator') {
+    throw new AppError('UNAUTHORIZED', 'Only operators can redesign drafts', { userId: appUser.id })
+  }
+  const { emailId, instruction } = regenerateSchema.parse({
+    emailId: formData.get('emailId'),
+    instruction: formData.get('instruction'),
+  })
+
+  const supabase = createAdminClient()
+  let draft: { subject: string; body: string }
+  try {
+    draft = await regenerateDraftContentPipeline(supabase, { emailId, instruction })
+  } catch (error) {
+    if (
+      error instanceof AppError
+      && (error.code === 'EXTERNAL_ERROR' || error.code === 'EXTERNAL_TIMEOUT' || error.code === 'VALIDATION_ERROR')
+    ) {
+      return { ok: false, code: error.code }
+    }
+    throw error
+  }
+
+  const updated = await updateDraftContentRow(supabase, emailId, draft)
+  if (!updated) {
+    return { ok: false, code: 'VALIDATION_ERROR' }
+  }
+  revalidatePath('/inbox')
+  return { ok: true, subject: draft.subject, body: draft.body }
 }
 
 // Operator supplies the previously-missing fact. We atomically claim the open

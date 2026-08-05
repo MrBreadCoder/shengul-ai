@@ -4,13 +4,17 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { CheckCircle, Paperclip, PaperPlaneTilt } from '@phosphor-icons/react'
-import { approveDraft, updateDraftAttachments } from './actions'
+import { CheckCircle, MagicWand, Paperclip, PaperPlaneTilt, PencilSimple } from '@phosphor-icons/react'
+import { approveDraft, regenerateDraftContent, updateDraftAttachments, updateDraftContent } from './actions'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { CompanyMark } from '@/components/company-mark'
 import { ResourcePicker } from '@/components/resource-picker'
 import type { ResourceSummary } from '@/components/resource-list'
 import { formatBytes } from '@/lib/format/bytes'
+import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS, MAX_INSTRUCTION_CHARS } from '@/lib/validation/email-limits'
 
 export interface DraftAttachment {
   resourceId: string
@@ -32,6 +36,11 @@ interface DraftRowProps {
   resources: readonly ResourceSummary[]
 }
 
+function messageForRegenerateCode(code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT'): string {
+  if (code === 'VALIDATION_ERROR') return 'This draft was already sent, so it can no longer be redesigned.'
+  return 'Could not redesign that draft. Try again.'
+}
+
 export function DraftRow({
   emailId,
   caseId,
@@ -46,6 +55,13 @@ export function DraftRow({
   const [isSent, setIsSent] = useState(false)
   const [isEditingAttachments, setIsEditingAttachments] = useState(false)
   const [isSavingAttachments, startAttachmentTransition] = useTransition()
+  const [isEditingContent, setIsEditingContent] = useState(false)
+  const [draftSubject, setDraftSubject] = useState(subject)
+  const [draftBody, setDraftBody] = useState(body)
+  const [instruction, setInstruction] = useState('')
+  const [isSavingContent, startContentTransition] = useTransition()
+  const [isRedesigning, startRedesignTransition] = useTransition()
+  const [redesignError, setRedesignError] = useState<string | null>(null)
   const reduceMotion = useReducedMotion()
 
   const onSaveAttachments = (formData: FormData): void => {
@@ -59,6 +75,58 @@ export function DraftRow({
           description: error instanceof Error ? error.message : 'Please try again.',
         })
       }
+    })
+  }
+
+  const onOpenEditor = (): void => {
+    setDraftSubject(subject)
+    setDraftBody(body)
+    setInstruction('')
+    setRedesignError(null)
+    setIsEditingContent(true)
+  }
+
+  const onCancelEdit = (): void => {
+    setIsEditingContent(false)
+    setRedesignError(null)
+  }
+
+  const onClear = (): void => {
+    setDraftSubject('')
+    setDraftBody('')
+  }
+
+  const onSaveContent = (): void => {
+    const formData = new FormData()
+    formData.set('emailId', emailId)
+    formData.set('subject', draftSubject)
+    formData.set('body', draftBody)
+    startContentTransition(async () => {
+      try {
+        await updateDraftContent(formData)
+        setIsEditingContent(false)
+        toast.success('Draft updated')
+      } catch (error) {
+        toast.error('Could not save that change', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        })
+      }
+    })
+  }
+
+  const onRedesign = (): void => {
+    setRedesignError(null)
+    const formData = new FormData()
+    formData.set('emailId', emailId)
+    formData.set('instruction', instruction)
+    startRedesignTransition(async () => {
+      const result = await regenerateDraftContent(formData)
+      if (!result.ok) {
+        setRedesignError(messageForRegenerateCode(result.code))
+        return
+      }
+      setDraftSubject(result.subject)
+      setDraftBody(result.body)
     })
   }
 
@@ -100,13 +168,92 @@ export function DraftRow({
       </header>
 
       <div className="px-4 py-4">
-        <p className="text-[13px] font-medium">{subject}</p>
-        <p className="text-muted-foreground mt-2.5 max-w-[75ch] text-sm leading-relaxed whitespace-pre-wrap">
-          {body}
-        </p>
+        {isEditingContent ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`draft-subject-${emailId}`}>Subject</Label>
+              <Input
+                id={`draft-subject-${emailId}`}
+                value={draftSubject}
+                onChange={(event) => setDraftSubject(event.target.value)}
+                maxLength={MAX_SUBJECT_CHARS}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`draft-body-${emailId}`}>Body</Label>
+              <Textarea
+                id={`draft-body-${emailId}`}
+                value={draftBody}
+                onChange={(event) => setDraftBody(event.target.value)}
+                rows={8}
+                maxLength={MAX_BODY_CHARS}
+              />
+            </div>
+
+            <div className="border-hairline flex flex-col gap-2 rounded-md border border-dashed p-3">
+              <Label htmlFor={`draft-instruction-${emailId}`}>Redesign with AI</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id={`draft-instruction-${emailId}`}
+                  value={instruction}
+                  onChange={(event) => setInstruction(event.target.value)}
+                  placeholder="e.g. make it shorter, lead with the pricing angle"
+                  maxLength={MAX_INSTRUCTION_CHARS}
+                  className="min-w-56 flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isRedesigning || instruction.trim().length === 0}
+                  onClick={onRedesign}
+                >
+                  <MagicWand size={13} weight="light" />
+                  {isRedesigning ? 'Redesigning…' : 'Redesign'}
+                </Button>
+              </div>
+              {redesignError ? (
+                <p role="alert" className="text-destructive text-[12px]">
+                  {redesignError}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={isSavingContent || draftSubject.trim().length === 0 || draftBody.trim().length === 0}
+                onClick={onSaveContent}
+              >
+                {isSavingContent ? 'Saving…' : 'Save'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" disabled={isSavingContent} onClick={onClear}>
+                Clear
+              </Button>
+              <Button type="button" variant="ghost" size="sm" disabled={isSavingContent} onClick={onCancelEdit}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-[13px] font-medium">{subject}</p>
+            <p className="text-muted-foreground mt-2.5 max-w-[75ch] text-sm leading-relaxed whitespace-pre-wrap">
+              {body}
+            </p>
+          </>
+        )}
 
         {isSent ? null : (
           <div className="mt-4 flex flex-col gap-2">
+            {!isEditingContent ? (
+              <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onOpenEditor}>
+                <PencilSimple size={14} weight="light" />
+                Edit
+              </Button>
+            ) : null}
+
             {attachments.length > 0 ? (
               <ul className="flex flex-wrap gap-2">
                 {attachments.map((attachment) => (
@@ -192,11 +339,15 @@ export function DraftRow({
               exit={reduceMotion ? undefined : { opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
-              <Button type="button" size="sm" onClick={onApprove} disabled={isPending}>
+              <Button type="button" size="sm" onClick={onApprove} disabled={isPending || isEditingContent}>
                 <PaperPlaneTilt size={14} weight="fill" />
                 {isPending ? 'Sending…' : 'Approve and send'}
               </Button>
-              <p className="text-faint text-[11px]">Goes out from the campaign mailbox immediately.</p>
+              <p className="text-faint text-[11px]">
+                {isEditingContent
+                  ? 'Save or cancel your edit before approving.'
+                  : 'Goes out from the campaign mailbox immediately.'}
+              </p>
             </motion.div>
           )}
         </AnimatePresence>

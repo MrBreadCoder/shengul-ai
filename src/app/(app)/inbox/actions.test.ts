@@ -22,6 +22,8 @@ const listAttachmentsForEmailMock = vi.fn()
 const replaceEmailAttachmentsMock = vi.fn()
 const loadResourceAttachmentsMock = vi.fn()
 const resolveSelectedResourcesMock = vi.fn()
+const updateDraftContentRowMock = vi.fn()
+const regenerateDraftContentPipelineMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
@@ -31,6 +33,7 @@ vi.mock('@/lib/db/emails', () => ({
   markEmailSent: (...a: unknown[]) => markEmailSentMock(...a),
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
   hasReplyForInbound: (...a: unknown[]) => hasReplyForInboundMock(...a),
+  updateDraftContent: (...a: unknown[]) => updateDraftContentRowMock(...a),
 }))
 vi.mock('@/lib/pipeline/followup', () => ({
   FIRST_TOUCH_STEP: 0,
@@ -57,8 +60,13 @@ vi.mock('@/lib/resources/load-attachments', () => ({
 vi.mock('@/lib/resources/select', () => ({
   resolveSelectedResources: (...a: unknown[]) => resolveSelectedResourcesMock(...a),
 }))
+vi.mock('@/lib/pipeline/redesign', () => ({
+  regenerateDraftContent: (...a: unknown[]) => regenerateDraftContentPipelineMock(...a),
+}))
 
-import { approveDraft, answerKnowledgeRequest, updateDraftAttachments } from './actions'
+import {
+  approveDraft, answerKnowledgeRequest, updateDraftAttachments, updateDraftContent, regenerateDraftContent,
+} from './actions'
 
 const EMAIL_ID = '11111111-1111-4111-8111-111111111111'
 
@@ -90,7 +98,7 @@ beforeEach(() => {
     revalidatePathMock, logEventSafeMock, claimAnswerMock, getKnowledgeRequestByIdMock,
     hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock,
     listAttachmentsForEmailMock, replaceEmailAttachmentsMock, loadResourceAttachmentsMock,
-    resolveSelectedResourcesMock]) m.mockReset()
+    resolveSelectedResourcesMock, updateDraftContentRowMock, regenerateDraftContentPipelineMock]) m.mockReset()
   requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator', client_id: null } })
   listAttachmentsForEmailMock.mockResolvedValue([])
   replaceEmailAttachmentsMock.mockResolvedValue(undefined)
@@ -410,5 +418,117 @@ describe('approveDraft attachments', () => {
 
     await expect(approveDraft(fd(EMAIL_ID))).rejects.toThrow('smtp down')
     expect(markEmailFailedMock).toHaveBeenCalledWith({}, EMAIL_ID)
+  })
+})
+
+describe('updateDraftContent', () => {
+  it('should persist the manually edited subject and body', async () => {
+    updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'New subject', body: 'New body' }))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', 'New subject')
+    formData.set('body', 'New body')
+
+    await updateDraftContent(formData)
+
+    expect(updateDraftContentRowMock).toHaveBeenCalledWith(
+      {}, EMAIL_ID, { subject: 'New subject', body: 'New body' },
+    )
+    expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+  })
+
+  it('should reject a non-operator', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', 'New subject')
+    formData.set('body', 'New body')
+
+    await expect(updateDraftContent(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(updateDraftContentRowMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject an empty subject before touching the database', async () => {
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', '')
+    formData.set('body', 'New body')
+
+    await expect(updateDraftContent(formData)).rejects.toBeTruthy()
+    expect(updateDraftContentRowMock).not.toHaveBeenCalled()
+  })
+
+  it('should throw VALIDATION_ERROR when the draft was already sent', async () => {
+    updateDraftContentRowMock.mockResolvedValue(null)
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', 'New subject')
+    formData.set('body', 'New body')
+
+    await expect(updateDraftContent(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(revalidatePathMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('regenerateDraftContent', () => {
+  it('should redesign the draft and persist the result', async () => {
+    regenerateDraftContentPipelineMock.mockResolvedValue({ subject: 'AI subject', body: 'AI body' })
+    updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'AI subject', body: 'AI body' }))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    const result = await regenerateDraftContent(formData)
+
+    expect(regenerateDraftContentPipelineMock).toHaveBeenCalledWith(
+      {}, { emailId: EMAIL_ID, instruction: 'make it shorter' },
+    )
+    expect(updateDraftContentRowMock).toHaveBeenCalledWith({}, EMAIL_ID, { subject: 'AI subject', body: 'AI body' })
+    expect(result).toEqual({ ok: true, subject: 'AI subject', body: 'AI body' })
+    expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+  })
+
+  it('should reject a non-operator', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    await expect(regenerateDraftContent(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(regenerateDraftContentPipelineMock).not.toHaveBeenCalled()
+  })
+
+  it('should reject an empty instruction before calling the pipeline', async () => {
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', '')
+
+    await expect(regenerateDraftContent(formData)).rejects.toBeTruthy()
+    expect(regenerateDraftContentPipelineMock).not.toHaveBeenCalled()
+  })
+
+  it('should return ok:false with the error code when the LLM call fails, without throwing', async () => {
+    regenerateDraftContentPipelineMock.mockRejectedValue(new AppError('EXTERNAL_ERROR', 'LLM generateObject failed'))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    const result = await regenerateDraftContent(formData)
+
+    expect(result).toEqual({ ok: false, code: 'EXTERNAL_ERROR' })
+    expect(updateDraftContentRowMock).not.toHaveBeenCalled()
+  })
+
+  it('should return ok:false when the draft was approved out from under the redesign', async () => {
+    regenerateDraftContentPipelineMock.mockResolvedValue({ subject: 'AI subject', body: 'AI body' })
+    updateDraftContentRowMock.mockResolvedValue(null)
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    const result = await regenerateDraftContent(formData)
+
+    expect(result).toEqual({ ok: false, code: 'VALIDATION_ERROR' })
+    expect(revalidatePathMock).not.toHaveBeenCalled()
   })
 })
