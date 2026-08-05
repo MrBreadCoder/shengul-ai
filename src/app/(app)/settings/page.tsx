@@ -15,6 +15,7 @@ import { ConnectButtons } from './connect-buttons'
 import { MailboxRow } from './mailbox-row'
 import { MailboxesWebMcpTools } from './mailboxes-webmcp-tools'
 import { ReplyModeSection } from './reply-mode-section'
+import { FollowupCadenceSection } from './followup-cadence-section'
 import { ConnectCrmButtons } from './connect-crm-buttons'
 import { PipelinePicker } from './pipeline-picker'
 import { ConnectionCard } from './connection-card'
@@ -94,6 +95,12 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
       {client ? (
         <Section title="Reply mode">
           <ReplyModeSection currentMode={client.reply_mode} />
+        </Section>
+      ) : null}
+
+      {client ? (
+        <Section title="Follow-up cadence">
+          <FollowupCadenceSection initialDelaysDays={client.followup_delays_days} />
         </Section>
       ) : null}
 
