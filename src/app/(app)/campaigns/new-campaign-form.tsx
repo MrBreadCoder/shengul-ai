@@ -15,6 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
 
 interface ClientOption {
   id: string
@@ -28,6 +30,31 @@ function splitCsv(value: FormDataEntryValue | null): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
+}
+
+const SENIORITY_LABELS: Record<(typeof apolloPersonSeniorities)[number], string> = {
+  owner: 'Owner',
+  founder: 'Founder',
+  c_suite: 'C-Suite',
+  partner: 'Partner',
+  vp: 'VP',
+  head: 'Head',
+  director: 'Director',
+  manager: 'Manager',
+  senior: 'Senior',
+  entry: 'Entry',
+  intern: 'Intern',
+}
+
+const CONTACT_EMAIL_STATUS_LABELS: Record<(typeof apolloContactEmailStatuses)[number], string> = {
+  verified: 'Verified',
+  unverified: 'Unverified',
+  'likely to engage': 'Likely to engage',
+  unavailable: 'Unavailable',
+}
+
+function getAllStrings(formData: FormData, name: string): string[] {
+  return formData.getAll(name).map(String)
 }
 
 interface FieldProps {
@@ -83,6 +110,8 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       keywords: splitCsv(formData.get('keywords')),
       excludeOrganizationLocations: splitCsv(formData.get('excludeOrganizationLocations')),
       excludeKeywords: splitCsv(formData.get('excludeKeywords')),
+      personSeniorities: getAllStrings(formData, 'personSeniorities'),
+      contactEmailStatuses: getAllStrings(formData, 'contactEmailStatuses'),
     }
 
     try {
@@ -276,6 +305,43 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
             placeholder="staffing, agency, recruiting"
             toolparamdescription="Comma-separated words that disqualify a company. Matched against its name and the person's title after Apollo returns results."
           />
+        </Field>
+
+        <Field id="personSeniorities" label="Target seniority" hint="Leave all unchecked to search every seniority.">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {apolloPersonSeniorities.map((value) => (
+              <label key={value} htmlFor={`personSeniorities-${value}`} className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  id={`personSeniorities-${value}`}
+                  name="personSeniorities"
+                  value={value}
+                  toolparamdescription="One seniority level to include. Leave all unchecked to search every level Apollo recognizes."
+                />
+                {SENIORITY_LABELS[value]}
+              </label>
+            ))}
+          </div>
+        </Field>
+
+        <Field
+          id="contactEmailStatuses"
+          label="Contact email status"
+          hint="Restricts Apollo's own search to contacts already at this status, before a credit is spent revealing them. Leave all unchecked to search every status."
+        >
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {apolloContactEmailStatuses.map((value) => (
+              <label key={value} htmlFor={`contactEmailStatuses-${value}`} className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  id={`contactEmailStatuses-${value}`}
+                  name="contactEmailStatuses"
+                  value={value}
+                  defaultChecked={value === 'verified'}
+                  toolparamdescription="One Apollo contact-email-status value to restrict search to. 'Verified' is checked by default. Leave all unchecked to search every status."
+                />
+                {CONTACT_EMAIL_STATUS_LABELS[value]}
+              </label>
+            ))}
+          </div>
         </Field>
       </fieldset>
 

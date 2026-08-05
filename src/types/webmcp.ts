@@ -117,4 +117,11 @@ declare module 'react' {
   interface SelectHTMLAttributes<T> extends HTMLAttributes<T> {
     toolparamdescription?: string
   }
+
+  interface ButtonHTMLAttributes<T> extends HTMLAttributes<T> {
+    /** Radix's Checkbox (and other button-based form controls) render a
+     *  native `<button>` under the hood, so this field-level hint needs to
+     *  reach button attributes too, not just input/textarea/select. */
+    toolparamdescription?: string
+  }
 }
