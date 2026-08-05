@@ -23,15 +23,17 @@ import { listEventsForCase } from '@/lib/db/events'
 import { getCampaignById } from '@/lib/db/campaigns'
 import { listNotesForCase } from '@/lib/db/notes'
 import { listActiveResourcesForClient } from '@/lib/db/client-resources'
+import { listSequencesForCase } from '@/lib/db/sequences'
 import { CASE_STATUS, KNOWLEDGE_REQ_STATUS, LEAD_EMAIL_STATUS } from '@/lib/ui/status'
 import { buildContactThreads } from '@/lib/ui/mail-threads'
-import { formatAbsolute, formatRelative, humanizeEnum } from '@/lib/format'
+import { formatAbsolute, formatRelative, humanizeEnum, formatFollowupCountdown } from '@/lib/format'
 import { CompanyMark } from '@/components/company-mark'
 import { StatusPill } from '@/components/status-dot'
 import { KnowledgeItem } from '@/components/knowledge-item'
 import { EmptyState } from '@/components/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StopLeadButton } from './stop-lead-button'
+import { LeadFollowupControl } from './lead-followup-control'
 import { NotesPanel, type NotePanelItem } from './notes-panel'
 import { MailTab } from './mail-tab'
 import { CrmLinkBadge } from './crm-link-badge'
@@ -77,7 +79,7 @@ export default async function CasePage({
   // is the behaviour we want: no existence leak across clients.
   if (!kase) notFound()
 
-  const [leads, emails, knowledge, requests, events, campaign, notes, resources, crmLink] = await Promise.all([
+  const [leads, emails, knowledge, requests, events, campaign, notes, resources, crmLink, sequences] = await Promise.all([
     listLeadsForCase(supabase, caseId),
     listEmailsForCase(supabase, caseId),
     listKnowledgeForCase(supabase, caseId),
@@ -87,8 +89,16 @@ export default async function CasePage({
     listNotesForCase(supabase, caseId),
     listActiveResourcesForClient(supabase, kase.client_id, RESOURCE_LIMIT),
     getCaseCrmLink(supabase, caseId),
+    listSequencesForCase(supabase, caseId),
   ])
   const crmConnection = crmLink ? await getCrmConnectionForClient(supabase, kase.client_id) : null
+  // Only an active/paused sequence has anything left to edit — a
+  // stopped/completed one shows no control at all (see LeadFollowupControl).
+  const sequenceByLeadId = new Map(
+    sequences
+      .filter((sequence) => sequence.state === 'active' || sequence.state === 'paused')
+      .map((sequence) => [sequence.lead_id, sequence]),
+  )
 
   const now = new Date()
   const openRequests = requests.filter((request) => request.status === 'open').length
@@ -207,52 +217,64 @@ export default async function CasePage({
           </p>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {leads.map((lead) => (
-              <li
-                key={lead.id}
-                className="border-hairline bg-surface flex items-start gap-3 rounded-lg border p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium">{lead.full_name}</p>
-                  <p className="text-faint truncate text-[11px]">{lead.title ?? 'Title unknown'}</p>
-                  {lead.email ? (
-                    <p className="text-muted-foreground mt-1.5 truncate font-mono text-[11px]">
-                      {lead.email}
-                    </p>
-                  ) : null}
-                  <div className="mt-2 flex items-center gap-2">
-                    <StatusPill meta={LEAD_EMAIL_STATUS[lead.email_status]} />
-                    {lead.linkedin_url ? (
-                      <a
-                        href={lead.linkedin_url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        aria-label={`${lead.full_name} on LinkedIn`}
-                        className="text-faint hover:text-foreground transition-colors duration-200"
-                      >
-                        <LinkedinLogo size={14} weight="light" />
-                      </a>
+            {leads.map((lead) => {
+              const sequence = sequenceByLeadId.get(lead.id)
+              return (
+                <li
+                  key={lead.id}
+                  className="border-hairline bg-surface flex items-start gap-3 rounded-lg border p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium">{lead.full_name}</p>
+                    <p className="text-faint truncate text-[11px]">{lead.title ?? 'Title unknown'}</p>
+                    {lead.email ? (
+                      <p className="text-muted-foreground mt-1.5 truncate font-mono text-[11px]">
+                        {lead.email}
+                      </p>
                     ) : null}
-                    {/* A contact with no notes still shows the control, so the
-                        first note on a person is as easy to write as the tenth. */}
-                    <Link
-                      href={`/cases/${kase.id}?note=${lead.id}#notes`}
-                      scroll
-                      className="text-faint hover:text-foreground text-[11px] underline underline-offset-2 transition-colors duration-200"
-                    >
-                      {(noteCountByLeadId.get(lead.id) ?? 0) > 0
-                        ? `${noteCountByLeadId.get(lead.id)} note${noteCountByLeadId.get(lead.id) === 1 ? '' : 's'}`
-                        : 'Add note'}
-                    </Link>
+                    <div className="mt-2 flex items-center gap-2">
+                      <StatusPill meta={LEAD_EMAIL_STATUS[lead.email_status]} />
+                      {lead.linkedin_url ? (
+                        <a
+                          href={lead.linkedin_url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          aria-label={`${lead.full_name} on LinkedIn`}
+                          className="text-faint hover:text-foreground transition-colors duration-200"
+                        >
+                          <LinkedinLogo size={14} weight="light" />
+                        </a>
+                      ) : null}
+                      {/* A contact with no notes still shows the control, so the
+                          first note on a person is as easy to write as the tenth. */}
+                      <Link
+                        href={`/cases/${kase.id}?note=${lead.id}#notes`}
+                        scroll
+                        className="text-faint hover:text-foreground text-[11px] underline underline-offset-2 transition-colors duration-200"
+                      >
+                        {(noteCountByLeadId.get(lead.id) ?? 0) > 0
+                          ? `${noteCountByLeadId.get(lead.id)} note${noteCountByLeadId.get(lead.id) === 1 ? '' : 's'}`
+                          : 'Add note'}
+                      </Link>
+                    </div>
+                    {sequence ? (
+                      <LeadFollowupControl
+                        leadId={lead.id}
+                        caseId={kase.id}
+                        delaysDays={sequence.followup_delays_days}
+                        currentStep={sequence.current_step}
+                        countdownLabel={formatFollowupCountdown(sequence.next_action_at, now)}
+                      />
+                    ) : null}
                   </div>
-                </div>
-                {lead.status === 'parked' ? (
-                  <span className="text-faint shrink-0 text-[11px]">Stopped</span>
-                ) : (
-                  <StopLeadButton leadId={lead.id} caseId={kase.id} fullName={lead.full_name} />
-                )}
-              </li>
-            ))}
+                  {lead.status === 'parked' ? (
+                    <span className="text-faint shrink-0 text-[11px]">Stopped</span>
+                  ) : (
+                    <StopLeadButton leadId={lead.id} caseId={kase.id} fullName={lead.full_name} />
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

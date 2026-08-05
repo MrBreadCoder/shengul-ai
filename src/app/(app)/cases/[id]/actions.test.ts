@@ -5,6 +5,7 @@ const getLeadById = vi.fn()
 const parkLead = vi.fn()
 const addSuppression = vi.fn()
 const stopSequenceForLead = vi.fn()
+const updateSequenceFollowupDelays = vi.fn()
 const revalidatePath = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: () => requireUser() }))
@@ -16,10 +17,13 @@ vi.mock('@/lib/db/leads', () => ({
   parkLead: (...args: unknown[]) => parkLead(...args),
 }))
 vi.mock('@/lib/db/suppressions', () => ({ addSuppression: (...args: unknown[]) => addSuppression(...args) }))
-vi.mock('@/lib/db/sequences', () => ({ stopSequenceForLead: (...args: unknown[]) => stopSequenceForLead(...args) }))
+vi.mock('@/lib/db/sequences', () => ({
+  stopSequenceForLead: (...args: unknown[]) => stopSequenceForLead(...args),
+  updateSequenceFollowupDelays: (...args: unknown[]) => updateSequenceFollowupDelays(...args),
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: () => Promise.resolve() }))
 
-const { stopLead } = await import('./actions')
+const { stopLead, updateLeadFollowupDelays } = await import('./actions')
 
 function form(): FormData {
   const data = new FormData()
@@ -83,5 +87,61 @@ describe('stopLead', () => {
     data.set('leadId', 'nope')
     data.set('caseId', '22222222-2222-4222-8222-222222222222')
     await expect(stopLead(data)).rejects.toThrow()
+  })
+})
+
+describe('updateLeadFollowupDelays', () => {
+  function delaysForm(days: number[]): FormData {
+    const data = new FormData()
+    data.set('leadId', '11111111-1111-4111-8111-111111111111')
+    data.set('caseId', '22222222-2222-4222-8222-222222222222')
+    for (const day of days) data.append('delaysDays', String(day))
+    return data
+  }
+
+  it('should persist the new cadence on that lead\'s sequence', async () => {
+    updateSequenceFollowupDelays.mockResolvedValue({ id: 'seq1', followup_delays_days: [2, 5] })
+
+    await updateLeadFollowupDelays(delaysForm([2, 5]))
+
+    expect(updateSequenceFollowupDelays).toHaveBeenCalledWith(
+      expect.anything(), '11111111-1111-4111-8111-111111111111', [2, 5],
+    )
+    expect(revalidatePath).toHaveBeenCalledWith('/cases/22222222-2222-4222-8222-222222222222')
+  })
+
+  it('should let a client-role user edit a lead the RLS read returned', async () => {
+    requireUser.mockResolvedValue({ appUser: { id: 'u2', role: 'client', client_id: 'c1' } })
+    updateSequenceFollowupDelays.mockResolvedValue({ id: 'seq1', followup_delays_days: [2, 5] })
+
+    await updateLeadFollowupDelays(delaysForm([2, 5]))
+
+    expect(updateSequenceFollowupDelays).toHaveBeenCalled()
+  })
+
+  it('should reject a lead that belongs to another client', async () => {
+    requireUser.mockResolvedValue({ appUser: { id: 'u2', role: 'client', client_id: 'other' } })
+
+    await expect(updateLeadFollowupDelays(delaysForm([2, 5]))).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(updateSequenceFollowupDelays).not.toHaveBeenCalled()
+  })
+
+  it('should reject when the RLS-scoped read finds no such lead', async () => {
+    getLeadById.mockResolvedValue(null)
+
+    await expect(updateLeadFollowupDelays(delaysForm([2, 5]))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(updateSequenceFollowupDelays).not.toHaveBeenCalled()
+  })
+
+  it('should reject an out-of-bounds cadence before touching the database', async () => {
+    await expect(updateLeadFollowupDelays(delaysForm([0]))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(updateSequenceFollowupDelays).not.toHaveBeenCalled()
+  })
+
+  it('should throw VALIDATION_ERROR when the sequence is no longer active or paused', async () => {
+    updateSequenceFollowupDelays.mockResolvedValue(null)
+
+    await expect(updateLeadFollowupDelays(delaysForm([2, 5]))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(revalidatePath).not.toHaveBeenCalled()
   })
 })
