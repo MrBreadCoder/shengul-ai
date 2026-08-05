@@ -2543,8 +2543,23 @@ started — +5 files: `followup-limits.test.ts`, `format.test.ts`,
 `followup-cadence-actions.test.ts` new, plus new describe blocks in
 `clients.test.ts`/`sequences.test.ts`/`actions.test.ts`; +64 tests total),
 0 type errors, 0 new lint errors (same 7 pre-existing unrelated warnings).
-No commits made per instruction — working tree left dirty for the user to
-review. Manual verification (Tasks 9 Step 9 and 10 Step 10 in the plan —
-exercising `/settings` and a case page's contact cards in `pnpm dev`) was
-not run in this session, per this codebase's convention of leaving
-`.tsx` component behavior to manual QA (no jsdom/testing-library setup).
+Committed as 11 task-scoped commits and pushed to `origin/master`
+(`3ca1e14`..`d0ef54e`) once the user asked to push. Manual verification
+(Tasks 9 Step 9 and 10 Step 10 in the plan — exercising `/settings` and a
+case page's contact cards in `pnpm dev`) was not run in this session, per
+this codebase's convention of leaving `.tsx` component behavior to manual
+QA (no jsdom/testing-library setup).
+
+**Follow-up UI fix, same day:** a client testing `/settings` entered a
+non-ascending cadence (`[14, 7, 5]`) and asked whether that was valid —
+it is, by design (§4: each element is a step-to-step gap, not a
+cumulative day offset), but the UI gave no way to see the actual send
+days, making a mis-ordered cadence indistinguishable from a typo.
+`src/components/followup-delays-editor.tsx` now computes a running
+`cumulativeSendDays` total and renders `· sends day N` next to each row
+(e.g. `[14, 7, 5]` shows day 14, day 21, day 26) — shared by both
+`/settings` and the per-lead case-page editor with no caller changes
+needed, since it's derived purely from the existing `delaysDays` prop.
+No test file (this component has none, per the no-`.tsx`-tests
+convention); verified with `pnpm typecheck && pnpm lint && pnpm exec
+vitest run` — still clean, 185/1945.

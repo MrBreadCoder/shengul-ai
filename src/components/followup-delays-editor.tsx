@@ -27,6 +27,22 @@ function nextRowKey(): string {
   return `step-${keySeed}`
 }
 
+// Each element is a step-to-step gap, not a day-of-cadence offset (see
+// docs/superpowers/specs/2026-08-05-configurable-followup-cadence-design.md
+// §4) — so [14, 7, 5] sends on day 14, then day 21, then day 26, not
+// "day 14, day 7, day 5". This turns each row's gap into that running
+// send-day total so an unusual (e.g. non-ascending) cadence is easy to
+// read correctly before saving it.
+function cumulativeSendDays(delaysDays: readonly number[]): number[] {
+  const totals: number[] = []
+  let runningTotal = 0
+  for (const days of delaysDays) {
+    runningTotal += days
+    totals.push(runningTotal)
+  }
+  return totals
+}
+
 /**
  * Controlled array-of-days editor: add/remove/edit follow-up steps. Owns no
  * save logic — the parent holds `delaysDays` state and decides when/how to
@@ -44,6 +60,7 @@ export function FollowupDelaysEditor({
   disabled = false,
 }: FollowupDelaysEditorProps): React.ReactElement {
   const [rowKeys, setRowKeys] = useState<string[]>(() => delaysDays.map(() => nextRowKey()))
+  const sendDays = cumulativeSendDays(delaysDays)
 
   function setDay(index: number, value: number): void {
     const next = [...delaysDays]
@@ -86,6 +103,11 @@ export function FollowupDelaysEditor({
               className="border-hairline bg-surface w-16 rounded-md border px-2 py-1 text-[11px]"
             />
             <span className="text-faint text-[11px]">days later</span>
+            <span className="text-faint text-[11px]" title="Total days after the first-touch email">
+              {/* sendDays is built by pushing exactly one entry per delaysDays
+                  element above, in the same order — index is always in range. */}
+              · sends day {sendDays[index]!}
+            </span>
             <button
               type="button"
               disabled={disabled || delaysDays.length <= MIN_FOLLOWUP_STEPS}
