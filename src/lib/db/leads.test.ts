@@ -40,19 +40,35 @@ function mockSupabase(overrides: {
 describe('getKnownSourceIds', () => {
   it('should return a set of non-null source ids', async () => {
     const supabase = mockSupabase({ selectResult: { data: [{ source_id: 'a' }, { source_id: 'b' }], error: null } })
-    const result = await getKnownSourceIds(supabase, 'camp1')
+    const result = await getKnownSourceIds(supabase, 'client1')
     expect(result).toEqual(new Set(['a', 'b']))
   })
 
   it('should filter out null source ids', async () => {
     const supabase = mockSupabase({ selectResult: { data: [{ source_id: 'a' }, { source_id: null }], error: null } })
-    const result = await getKnownSourceIds(supabase, 'camp1')
+    const result = await getKnownSourceIds(supabase, 'client1')
     expect(result).toEqual(new Set(['a']))
+  })
+
+  it('should query leads scoped to client_id, not campaign_id', async () => {
+    let queriedColumn = ''
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: (column: string) => {
+            queriedColumn = column
+            return { not: () => Promise.resolve({ data: [], error: null }) }
+          },
+        }),
+      }),
+    } as never
+    await getKnownSourceIds(supabase, 'client1')
+    expect(queriedColumn).toBe('client_id')
   })
 
   it('should throw DB_ERROR when the query errors', async () => {
     const supabase = mockSupabase({ selectResult: { data: null, error: { message: 'boom' } } })
-    await expect(getKnownSourceIds(supabase, 'camp1')).rejects.toBeInstanceOf(AppError)
+    await expect(getKnownSourceIds(supabase, 'client1')).rejects.toBeInstanceOf(AppError)
   })
 })
 

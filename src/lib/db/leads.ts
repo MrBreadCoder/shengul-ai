@@ -7,15 +7,15 @@ export type LeadInsert = Database['public']['Tables']['leads']['Insert']
 
 export async function getKnownSourceIds(
   supabase: SupabaseClient<Database>,
-  campaignId: string,
+  clientId: string,
 ): Promise<Set<string>> {
   const { data, error } = await supabase
     .from('leads')
     .select('source_id')
-    .eq('campaign_id', campaignId)
+    .eq('client_id', clientId)
     .not('source_id', 'is', null)
   if (error) {
-    throw new AppError('DB_ERROR', 'Failed to load known lead source ids', { campaignId, cause: error.message })
+    throw new AppError('DB_ERROR', 'Failed to load known lead source ids', { clientId, cause: error.message })
   }
   return new Set((data ?? []).map((r) => r.source_id).filter((v): v is string => v !== null))
 }
