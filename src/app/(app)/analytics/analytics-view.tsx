@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChartLineUp } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
@@ -46,6 +47,7 @@ interface AnalyticsViewProps {
 export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('analytics')
 
   // URL params are untrusted input that reaches SQL — validate, then whitelist.
   const parsed = analyticsSearchParamsSchema.safeParse(await searchParams)
@@ -113,90 +115,93 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
       {!hasAnyData ? (
         <EmptyState
           icon={ChartLineUp}
-          title="No pipeline activity in this range"
-          description="Run discovery or widen the date range above. Metrics appear the moment the first lead lands."
+          title={t('noDataTitle')}
+          description={t('noDataDescription')}
         />
       ) : null}
 
-      <Section title="Outreach">
+      <Section title={t('sectionOutreach')}>
         <div className={TILE_GRID}>
           <StatTile
             index={0}
-            label="Emails sent"
+            label={t('tile.emailsSent')}
             value={formatCount(overview.emailsSent)}
-            hint={`${formatCount(overview.firstTouchSent)} first touch · ${formatCount(overview.followupsSent)} follow-ups`}
+            hint={t('tile.emailsSentHint', {
+              firstTouch: formatCount(overview.firstTouchSent),
+              followups: formatCount(overview.followupsSent),
+            })}
           />
           <StatTile
             index={1}
-            label="Replies"
+            label={t('tile.replies')}
             value={formatCount(overview.repliesReceived)}
-            hint={`${formatCount(overview.leadsReplied)} people replied`}
+            hint={t('tile.repliesHint', { count: formatCount(overview.leadsReplied) })}
           />
           <StatTile
             index={2}
-            label="Reply rate"
+            label={t('tile.replyRate')}
             value={formatPercent(replyRate)}
-            hint={`of ${formatCount(overview.leadsContacted)} people contacted`}
+            hint={t('tile.replyRateHint', { count: formatCount(overview.leadsContacted) })}
           />
           <StatTile
             index={3}
-            label="Bounce rate"
+            label={t('tile.bounceRate')}
             value={formatPercent(bounceRate)}
-            hint={`${formatCount(overview.emailsBounced)} bounced`}
+            hint={t('tile.bounceRateHint', { count: formatCount(overview.emailsBounced) })}
           />
           <StatTile
             index={4}
-            label="Send failures"
+            label={t('tile.sendFailures')}
             value={formatCount(overview.emailsFailed)}
-            hint={`${formatPercent(failureRate)} of send attempts`}
+            hint={t('tile.sendFailuresHint', { percent: formatPercent(failureRate) })}
           />
           <StatTile
             index={5}
-            label="Active sequences"
+            label={t('tile.activeSequences')}
             value={formatCount(overview.activeSequences)}
-            hint="Follow-ups still running right now"
+            hint={t('tile.activeSequencesHint')}
           />
         </div>
       </Section>
 
-      <Section title="Pipeline">
+      <Section title={t('sectionPipeline')}>
         <div className={TILE_GRID}>
-          <StatTile index={0} label="Leads discovered" value={formatCount(overview.leadsDiscovered)} />
+          <StatTile index={0} label={t('tile.leadsDiscovered')} value={formatCount(overview.leadsDiscovered)} />
           <StatTile
             index={1}
-            label="Verified emails"
+            label={t('tile.verifiedEmails')}
             value={formatCount(overview.leadsVerified)}
-            hint={`${formatPercent(verifiedRate)} of discovered`}
+            hint={t('tile.verifiedEmailsHint', { percent: formatPercent(verifiedRate) })}
           />
-          <StatTile index={2} label="Cases created" value={formatCount(overview.casesCreated)} />
+          <StatTile index={2} label={t('tile.casesCreated')} value={formatCount(overview.casesCreated)} />
           <StatTile
             index={3}
-            label="Suppressions added"
+            label={t('tile.suppressionsAdded')}
             value={formatCount(overview.suppressionsAdded)}
-            hint="Ignores the campaign filter, honours the client filter"
+            hint={t('tile.suppressionsAddedHint')}
           />
         </div>
       </Section>
 
-      <Section title="Daily trend" aside={`Last ${Math.min(TREND_TABLE_DAYS, daily.length)} days shown below`}>
+      <Section title={t('sectionDailyTrend')} aside={t('lastDaysShown', { count: Math.min(TREND_TABLE_DAYS, daily.length) })}>
         <div className="grid gap-3 md:grid-cols-3">
           <SparklineChart
             index={0}
-            title="Emails sent"
+            title={t('tile.emailsSent')}
             color="var(--status-contacted)"
             total={formatCount(overview.emailsSent)}
             values={daily.map((day) => day.emailsSent)}
           />
           <SparklineChart
             index={1}
-            title="Replies"
+            title={t('tile.replies')}
             color="var(--status-won)"
             total={formatCount(overview.repliesReceived)}
             values={daily.map((day) => day.repliesReceived)}
           />
           <SparklineChart
             index={2}
-            title="Leads discovered"
+            title={t('tile.leadsDiscovered')}
             color="var(--status-ready)"
             total={formatCount(overview.leadsDiscovered)}
             values={daily.map((day) => day.leadsDiscovered)}
@@ -206,13 +211,13 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
         {trendRows.length > 0 ? (
           <div className="border-hairline mt-1 overflow-x-auto rounded-lg border">
             <Table>
-              <TableCaption className="sr-only">Daily totals, most recent first, in UTC</TableCaption>
+              <TableCaption className="sr-only">{t('trendTable.caption')}</TableCaption>
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">Day (UTC)</TableHead>
-                  <TableHead scope="col" className="text-right">Discovered</TableHead>
-                  <TableHead scope="col" className="text-right">Sent</TableHead>
-                  <TableHead scope="col" className="text-right">Replies</TableHead>
+                  <TableHead scope="col">{t('trendTable.day')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('trendTable.discovered')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('trendTable.sent')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('trendTable.replies')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -230,12 +235,12 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
         ) : null}
       </Section>
 
-      <Section title="Campaigns">
+      <Section title={t('sectionCampaigns')}>
         {scopedCampaigns.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            No campaigns yet.{' '}
+            {t('campaignsTable.empty')}{' '}
             <Link href={scope.kind === 'client' ? `/clients/${scope.clientId}?tab=campaigns` : '/campaigns'} className="text-primary underline underline-offset-2">
-              Create one
+              {t('campaignsTable.createOne')}
             </Link>
             .
           </p>
@@ -244,15 +249,26 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
             <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">Campaign</TableHead>
-                  <TableHead scope="col">Status</TableHead>
-                  {['Discovered', 'Verified', 'Sent', 'Contacted', 'Replied', 'Reply rate', 'In conv.', 'Hot', 'Won', 'Dead'].map(
-                    (heading) => (
-                      <TableHead key={heading} scope="col" className="text-right">
-                        {heading}
-                      </TableHead>
-                    ),
-                  )}
+                  <TableHead scope="col">{t('campaignsTable.campaign')}</TableHead>
+                  <TableHead scope="col">{t('campaignsTable.status')}</TableHead>
+                  {(
+                    [
+                      t('campaignsTable.discovered'),
+                      t('campaignsTable.verified'),
+                      t('campaignsTable.sent'),
+                      t('campaignsTable.contacted'),
+                      t('campaignsTable.replied'),
+                      t('campaignsTable.replyRate'),
+                      t('campaignsTable.inConversation'),
+                      t('campaignsTable.hot'),
+                      t('campaignsTable.won'),
+                      t('campaignsTable.dead'),
+                    ] as const
+                  ).map((heading) => (
+                    <TableHead key={heading} scope="col" className="text-right">
+                      {heading}
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -278,12 +294,12 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
         )}
       </Section>
 
-      <Section title="Mailboxes">
+      <Section title={t('sectionMailboxes')}>
         {mailboxes.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            No mailboxes connected.{' '}
+            {t('mailboxesTable.empty')}{' '}
             <Link href="/settings" className="text-primary underline underline-offset-2">
-              Connect one
+              {t('mailboxesTable.connectOne')}
             </Link>
             .
           </p>
@@ -292,14 +308,14 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
             <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">Mailbox</TableHead>
-                  <TableHead scope="col">Provider</TableHead>
-                  <TableHead scope="col">Health</TableHead>
-                  <TableHead scope="col" className="text-right">Today</TableHead>
-                  <TableHead scope="col" className="text-right">Cap used</TableHead>
-                  <TableHead scope="col" className="text-right">Sent all-time</TableHead>
-                  <TableHead scope="col" className="text-right">Bounce rate</TableHead>
-                  <TableHead scope="col">Last send</TableHead>
+                  <TableHead scope="col">{t('mailboxesTable.mailbox')}</TableHead>
+                  <TableHead scope="col">{t('mailboxesTable.provider')}</TableHead>
+                  <TableHead scope="col">{t('mailboxesTable.health')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxesTable.today')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxesTable.capUsed')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxesTable.sentAllTime')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxesTable.bounceRate')}</TableHead>
+                  <TableHead scope="col">{t('mailboxesTable.lastSend')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -325,16 +341,16 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
         )}
       </Section>
 
-      <Section title="Agent activity" className="pb-4">
+      <Section title={t('sectionAgentActivity')} className="pb-4">
         {eventCounts.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No agent events logged in this range.</p>
+          <p className="text-muted-foreground text-sm">{t('activityTable.empty')}</p>
         ) : (
           <div className="border-hairline overflow-x-auto rounded-lg border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">Event</TableHead>
-                  <TableHead scope="col" className="text-right">Count</TableHead>
+                  <TableHead scope="col">{t('activityTable.event')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('activityTable.count')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

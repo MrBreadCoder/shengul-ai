@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { FileText } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 
 type UploadState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
@@ -23,6 +24,7 @@ async function extractErrorMessage(res: Response, fallback: string): Promise<str
 }
 
 export function KnowledgeFileUpload({ clientId }: KnowledgeFileUploadProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<UploadState>({ status: 'idle' })
@@ -38,18 +40,18 @@ export function KnowledgeFileUpload({ clientId }: KnowledgeFileUploadProps): Rea
       formData.set('file', file)
       const res = await fetch(`/api/clients/${clientId}/knowledge/file`, { method: 'POST', body: formData })
       if (!res.ok) {
-        const message = await extractErrorMessage(res, 'Could not upload the file.')
+        const message = await extractErrorMessage(res, t('knowledgeFileUpload.uploadFailed'))
         setState({ status: 'error', message })
-        toast.error('Upload failed', { description: message })
+        toast.error(t('knowledgeFileUpload.uploadFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
-      toast.success('File added to the knowledge base')
+      toast.success(t('knowledgeFileUpload.uploadedToast'))
       router.refresh()
     } catch {
-      const message = 'Network request failed. Check your connection and retry.'
+      const message = t('knowledgeFileUpload.networkError')
       setState({ status: 'error', message })
-      toast.error('Upload failed', { description: message })
+      toast.error(t('knowledgeFileUpload.uploadFailedToast'), { description: message })
     }
   }
 
@@ -63,11 +65,11 @@ export function KnowledgeFileUpload({ clientId }: KnowledgeFileUploadProps): Rea
         accept="application/pdf,text/plain,text/markdown,.md"
         className="sr-only"
         onChange={(event) => void onFileSelected(event)}
-        aria-label="Upload knowledge file"
+        aria-label={t('knowledgeFileUpload.inputLabel')}
       />
       <Button type="button" variant="secondary" size="sm" disabled={isSubmitting} onClick={() => inputRef.current?.click()}>
         <FileText size={14} weight="light" />
-        {isSubmitting ? 'Uploading…' : 'Upload file'}
+        {isSubmitting ? t('knowledgeFileUpload.uploading') : t('knowledgeFileUpload.uploadButton')}
       </Button>
       {state.status === 'error' ? (
         <span role="alert" className="text-destructive text-[11px] font-medium">{state.message}</span>

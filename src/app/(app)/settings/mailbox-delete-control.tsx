@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 
 interface MailboxDeleteControlProps {
@@ -11,6 +12,8 @@ interface MailboxDeleteControlProps {
 }
 
 export function MailboxDeleteControl({ id, emailAddress }: MailboxDeleteControlProps): React.ReactElement {
+  const t = useTranslations('settings')
+  const tCommon = useTranslations('common')
   const router = useRouter()
   const [isConfirming, setIsConfirming] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -25,12 +28,12 @@ export function MailboxDeleteControl({ id, emailAddress }: MailboxDeleteControlP
     try {
       const response = await fetch(`/api/mailboxes/${id}`, { method: 'DELETE' })
       if (!response.ok) {
-        setError('Could not remove that mailbox.')
+        setError(t('mailboxDelete.removeFailed'))
         return
       }
       startTransition(() => router.refresh())
     } catch {
-      setError('network')
+      setError(t('mailboxDelete.networkError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -40,15 +43,14 @@ export function MailboxDeleteControl({ id, emailAddress }: MailboxDeleteControlP
     return (
       <div className="flex flex-col gap-1.5">
         <p className="text-muted-foreground max-w-64 text-[11px]">
-          Removes {emailAddress} for good. Sending stops immediately — reconnecting creates a new
-          connection, it does not restore this one.
+          {t('mailboxDelete.warning', { emailAddress })}
         </p>
         <div className="flex gap-2">
           <Button type="button" variant="destructive" size="sm" disabled={isBusy} onClick={() => void remove()}>
-            {isBusy ? 'Removing…' : 'Yes, remove'}
+            {isBusy ? t('mailboxDelete.removing') : t('mailboxDelete.confirmRemove')}
           </Button>
           <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => setIsConfirming(false)}>
-            Cancel
+            {tCommon('cancel')}
           </Button>
         </div>
         {error ? (
@@ -63,7 +65,7 @@ export function MailboxDeleteControl({ id, emailAddress }: MailboxDeleteControlP
   return (
     <Button type="button" variant="outline" size="sm" onClick={() => setIsConfirming(true)}>
       <Trash size={13} weight="light" />
-      Remove
+      {t('mailboxDelete.remove')}
     </Button>
   )
 }

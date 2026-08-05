@@ -1,4 +1,5 @@
 import { Envelope, Plus } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { EmailMessage } from '@/components/email-message'
 import { EmptyState } from '@/components/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -15,13 +16,15 @@ interface MailTabProps {
   now: Date
 }
 
-export function MailTab({
+export async function MailTab({
   caseId,
   threads,
   newContactOptions,
   resources,
   now,
-}: MailTabProps): React.ReactElement {
+}: MailTabProps): Promise<React.ReactElement> {
+  const t = await getTranslations('cases')
+
   // No contact has been emailed yet: no thread to separate, so this stays
   // the original single-form layout instead of a tab row with one empty tab.
   if (threads.length === 0) {
@@ -29,8 +32,8 @@ export function MailTab({
       <div className="flex max-w-[80ch] flex-col gap-4">
         <EmptyState
           icon={Envelope}
-          title="No mail on this case"
-          description="Outbound drafts appear here once the writer agent runs, and replies land automatically when the inbound poller picks them up."
+          title={t('mailTab.emptyTitle')}
+          description={t('mailTab.emptyDescription')}
         />
         <ComposeForm caseId={caseId} contacts={newContactOptions} resources={resources} defaultSubject="" />
       </div>
@@ -52,7 +55,7 @@ export function MailTab({
         {newContactOptions.length > 0 ? (
           <TabsTrigger value="new">
             <Plus size={14} weight="light" />
-            New
+            {t('mailTab.newTab')}
           </TabsTrigger>
         ) : null}
       </TabsList>

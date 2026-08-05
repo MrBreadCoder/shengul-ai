@@ -3,12 +3,14 @@
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { Warning } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export default function LoginPage(): React.ReactElement {
+  const t = useTranslations('auth')
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,7 +25,7 @@ export default function LoginPage(): React.ReactElement {
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
     if (signInError) {
       // Deliberately does not distinguish unknown email from wrong password.
-      setError('That email and password combination did not work.')
+      setError(t('signInError'))
       setIsSubmitting(false)
       return
     }
@@ -35,12 +37,12 @@ export default function LoginPage(): React.ReactElement {
     <main className="grid min-h-[100dvh] place-items-center px-4 py-16">
       <div className="w-full max-w-[360px]">
         <div className="flex items-center">
-          <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
+          <span className="text-sm font-semibold tracking-tight">{t('brand')}</span>
         </div>
 
-        <h1 className="mt-8 text-xl font-semibold tracking-tight">Sign in</h1>
+        <h1 className="mt-8 text-xl font-semibold tracking-tight">{t('signInTitle')}</h1>
         <p className="text-muted-foreground mt-1.5 text-sm">
-          Your outreach pipeline, mail and case knowledge.
+          {t('signInSubtitle')}
         </p>
 
         {/*
@@ -52,7 +54,7 @@ export default function LoginPage(): React.ReactElement {
         <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4" noValidate={false}>
           <div className="flex flex-col gap-2">
             <Label htmlFor="email" className="text-xs">
-              Email
+              {t('emailLabel')}
             </Label>
             <Input
               id="email"
@@ -67,7 +69,7 @@ export default function LoginPage(): React.ReactElement {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="password" className="text-xs">
-              Password
+              {t('passwordLabel')}
             </Label>
             <Input
               id="password"
@@ -91,7 +93,7 @@ export default function LoginPage(): React.ReactElement {
           ) : null}
 
           <Button type="submit" disabled={isSubmitting} className="mt-1 w-full">
-            {isSubmitting ? 'Signing in…' : 'Sign in'}
+            {isSubmitting ? t('signingIn') : t('signInButton')}
           </Button>
         </form>
       </div>

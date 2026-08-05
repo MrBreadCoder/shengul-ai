@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import type { AppUser } from '@/lib/db/app-users'
 import { canManageClient, canManageOwnRow } from './can-manage-client'
 
-const operator: AppUser = { id: 'op1', role: 'operator', client_id: null, created_at: '2026-01-01T00:00:00Z' }
-const client: AppUser = { id: 'u1', role: 'client', client_id: 'c1', created_at: '2026-01-01T00:00:00Z' }
-const otherClient: AppUser = { id: 'u2', role: 'client', client_id: 'c2', created_at: '2026-01-01T00:00:00Z' }
+const operator: AppUser = { id: 'op1', role: 'operator', client_id: null, locale: null, created_at: '2026-01-01T00:00:00Z' }
+const client: AppUser = { id: 'u1', role: 'client', client_id: 'c1', locale: null, created_at: '2026-01-01T00:00:00Z' }
+const otherClient: AppUser = { id: 'u2', role: 'client', client_id: 'c2', locale: null, created_at: '2026-01-01T00:00:00Z' }
 
 describe('canManageClient', () => {
   it('should allow an operator for any client', () => {

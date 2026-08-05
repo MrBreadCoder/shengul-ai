@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Globe } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,6 +28,8 @@ interface EditDomainDialogProps {
 // CompanyMark, so an empty submission is valid — it clears the field rather
 // than failing validation.
 export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogProps): React.ReactElement {
+  const t = useTranslations('clients')
+  const tCommon = useTranslations('common')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [domain, setDomain] = useState(currentDomain ?? '')
@@ -46,17 +49,17 @@ export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogPr
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'Could not update the website.'
+            : t('editDomainDialog.updateFailed')
         setState({ status: 'error', message })
-        toast.error('Update failed', { description: message })
+        toast.error(t('editDomainDialog.updateFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
       setOpen(false)
-      toast.success('Website updated')
+      toast.success(t('editDomainDialog.updatedToast'))
       router.refresh()
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('editDomainDialog.networkError') })
     }
   }
 
@@ -69,25 +72,25 @@ export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogPr
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" aria-label="Edit website">
+        <Button type="button" variant="ghost" size="sm" aria-label={t('editDomainDialog.trigger')}>
           <Globe size={14} weight="light" />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Website</DialogTitle>
+          <DialogTitle>{t('editDomainDialog.title')}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={onSubmit}
           // Declarative WebMCP: an agent may fill this in, but the operator
           // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
           toolname="setClientWebsite"
-          tooldescription="Records the client's own website, used to auto-fetch its logo from the site favicon. Submitting it empty clears the field."
+          tooldescription={t('editDomainDialog.toolDescription')}
           className="flex flex-col gap-4"
         >
           <div className="flex flex-col gap-2">
             <Label htmlFor="clientDomain" className="text-xs">
-              Domain
+              {t('editDomainDialog.domainLabel')}
             </Label>
             <Input
               id="clientDomain"
@@ -95,11 +98,9 @@ export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogPr
               value={domain}
               onChange={(event) => setDomain(event.target.value)}
               placeholder="acme.com"
-              toolparamdescription="The client's bare domain, without a scheme or path — for example acme.com. Optional; leave blank to clear it."
+              toolparamdescription={t('editDomainDialog.domainToolParamDescription')}
             />
-            <p className="text-faint text-[11px]">
-              Used to auto-fetch a logo from the site&apos;s favicon when no logo is uploaded. Leave blank to clear it.
-            </p>
+            <p className="text-faint text-[11px]">{t('editDomainDialog.domainHint')}</p>
           </div>
           {state.status === 'error' ? (
             <p role="alert" className="text-destructive text-xs">
@@ -108,7 +109,7 @@ export function EditDomainDialog({ clientId, currentDomain }: EditDomainDialogPr
           ) : null}
           <DialogFooter>
             <Button type="submit" size="sm" disabled={state.status === 'submitting'}>
-              {state.status === 'submitting' ? 'Saving…' : 'Save'}
+              {state.status === 'submitting' ? tCommon('saving') : tCommon('save')}
             </Button>
           </DialogFooter>
         </form>

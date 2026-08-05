@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 import { FollowupDelaysEditor } from '@/components/followup-delays-editor'
 import { Button } from '@/components/ui/button'
 import { updateFollowupCadence } from './followup-cadence-actions'
@@ -14,6 +15,7 @@ function arraysEqual(a: readonly number[], b: readonly number[]): boolean {
 }
 
 export function FollowupCadenceSection({ initialDelaysDays }: FollowupCadenceSectionProps): React.ReactElement {
+  const t = useTranslations('settings')
   const [delaysDays, setDelaysDays] = useState<number[]>([...initialDelaysDays])
   const [savedDelaysDays, setSavedDelaysDays] = useState<number[]>([...initialDelaysDays])
   // Bumped on Reset to force FollowupDelaysEditor to remount — its internal
@@ -35,7 +37,7 @@ export function FollowupCadenceSection({ initialDelaysDays }: FollowupCadenceSec
         setSavedDelaysDays([...delaysDays])
         setShowSaved(true)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save that change. Please try again.')
+        setError(err instanceof Error ? err.message : t('followupCadenceSaveFailed'))
       }
     })
   }
@@ -48,10 +50,7 @@ export function FollowupCadenceSection({ initialDelaysDays }: FollowupCadenceSec
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-[12px]">
-        Applies to new contacts going forward — an already-running follow-up sequence for a contact keeps its
-        cadence unless you edit that contact directly, from its case page.
-      </p>
+      <p className="text-muted-foreground text-[12px]">{t('followupCadenceHint')}</p>
       <FollowupDelaysEditor
         key={resetVersion}
         idPrefix="client-default"
@@ -61,14 +60,14 @@ export function FollowupCadenceSection({ initialDelaysDays }: FollowupCadenceSec
       />
       <div className="flex items-center gap-2">
         <Button type="button" size="sm" disabled={isPending || !isDirty} onClick={onSave}>
-          {isPending ? 'Saving…' : 'Save changes'}
+          {isPending ? t('followupCadenceSaving') : t('followupCadenceSaveChanges')}
         </Button>
         {isDirty ? (
           <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={onReset}>
-            Reset
+            {t('followupCadenceReset')}
           </Button>
         ) : null}
-        {showSaved && !isDirty ? <span className="text-faint text-[11px]">Saved</span> : null}
+        {showSaved && !isDirty ? <span className="text-faint text-[11px]">{t('followupCadenceSaved')}</span> : null}
       </div>
       {error ? (
         <p role="alert" className="text-destructive text-[12px]">

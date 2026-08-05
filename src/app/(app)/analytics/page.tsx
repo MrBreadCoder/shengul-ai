@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { getTranslations } from 'next-intl/server'
 import { PageHeader } from '@/components/page-header'
 import { AnalyticsView } from './analytics-view'
 import { RealtimeRefresher } from './realtime-refresher'
@@ -12,16 +13,17 @@ interface AnalyticsPageProps {
 }
 
 export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps): Promise<React.ReactElement> {
+  const t = await getTranslations('analytics')
   return (
     <div className="flex flex-col gap-8">
       <RealtimeRefresher />
       <PageHeader
-        title="Analytics"
-        description="Numbers recompute live as the pipeline runs."
+        title={t('title')}
+        description={t('description')}
         actions={
           <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
             <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
-            Live
+            {t('live')}
           </span>
         }
       />

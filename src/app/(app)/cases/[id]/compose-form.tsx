@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { PaperPlaneTilt } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -26,11 +27,11 @@ interface ComposeFormProps {
 
 // Maps the codes sendManualEmail's result can report onto something a client
 // can act on. Anything else is a bug, not a state they can fix.
-function messageForCode(code: string): string {
-  if (code === 'FORBIDDEN') return 'That address is on your suppression list, so nothing was sent.'
-  if (code === 'RATE_LIMITED') return 'No healthy mailbox is available right now. Check Settings.'
-  if (code === 'VALIDATION_ERROR') return 'Check the recipient, the subject and the attachments, then try again.'
-  return 'Could not send that email. Try again.'
+function messageForCode(t: ReturnType<typeof useTranslations<'cases'>>, code: string): string {
+  if (code === 'FORBIDDEN') return t('composeForm.errorForbidden')
+  if (code === 'RATE_LIMITED') return t('composeForm.errorRateLimited')
+  if (code === 'VALIDATION_ERROR') return t('composeForm.errorValidation')
+  return t('composeForm.errorGeneric')
 }
 
 export function ComposeForm({
@@ -39,6 +40,7 @@ export function ComposeForm({
   resources,
   defaultSubject,
 }: ComposeFormProps): React.ReactElement {
+  const t = useTranslations('cases')
   const [leadId, setLeadId] = useState<string>(contacts[0]?.id ?? '')
   const [subject, setSubject] = useState(defaultSubject)
   const [body, setBody] = useState('')
@@ -49,7 +51,7 @@ export function ComposeForm({
   if (contacts.length === 0) {
     return (
       <p className="border-hairline text-muted-foreground rounded-lg border border-dashed px-4 py-5 text-center text-sm">
-        No contact on this case has a verified address yet, so there is nobody to write to.
+        {t('composeForm.noVerifiedContact')}
       </p>
     )
   }
@@ -62,11 +64,11 @@ export function ComposeForm({
     startTransition(async () => {
       const result: SendManualEmailResult = await sendManualEmail(formData)
       if (!result.ok) {
-        setError(messageForCode(result.code))
+        setError(messageForCode(t, result.code))
         return
       }
       const recipient = contacts.find((contact) => contact.id === leadId)
-      setSentTo(recipient?.email ?? 'the contact')
+      setSentTo(recipient?.email ?? t('composeForm.theContact'))
       setBody('')
     })
   }
@@ -75,7 +77,7 @@ export function ComposeForm({
     <form action={submit} className="border-hairline bg-surface flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex min-w-56 flex-col gap-1.5">
-          <Label htmlFor={contacts.length > 1 ? 'compose-recipient' : undefined}>To</Label>
+          <Label htmlFor={contacts.length > 1 ? 'compose-recipient' : undefined}>{t('composeForm.toLabel')}</Label>
           {contacts.length === 1 ? (
             // length check above guarantees index 0 exists
             <p className="text-sm font-medium">
@@ -97,7 +99,7 @@ export function ComposeForm({
           )}
         </div>
         <div className="flex min-w-64 flex-1 flex-col gap-1.5">
-          <Label htmlFor="compose-subject">Subject</Label>
+          <Label htmlFor="compose-subject">{t('composeForm.subjectLabel')}</Label>
           <Input
             id="compose-subject"
             name="subject"
@@ -113,11 +115,11 @@ export function ComposeForm({
         name="body"
         value={body}
         onChange={(event) => setBody(event.target.value)}
-        placeholder="Write your message. It goes out from your own mailbox, in your own words."
+        placeholder={t('composeForm.bodyPlaceholder')}
         rows={8}
         maxLength={MAX_BODY_CHARS}
         required
-        aria-label="Message body"
+        aria-label={t('composeForm.bodyLabel')}
       />
 
       <ResourcePicker resources={resources} name="resourceIds" />
@@ -129,7 +131,7 @@ export function ComposeForm({
       ) : null}
       {sentTo ? (
         <p role="status" className="text-[12px] text-[var(--status-won)]">
-          Sent to {sentTo}. Follow-ups for this contact will adjust automatically.
+          {t('composeForm.sentTo', { recipient: sentTo })}
         </p>
       ) : null}
 
@@ -140,7 +142,7 @@ export function ComposeForm({
         disabled={isPending || subject.trim().length === 0 || body.trim().length === 0}
       >
         <PaperPlaneTilt size={13} weight="light" />
-        {isPending ? 'Sending…' : 'Send'}
+        {isPending ? t('composeForm.sending') : t('composeForm.sendButton')}
       </Button>
     </form>
   )

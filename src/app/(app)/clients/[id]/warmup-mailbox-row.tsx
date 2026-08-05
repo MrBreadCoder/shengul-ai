@@ -2,13 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { getMailboxWarmthStatus, type WarmupProfile } from '@/lib/mailbox/warmup'
 
-const WARMUP_LABEL: Record<WarmupProfile, string> = {
-  standard: 'Warm up — raise the cap daily',
-  slow: 'Warm up slowly — raise the cap every 2 days',
-  none: 'Already warm — no ramp',
-}
+const WARMUP_PROFILES: readonly WarmupProfile[] = ['standard', 'slow', 'none']
 
 interface WarmupMailboxRowProps {
   id: string
@@ -31,6 +28,7 @@ interface WarmupPatchBody {
 }
 
 export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -47,7 +45,9 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
     now: new Date(),
   })
   const statusLabel =
-    status.kind === 'ramping' ? `Ramping · day ${status.dayNumber} · cap ${status.currentCap}` : 'Already warm'
+    status.kind === 'ramping'
+      ? t('warmupMailboxRow.ramping', { day: status.dayNumber, cap: status.currentCap })
+      : t('warmupMailboxRow.alreadyWarm')
 
   async function patch(body: WarmupPatchBody): Promise<void> {
     if (isBusy) return
@@ -60,12 +60,12 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
         body: JSON.stringify(body),
       })
       if (!response.ok) {
-        setError('Could not save that change.')
+        setError(t('warmupMailboxRow.saveFailed'))
         return
       }
       startTransition(() => router.refresh())
     } catch {
-      setError('network')
+      setError(t('warmupMailboxRow.networkError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -84,31 +84,29 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium">{props.emailAddress}</p>
         <p className="text-faint truncate text-[11px]">
-          <span className="tnum">
-            {props.sentToday}/{props.dailyCap} today
-          </span>{' '}
+          <span className="tnum">{t('warmupMailboxRow.sentToday', { sentToday: props.sentToday, dailyCap: props.dailyCap })}</span>{' '}
           · {statusLabel}
         </p>
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="text-faint text-[10px]">Profile</span>
+        <span className="text-faint text-[10px]">{t('warmupMailboxRow.profileLabel')}</span>
         <select
           value={props.profile}
           disabled={isBusy}
           onChange={(event) => void patch({ profile: event.target.value as WarmupProfile })}
           className="border-hairline bg-surface rounded-md border px-2 py-1 text-[11px]"
         >
-          {(Object.keys(WARMUP_LABEL) as WarmupProfile[]).map((profile) => (
+          {WARMUP_PROFILES.map((profile) => (
             <option key={profile} value={profile}>
-              {WARMUP_LABEL[profile]}
+              {t(`warmupMailboxRow.warmupOption.${profile}` as 'warmupMailboxRow.warmupOption.standard')}
             </option>
           ))}
         </select>
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-faint text-[10px]">Start cap</span>
+        <span className="text-faint text-[10px]">{t('warmupMailboxRow.startCapLabel')}</span>
         <input
           type="number"
           min={1}
@@ -121,7 +119,7 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-faint text-[10px]">Increment</span>
+        <span className="text-faint text-[10px]">{t('warmupMailboxRow.incrementLabel')}</span>
         <input
           type="number"
           min={1}
@@ -134,7 +132,7 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-faint text-[10px]">Target cap</span>
+        <span className="text-faint text-[10px]">{t('warmupMailboxRow.targetCapLabel')}</span>
         <input
           type="number"
           min={1}
@@ -147,7 +145,7 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-faint text-[10px]">Already-warm cap</span>
+        <span className="text-faint text-[10px]">{t('warmupMailboxRow.alreadyWarmCapLabel')}</span>
         <input
           type="number"
           min={1}

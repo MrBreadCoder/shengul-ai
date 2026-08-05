@@ -2,26 +2,28 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 
 interface KnowledgeTab {
   readonly href: string
-  readonly label: string
+  readonly labelKey: 'facts' | 'sources' | 'resources'
   /** `/knowledge` must match exactly, or it stays lit on every sub-route. */
   readonly exact?: boolean
 }
 
 const TABS: readonly KnowledgeTab[] = [
-  { href: '/knowledge', label: 'Facts', exact: true },
-  { href: '/knowledge/sources', label: 'Sources' },
-  { href: '/knowledge/resources', label: 'Resources' },
+  { href: '/knowledge', labelKey: 'facts', exact: true },
+  { href: '/knowledge/sources', labelKey: 'sources' },
+  { href: '/knowledge/resources', labelKey: 'resources' },
 ]
 
 export function KnowledgeTabs(): React.ReactElement {
   const pathname = usePathname()
+  const t = useTranslations('knowledge')
 
   return (
-    <nav aria-label="Knowledge sections" className="border-hairline flex items-center gap-1 border-b pb-2">
+    <nav aria-label={t('tabs.ariaLabel')} className="border-hairline flex items-center gap-1 border-b pb-2">
       {TABS.map((tab) => {
         const isActive = tab.exact ? pathname === tab.href : pathname.startsWith(tab.href)
         return (
@@ -37,7 +39,7 @@ export function KnowledgeTabs(): React.ReactElement {
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
             )}
           >
-            {tab.label}
+            {t(`tabs.${tab.labelKey}`)}
           </Link>
         )
       })}

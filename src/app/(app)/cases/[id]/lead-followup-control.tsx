@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { PencilSimple } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { FollowupDelaysEditor } from '@/components/followup-delays-editor'
 import { Button } from '@/components/ui/button'
 import { formatFollowupStatus } from '@/lib/format'
@@ -23,6 +24,8 @@ export function LeadFollowupControl({
   currentStep,
   countdownLabel,
 }: LeadFollowupControlProps): React.ReactElement {
+  const t = useTranslations('cases')
+  const tCommon = useTranslations('common')
   const [isEditing, setIsEditing] = useState(false)
   const [draftDelays, setDraftDelays] = useState<number[]>([...delaysDays])
   const [isSaving, startTransition] = useTransition()
@@ -44,7 +47,7 @@ export function LeadFollowupControl({
         await updateLeadFollowupDelays(formData)
         setIsEditing(false)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save that change. Please try again.')
+        setError(err instanceof Error ? err.message : t('leadFollowupControl.saveFailed'))
       }
     })
   }
@@ -56,7 +59,7 @@ export function LeadFollowupControl({
         <button
           type="button"
           onClick={onOpen}
-          aria-label="Edit follow-up cadence for this contact"
+          aria-label={t('leadFollowupControl.editLabel')}
           className="text-faint hover:text-foreground transition-colors duration-200"
         >
           <PencilSimple size={12} weight="light" />
@@ -80,10 +83,10 @@ export function LeadFollowupControl({
       ) : null}
       <div className="flex items-center gap-2">
         <Button type="button" size="sm" disabled={isSaving} onClick={onSave}>
-          {isSaving ? 'Saving…' : 'Save'}
+          {isSaving ? tCommon('saving') : tCommon('save')}
         </Button>
         <Button type="button" variant="ghost" size="sm" disabled={isSaving} onClick={() => setIsEditing(false)}>
-          Cancel
+          {tCommon('cancel')}
         </Button>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Prohibit } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -18,6 +19,8 @@ interface StopLeadButtonProps {
 // permanently for this client and kills an in-flight sequence), so it follows
 // the same confirm pattern as the client pause/archive controls.
 export function StopLeadButton({ leadId, caseId, fullName }: StopLeadButtonProps): React.ReactElement {
+  const t = useTranslations('cases')
+  const tCommon = useTranslations('common')
   const [isOpen, setIsOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -32,7 +35,7 @@ export function StopLeadButton({ leadId, caseId, fullName }: StopLeadButtonProps
         await stopLead(data)
         setIsOpen(false)
       } catch {
-        setError('Could not stop this contact. Try again.')
+        setError(t('stopLead.error'))
       }
     })
   }
@@ -40,17 +43,14 @@ export function StopLeadButton({ leadId, caseId, fullName }: StopLeadButtonProps
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" aria-label={`Stop outreach to ${fullName}`}>
+        <Button type="button" variant="ghost" size="sm" aria-label={t('stopLead.trigger', { fullName })}>
           <Prohibit size={13} weight="light" />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Stop outreach to {fullName}?</DialogTitle>
-          <DialogDescription>
-            Their address is added to your suppression list, any running follow-up sequence stops, and the
-            contact is parked. Nothing is deleted, but no further email is ever sent to them.
-          </DialogDescription>
+          <DialogTitle>{t('stopLead.title', { fullName })}</DialogTitle>
+          <DialogDescription>{t('stopLead.description')}</DialogDescription>
         </DialogHeader>
         {error ? (
           <p role="alert" className="text-destructive text-[12px]">
@@ -59,10 +59,10 @@ export function StopLeadButton({ leadId, caseId, fullName }: StopLeadButtonProps
         ) : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isPending}>
-            Cancel
+            {tCommon('cancel')}
           </Button>
           <Button type="button" variant="destructive" onClick={confirm} disabled={isPending}>
-            {isPending ? 'Stopping…' : 'Yes, stop outreach'}
+            {isPending ? t('stopLead.stopping') : t('stopLead.confirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

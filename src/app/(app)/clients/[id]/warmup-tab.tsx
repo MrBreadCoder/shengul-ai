@@ -1,4 +1,5 @@
 import { Thermometer } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { EmptyState } from '@/components/empty-state'
 import type { MailboxRow } from '@/lib/db/mailboxes'
 import { WarmupMailboxRow } from './warmup-mailbox-row'
@@ -7,13 +8,15 @@ interface WarmupTabProps {
   mailboxes: readonly MailboxRow[]
 }
 
-export function WarmupTab({ mailboxes }: WarmupTabProps): React.ReactElement {
+export async function WarmupTab({ mailboxes }: WarmupTabProps): Promise<React.ReactElement> {
+  const t = await getTranslations('clients')
+
   if (mailboxes.length === 0) {
     return (
       <EmptyState
         icon={Thermometer}
-        title="No mailboxes connected"
-        description="Connect a mailbox for this client from their own /settings page, then configure its warmup here."
+        title={t('warmupTab.emptyTitle')}
+        description={t('warmupTab.emptyDescription')}
       />
     )
   }

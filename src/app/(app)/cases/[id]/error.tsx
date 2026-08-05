@@ -1,12 +1,14 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { ErrorPanel } from '@/components/error-panel'
 
 export default function Error({ reset }: { error: Error; reset: () => void }): React.ReactElement {
+  const t = useTranslations('cases')
   return (
     <ErrorPanel
-      title="Case unavailable"
-      description="This case could not be loaded. It may have been reassigned, or the database is briefly unreachable."
+      title={t('errorTitle')}
+      description={t('errorDescription')}
       reset={reset}
     />
   )

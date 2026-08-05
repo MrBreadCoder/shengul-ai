@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -35,6 +36,7 @@ export function DeleteClientDialog({
   campaignCount,
   userCount,
 }: DeleteClientDialogProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -56,16 +58,16 @@ export function DeleteClientDialog({
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'Could not delete the client.'
+            : t('deleteDialog.deleteFailed')
         setState({ status: 'error', message })
-        toast.error('Delete failed', { description: message })
+        toast.error(t('deleteDialog.deleteFailedToast'), { description: message })
         return
       }
-      toast.success(`${clientName} deleted`)
+      toast.success(t('deleteDialog.deletedToast', { clientName }))
       router.push('/clients')
       router.refresh()
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('deleteDialog.networkError') })
     }
   }
 
@@ -83,24 +85,25 @@ export function DeleteClientDialog({
       <DialogTrigger asChild>
         <Button type="button" variant="destructive" size="sm">
           <Trash size={13} weight="light" />
-          Delete permanently
+          {t('deleteDialog.trigger')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {clientName} permanently</DialogTitle>
+          <DialogTitle>{t('deleteDialog.title', { clientName })}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           <p className="text-muted-foreground text-sm">
-            This deletes {campaignCount} campaign{campaignCount === 1 ? '' : 's'} and every case, lead, email, and
-            sequence under {campaignCount === 1 ? 'it' : 'them'}, plus {userCount} login
-            {userCount === 1 ? '' : 's'} for this client. There is no undo.
+            {t('deleteDialog.warning', { campaignCount, userCount })}
           </p>
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="confirmName" className="text-xs">
-              Type <span className="font-mono">{clientName}</span> to confirm
+              {t.rich('deleteDialog.confirmLabel', {
+                name: clientName,
+                bold: (chunks) => <span className="font-mono">{chunks}</span>,
+              })}
             </Label>
             <Input
               id="confirmName"
@@ -119,7 +122,7 @@ export function DeleteClientDialog({
 
         <DialogFooter>
           <Button type="button" variant="destructive" size="sm" disabled={!isArmed || state.status === 'submitting'} onClick={onConfirm}>
-            {state.status === 'submitting' ? 'Deleting…' : 'Delete forever'}
+            {state.status === 'submitting' ? t('deleteDialog.deleting') : t('deleteDialog.deleteForever')}
           </Button>
         </DialogFooter>
       </DialogContent>

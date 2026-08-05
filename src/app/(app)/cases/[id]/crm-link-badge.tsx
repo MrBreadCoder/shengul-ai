@@ -1,4 +1,5 @@
 import { ArrowSquareOut, WarningCircle } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 
 interface CrmLinkBadgeProps {
   provider: string
@@ -10,12 +11,14 @@ function formatProvider(provider: string): string {
   return provider === 'hubspot' ? 'HubSpot' : 'Pipedrive'
 }
 
-export function CrmLinkBadge({ provider, dealUrl, syncError }: CrmLinkBadgeProps): React.ReactElement | null {
+export async function CrmLinkBadge({ provider, dealUrl, syncError }: CrmLinkBadgeProps): Promise<React.ReactElement | null> {
+  const t = await getTranslations('cases')
+
   if (syncError) {
     return (
       <span className="text-faint inline-flex items-center gap-1.5 text-[12px]">
         <WarningCircle size={13} weight="light" />
-        {formatProvider(provider)} sync failed: {syncError}
+        {t('crmLinkBadge.syncFailed', { provider: formatProvider(provider), error: syncError })}
       </span>
     )
   }
@@ -30,7 +33,7 @@ export function CrmLinkBadge({ provider, dealUrl, syncError }: CrmLinkBadgeProps
       rel="noreferrer"
       className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-[12px] transition-colors"
     >
-      Synced to {formatProvider(provider)}
+      {t('crmLinkBadge.synced', { provider: formatProvider(provider) })}
       <ArrowSquareOut size={13} weight="light" />
     </a>
   )

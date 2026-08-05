@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { CheckCircle } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { createServerClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { listDraftEmailsForClient } from '@/lib/db/emails'
@@ -25,6 +26,7 @@ const RESOURCES_PER_CLIENT = 200
 export default async function InboxPage(): Promise<React.ReactElement> {
   await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('inbox')
   const [drafts, knowledgeRequests, cases] = await Promise.all([
     listDraftEmailsForClient(supabase),
     listOpenKnowledgeRequestsForClient(supabase),
@@ -82,12 +84,12 @@ export default async function InboxPage(): Promise<React.ReactElement> {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Inbox"
-        description="The only two things the agent cannot do alone: send a first email, and answer a question it has no facts for."
+        title={t('title')}
+        description={t('description')}
         actions={
           total > 0 ? (
             <span className="text-muted-foreground tnum text-sm">
-              {total} awaiting you
+              {t('awaitingCount', { count: total })}
             </span>
           ) : null
         }
@@ -96,8 +98,8 @@ export default async function InboxPage(): Promise<React.ReactElement> {
       {total === 0 ? (
         <EmptyState
           icon={CheckCircle}
-          title="Nothing needs your attention"
-          description="Drafts awaiting approval and questions the agent cannot answer will collect here. It is running on its own until then."
+          title={t('emptyTitle')}
+          description={t('emptyDescription')}
         />
       ) : (
         <div className="flex flex-col gap-10">
@@ -105,8 +107,8 @@ export default async function InboxPage(): Promise<React.ReactElement> {
               an unsent first touch. */}
           {knowledgeRequests.length > 0 ? (
             <Section
-              title="Questions the agent cannot answer"
-              aside={`${knowledgeRequests.length} open`}
+              title={t('questionsSectionTitle')}
+              aside={t('questionsOpenAside', { count: knowledgeRequests.length })}
             >
               <div className="flex flex-col gap-3">
                 {knowledgeRequests.map((request) => (
@@ -116,7 +118,7 @@ export default async function InboxPage(): Promise<React.ReactElement> {
                     caseId={request.case_id}
                     clientId={request.client_id}
                     question={request.question}
-                    companyName={companyByCaseId.get(request.case_id) ?? 'Unknown company'}
+                    companyName={companyByCaseId.get(request.case_id) ?? t('unknownCompany')}
                     age={formatRelative(request.created_at, now)}
                     resources={resourcesByClientId.get(request.client_id) ?? []}
                   />
@@ -126,17 +128,17 @@ export default async function InboxPage(): Promise<React.ReactElement> {
           ) : null}
 
           {drafts.length > 0 ? (
-            <Section title="Drafts awaiting approval" aside={`${drafts.length} queued`}>
+            <Section title={t('draftsSectionTitle')} aside={t('draftsQueuedAside', { count: drafts.length })}>
               <div className="flex flex-col gap-3">
                 {drafts.map((draft) => (
                   <DraftRow
                     key={draft.id}
                     emailId={draft.id}
                     caseId={draft.case_id}
-                    subject={draft.subject ?? '(no subject)'}
+                    subject={draft.subject ?? t('noSubjectPlaceholder')}
                     body={draft.body ?? ''}
                     companyName={
-                      (draft.case_id && companyByCaseId.get(draft.case_id)) || 'Unknown company'
+                      (draft.case_id && companyByCaseId.get(draft.case_id)) || t('unknownCompany')
                     }
                     age={formatRelative(draft.created_at, now)}
                     attachments={draftAttachments(draft.id)}

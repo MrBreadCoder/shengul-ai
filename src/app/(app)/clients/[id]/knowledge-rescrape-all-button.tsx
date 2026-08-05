@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { ArrowsClockwise } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 
 interface KnowledgeRescrapeAllButtonProps {
@@ -14,6 +15,7 @@ interface KnowledgeRescrapeAllButtonProps {
 type ActionState = { status: 'idle' } | { status: 'submitting' }
 
 export function KnowledgeRescrapeAllButton({ clientId, websitePageCount }: KnowledgeRescrapeAllButtonProps): React.ReactElement | null {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [state, setState] = useState<ActionState>({ status: 'idle' })
 
@@ -22,19 +24,19 @@ export function KnowledgeRescrapeAllButton({ clientId, websitePageCount }: Knowl
   if (websitePageCount === 0) return null
 
   async function onRescrapeAll(): Promise<void> {
-    if (!window.confirm(`Re-scrape all ${websitePageCount} web page source(s) for this client?`)) return
+    if (!window.confirm(t('rescrapeAll.confirm', { count: websitePageCount }))) return
     setState({ status: 'submitting' })
     const res = await fetch(`/api/clients/${clientId}/knowledge/rescrape-all`, { method: 'POST' })
     setState({ status: 'idle' })
     if (!res.ok) {
-      toast.error('Could not queue re-scrapes')
+      toast.error(t('rescrapeAll.queueFailed'))
       return
     }
     const json = (await res.json()) as { queued: number; failed: number }
     if (json.failed > 0) {
-      toast.warning(`Queued ${json.queued} re-scrape(s), ${json.failed} failed to queue`)
+      toast.warning(t('rescrapeAll.queuedWithFailures', { queued: json.queued, failed: json.failed }))
     } else {
-      toast.success(`Queued ${json.queued} re-scrape(s)`)
+      toast.success(t('rescrapeAll.queued', { queued: json.queued }))
     }
     router.refresh()
   }
@@ -48,7 +50,7 @@ export function KnowledgeRescrapeAllButton({ clientId, websitePageCount }: Knowl
       onClick={() => void onRescrapeAll()}
     >
       <ArrowsClockwise size={14} weight="light" />
-      Re-scrape all
+      {t('rescrapeAll.trigger')}
     </Button>
   )
 }

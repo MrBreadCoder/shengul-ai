@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Plus } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -32,25 +33,25 @@ function splitCsv(value: FormDataEntryValue | null): string[] {
     .filter(Boolean)
 }
 
-const SENIORITY_LABELS: Record<(typeof apolloPersonSeniorities)[number], string> = {
-  owner: 'Owner',
-  founder: 'Founder',
-  c_suite: 'C-Suite',
-  partner: 'Partner',
-  vp: 'VP',
-  head: 'Head',
-  director: 'Director',
-  manager: 'Manager',
-  senior: 'Senior',
-  entry: 'Entry',
-  intern: 'Intern',
+const SENIORITY_KEY: Record<(typeof apolloPersonSeniorities)[number], string> = {
+  owner: 'seniority.owner',
+  founder: 'seniority.founder',
+  c_suite: 'seniority.c_suite',
+  partner: 'seniority.partner',
+  vp: 'seniority.vp',
+  head: 'seniority.head',
+  director: 'seniority.director',
+  manager: 'seniority.manager',
+  senior: 'seniority.senior',
+  entry: 'seniority.entry',
+  intern: 'seniority.intern',
 }
 
-const CONTACT_EMAIL_STATUS_LABELS: Record<(typeof apolloContactEmailStatuses)[number], string> = {
-  verified: 'Verified',
-  unverified: 'Unverified',
-  'likely to engage': 'Likely to engage',
-  unavailable: 'Unavailable',
+const CONTACT_EMAIL_STATUS_KEY: Record<(typeof apolloContactEmailStatuses)[number], string> = {
+  verified: 'contactEmailStatus.verified',
+  unverified: 'contactEmailStatus.unverified',
+  'likely to engage': 'contactEmailStatus.likelyToEngage',
+  unavailable: 'contactEmailStatus.unavailable',
 }
 
 function getAllStrings(formData: FormData, name: string): string[] {
@@ -79,6 +80,7 @@ function Field({ id, label, hint, children }: FieldProps): React.ReactElement {
 type NewCampaignFormProps = { clients: ClientOption[] } | { fixedClientId: string; fixedClientName: string }
 
 export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement {
+  const t = useTranslations('campaigns')
   const router = useRouter()
   const [state, setState] = useState<SubmitState>({ status: 'idle' })
   const isFixed = 'fixedClientId' in props
@@ -89,7 +91,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
 
   async function onSubmit(formData: FormData): Promise<void> {
     if (!clientId) {
-      setState({ status: 'error', message: 'Choose a client first.' })
+      setState({ status: 'error', message: t('newCampaignForm.chooseClientFirst') })
       return
     }
     setState({ status: 'submitting' })
@@ -125,19 +127,19 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'The server rejected the campaign.'
+            : t('newCampaignForm.rejected')
         setState({ status: 'error', message })
-        toast.error('Could not create campaign', { description: message })
+        toast.error(t('newCampaignForm.createFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
-      toast.success('Campaign created')
+      toast.success(t('newCampaignForm.createdToast'))
       // Server Components hold the campaign list, so refresh rather than reload.
       router.refresh()
     } catch {
-      const message = 'Network request failed. Check your connection and retry.'
+      const message = t('newCampaignForm.networkError')
       setState({ status: 'error', message })
-      toast.error('Could not create campaign', { description: message })
+      toast.error(t('newCampaignForm.createFailedToast'), { description: message })
     }
   }
 
@@ -149,18 +151,18 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       // Declarative WebMCP: an agent may fill this in, but the operator presses
       // the button. No `toolautosubmit` — see `@/types/webmcp`.
       toolname="createCampaign"
-      tooldescription="Sets up an outreach campaign: which client it runs for, what it promises, and the ideal customer profile the daily Apollo discovery run searches against."
+      tooldescription={t('newCampaignForm.toolDescription')}
       className="border-hairline bg-surface flex flex-col gap-5 rounded-lg border p-5"
     >
       <div className="grid gap-5 sm:grid-cols-2">
         {isFixed ? null : (
-          <Field id="clientId" label="Client">
+          <Field id="clientId" label={t('newCampaignForm.clientLabel')}>
             {/* `name` makes Radix's hidden native select a named required field,
                 which is what an agent (and Lighthouse) looks for. The submit
                 handler still reads `clientId` from state. */}
             <Select value={clientId} onValueChange={setClientId} name="clientId" required>
               <SelectTrigger id="clientId" className="w-full">
-                <SelectValue placeholder="Select a client" />
+                <SelectValue placeholder={t('newCampaignForm.clientPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {props.clients.map((client) => (
@@ -173,21 +175,21 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           </Field>
         )}
 
-        <Field id="name" label="Campaign name">
+        <Field id="name" label={t('newCampaignForm.nameLabel')}>
           <Input
             id="name"
             name="name"
             required
             placeholder="Q3 mid-market ops"
-            toolparamdescription="An internal label for this campaign. Never shown to a prospect."
+            toolparamdescription={t('newCampaignForm.nameToolParamDescription')}
           />
         </Field>
       </div>
 
       <Field
         id="valueProp"
-        label="Value proposition"
-        hint="The agent grounds every first email on this. Be specific about the outcome, not the product."
+        label={t('newCampaignForm.valuePropLabel')}
+        hint={t('newCampaignForm.valuePropHint')}
       >
         <Textarea
           id="valueProp"
@@ -196,22 +198,22 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           rows={3}
           placeholder="We cut invoice reconciliation time for finance teams running NetSuite."
           className="resize-y"
-          toolparamdescription="One or two sentences naming the outcome the client delivers, not the product. Every first email is grounded on this, so vague copy produces vague email."
+          toolparamdescription={t('newCampaignForm.valuePropToolParamDescription')}
         />
       </Field>
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <Field id="bookingLink" label="Booking link" hint="Optional. Used on a hot handoff.">
+        <Field id="bookingLink" label={t('newCampaignForm.bookingLinkLabel')} hint={t('newCampaignForm.bookingLinkHint')}>
           <Input
             id="bookingLink"
             name="bookingLink"
             type="url"
             placeholder="https://cal.com/you/30min"
-            toolparamdescription="Optional. The scheduler URL offered when a prospect turns into a real decision. Leave blank to hand those threads straight to the operator instead."
+            toolparamdescription={t('newCampaignForm.bookingLinkToolParamDescription')}
           />
         </Field>
 
-        <Field id="dailyTarget" label="Daily discovery target" hint="Apollo records pulled per day.">
+        <Field id="dailyTarget" label={t('newCampaignForm.dailyTargetLabel')} hint={t('newCampaignForm.dailyTargetHint')}>
           <Input
             id="dailyTarget"
             name="dailyTarget"
@@ -220,48 +222,48 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
             min={1}
             max={100}
             className="tnum"
-            toolparamdescription="How many new people to pull from Apollo each day, 1 to 100. Defaults to 50."
+            toolparamdescription={t('newCampaignForm.dailyTargetToolParamDescription')}
           />
         </Field>
       </div>
 
       <fieldset className="border-hairline flex flex-col gap-5 border-t pt-5">
-        <legend className="sr-only">Ideal customer profile</legend>
-        <p className="text-xs font-medium">Ideal customer profile</p>
+        <legend className="sr-only">{t('newCampaignForm.icpLegend')}</legend>
+        <p className="text-xs font-medium">{t('newCampaignForm.icpLegend')}</p>
 
-        <Field id="personTitles" label="Target titles" hint="Comma-separated.">
+        <Field id="personTitles" label={t('newCampaignForm.personTitlesLabel')} hint={t('newCampaignForm.commaSeparatedHint')}>
           <Input
             id="personTitles"
             name="personTitles"
             placeholder="vp sales, head of revenue, founder"
-            toolparamdescription="Comma-separated job titles to search for. Broad titles find more people; narrow ones find better ones."
+            toolparamdescription={t('newCampaignForm.personTitlesToolParamDescription')}
           />
         </Field>
 
-        <Field id="organizationLocations" label="Company locations" hint="Comma-separated.">
+        <Field id="organizationLocations" label={t('newCampaignForm.organizationLocationsLabel')} hint={t('newCampaignForm.commaSeparatedHint')}>
           <Input
             id="organizationLocations"
             name="organizationLocations"
             placeholder="united states, united kingdom"
-            toolparamdescription="Comma-separated countries or regions the target company is headquartered in."
+            toolparamdescription={t('newCampaignForm.organizationLocationsToolParamDescription')}
           />
         </Field>
 
         <Field
           id="excludeOrganizationLocations"
-          label="Exclude company locations"
-          hint="Comma-separated. Companies headquartered here are skipped."
+          label={t('newCampaignForm.excludeOrganizationLocationsLabel')}
+          hint={t('newCampaignForm.excludeOrganizationLocationsHint')}
         >
           <Input
             id="excludeOrganizationLocations"
             name="excludeOrganizationLocations"
             placeholder="ireland, india"
-            toolparamdescription="Comma-separated countries or regions to skip. Companies headquartered in one of these are never contacted."
+            toolparamdescription={t('newCampaignForm.excludeOrganizationLocationsToolParamDescription')}
           />
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field id="employeeMin" label="Min employees">
+          <Field id="employeeMin" label={t('newCampaignForm.employeeMinLabel')}>
             <Input
               id="employeeMin"
               name="employeeMin"
@@ -269,10 +271,10 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
               min={1}
               placeholder="50"
               className="tnum"
-              toolparamdescription="Smallest headcount to consider. Leave blank for no lower bound."
+              toolparamdescription={t('newCampaignForm.employeeMinToolParamDescription')}
             />
           </Field>
-          <Field id="employeeMax" label="Max employees">
+          <Field id="employeeMax" label={t('newCampaignForm.employeeMaxLabel')}>
             <Input
               id="employeeMax"
               name="employeeMax"
@@ -280,34 +282,34 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
               min={1}
               placeholder="500"
               className="tnum"
-              toolparamdescription="Largest headcount to consider. Leave blank for no upper bound."
+              toolparamdescription={t('newCampaignForm.employeeMaxToolParamDescription')}
             />
           </Field>
         </div>
 
-        <Field id="keywords" label="Keywords" hint="Comma-separated.">
+        <Field id="keywords" label={t('newCampaignForm.keywordsLabel')} hint={t('newCampaignForm.commaSeparatedHint')}>
           <Input
             id="keywords"
             name="keywords"
             placeholder="saas, logistics, fintech"
-            toolparamdescription="Comma-separated industry or market words the target company should match."
+            toolparamdescription={t('newCampaignForm.keywordsToolParamDescription')}
           />
         </Field>
 
         <Field
           id="excludeKeywords"
-          label="Exclude keywords"
-          hint="Comma-separated. Matched against company name and title — Apollo doesn't expose company keyword/industry text at search time, so this filter runs after Apollo returns results, not inside Apollo's own search."
+          label={t('newCampaignForm.excludeKeywordsLabel')}
+          hint={t('newCampaignForm.excludeKeywordsHint')}
         >
           <Input
             id="excludeKeywords"
             name="excludeKeywords"
             placeholder="staffing, agency, recruiting"
-            toolparamdescription="Comma-separated words that disqualify a company. Matched against its name and the person's title after Apollo returns results."
+            toolparamdescription={t('newCampaignForm.excludeKeywordsToolParamDescription')}
           />
         </Field>
 
-        <Field id="personSeniorities" label="Target seniority" hint="Leave all unchecked to search every seniority.">
+        <Field id="personSeniorities" label={t('newCampaignForm.personSenioritiesLabel')} hint={t('newCampaignForm.personSenioritiesHint')}>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {apolloPersonSeniorities.map((value) => (
               <label key={value} htmlFor={`personSeniorities-${value}`} className="flex items-center gap-2 text-xs">
@@ -315,9 +317,9 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
                   id={`personSeniorities-${value}`}
                   name="personSeniorities"
                   value={value}
-                  toolparamdescription="One seniority level to include. Leave all unchecked to search every level Apollo recognizes."
+                  toolparamdescription={t('newCampaignForm.personSenioritiesToolParamDescription')}
                 />
-                {SENIORITY_LABELS[value]}
+                {t(SENIORITY_KEY[value] as 'seniority.owner')}
               </label>
             ))}
           </div>
@@ -325,8 +327,8 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
 
         <Field
           id="contactEmailStatuses"
-          label="Contact email status"
-          hint="Restricts Apollo's own search to contacts already at this status, before a credit is spent revealing them. Leave all unchecked to search every status."
+          label={t('newCampaignForm.contactEmailStatusesLabel')}
+          hint={t('newCampaignForm.contactEmailStatusesHint')}
         >
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {apolloContactEmailStatuses.map((value) => (
@@ -336,9 +338,9 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
                   name="contactEmailStatuses"
                   value={value}
                   defaultChecked={value === 'verified'}
-                  toolparamdescription="One Apollo contact-email-status value to restrict search to. 'Verified' is checked by default. Leave all unchecked to search every status."
+                  toolparamdescription={t('newCampaignForm.contactEmailStatusesToolParamDescription')}
                 />
-                {CONTACT_EMAIL_STATUS_LABELS[value]}
+                {t(CONTACT_EMAIL_STATUS_KEY[value] as 'contactEmailStatus.verified')}
               </label>
             ))}
           </div>
@@ -348,7 +350,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       <div className="border-hairline flex flex-wrap items-center gap-3 border-t pt-5">
         <Button type="submit" size="sm" disabled={isSubmitting}>
           <Plus size={14} weight="bold" />
-          {isSubmitting ? 'Creating…' : 'Create campaign'}
+          {isSubmitting ? t('newCampaignForm.creating') : t('newCampaignForm.createButton')}
         </Button>
         {state.status === 'error' ? (
           <span role="alert" className="text-destructive text-xs">

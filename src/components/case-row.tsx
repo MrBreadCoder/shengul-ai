@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CaretRight, Users } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { CompanyMark } from '@/components/company-mark'
 import { StatusPill } from '@/components/status-dot'
 import { CASE_STATUS } from '@/lib/ui/status'
@@ -34,7 +35,7 @@ interface CaseRowProps {
  * contacts, age — so a long list stays scannable down a single column of
  * company names, with stage carried as a tag rather than by grouping.
  */
-export function CaseRow({
+export async function CaseRow({
   id,
   companyName,
   companyDomain,
@@ -44,7 +45,8 @@ export function CaseRow({
   updatedAt,
   now,
   isMuted = false,
-}: CaseRowProps): React.ReactElement {
+}: CaseRowProps): Promise<React.ReactElement> {
+  const t = await getTranslations('crm')
   const lead = leads[0]
 
   return (
@@ -75,7 +77,7 @@ export function CaseRow({
       <span className="text-faint hidden shrink-0 items-center gap-1.5 text-[11px] lg:flex">
         <Users size={12} weight="light" />
         {leads.length === 0 ? (
-          'No contacts'
+          t('noContacts')
         ) : (
           <span className="max-w-[150px] truncate">
             {leads.length > 1 ? `${lead?.full_name} +${leads.length - 1}` : lead?.full_name}

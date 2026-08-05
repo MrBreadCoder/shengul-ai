@@ -1,4 +1,5 @@
 import { Files } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import type { Database } from '@/types/database'
 import type { KnowledgeSourceRow } from '@/lib/db/client-knowledge'
 import { KNOWLEDGE_SOURCE_STATUS } from '@/lib/ui/status'
@@ -12,11 +13,11 @@ import { KnowledgeSourceActions } from './knowledge-source-actions'
 // mislabelled cell. 'pdf' is the legacy value; 'file' covers pdf/txt/md uploads.
 // 'resource' is the companion row behind a sendable file — filtered out of this
 // list, and labelled here only so the map stays total over the enum.
-const SOURCE_TYPE_LABEL: Record<Database['public']['Enums']['knowledge_source_type'], string> = {
-  website_page: 'Web page',
-  pdf: 'PDF',
-  file: 'File',
-  resource: 'Resource file',
+const SOURCE_TYPE_KEY: Record<Database['public']['Enums']['knowledge_source_type'], string> = {
+  website_page: 'sourcesList.typeWebPage',
+  pdf: 'sourcesList.typePdf',
+  file: 'sourcesList.typeFile',
+  resource: 'sourcesList.typeResource',
 }
 
 interface KnowledgeSourcesListProps {
@@ -25,13 +26,15 @@ interface KnowledgeSourcesListProps {
   now: Date
 }
 
-export function KnowledgeSourcesList({ clientId, sources, now }: KnowledgeSourcesListProps): React.ReactElement {
+export async function KnowledgeSourcesList({ clientId, sources, now }: KnowledgeSourcesListProps): Promise<React.ReactElement> {
+  const t = await getTranslations('clients')
+
   if (sources.length === 0) {
     return (
       <EmptyState
         icon={Files}
-        title="No knowledge sources yet"
-        description="Discover a website above or upload a PDF to start building this client's knowledge base."
+        title={t('sourcesList.emptyTitle')}
+        description={t('sourcesList.emptyDescription')}
       />
     )
   }
@@ -41,11 +44,11 @@ export function KnowledgeSourcesList({ clientId, sources, now }: KnowledgeSource
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">Source</TableHead>
-            <TableHead scope="col">Type</TableHead>
-            <TableHead scope="col">Status</TableHead>
-            <TableHead scope="col">Added</TableHead>
-            <TableHead scope="col" className="text-right">Actions</TableHead>
+            <TableHead scope="col">{t('sourcesList.source')}</TableHead>
+            <TableHead scope="col">{t('sourcesList.type')}</TableHead>
+            <TableHead scope="col">{t('sourcesList.status')}</TableHead>
+            <TableHead scope="col">{t('sourcesList.added')}</TableHead>
+            <TableHead scope="col" className="text-right">{t('sourcesList.actions')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -55,7 +58,7 @@ export function KnowledgeSourcesList({ clientId, sources, now }: KnowledgeSource
                 {source.title}
               </TableCell>
               <TableCell className="text-muted-foreground text-[13px]">
-                {SOURCE_TYPE_LABEL[source.source_type]}
+                {t(SOURCE_TYPE_KEY[source.source_type] as 'sourcesList.typeWebPage')}
               </TableCell>
               <TableCell>
                 <StatusPill meta={KNOWLEDGE_SOURCE_STATUS[source.status]} />

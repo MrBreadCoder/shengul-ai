@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { z } from 'zod'
 import { Kanban } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listCasesWithLeads } from '@/lib/db/crm'
@@ -47,6 +48,7 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
   const supabase = await createServerClient()
   const cases = await listCasesWithLeads(supabase)
   const now = new Date()
+  const t = await getTranslations('crm')
 
   const parsed = searchParamsSchema.safeParse(await searchParams)
   const status = parsed.success ? (parsed.data.status ?? null) : null
@@ -58,8 +60,13 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
     countByStatus.set(kase.status, (countByStatus.get(kase.status) ?? 0) + 1)
   }
 
+  // CASE_STATUS[value].label (from @/lib/ui/status) stays English even in
+  // Turkish — it is shared, untranslated, unmodified infrastructure across
+  // every already-shipped namespace that renders a case/campaign/client
+  // status pill (see Tasks 11-13). Threading translation through it is out of
+  // this task's scope; flagged here per the plan rather than left silent.
   const options: FilterOption[] = [
-    { value: null, label: 'All', count: cases.length },
+    { value: null, label: t('allLabel'), count: cases.length },
     ...STATUS_FILTERS.map((value) => ({
       value,
       label: CASE_STATUS[value].label,
@@ -80,15 +87,13 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Pipeline"
-        description="Every company the agent is working, newest first. Open a case to read its mail, research and audit trail."
+        title={t('title')}
+        description={t('description')}
         actions={
           <span className="text-muted-foreground tnum text-sm">
             {status
-              ? `${ordered.length.toLocaleString('en-US')} ${ordered.length === 1 ? 'case' : 'cases'}`
-              : `${live.length.toLocaleString('en-US')} live${
-                  closed.length > 0 ? ` · ${closed.length.toLocaleString('en-US')} closed` : ''
-                }`}
+              ? t('caseCount', { count: ordered.length })
+              : t('liveClosedCount', { live: live.length, closed: closed.length, hasClosed: closed.length > 0 ? 1 : 0 })}
           </span>
         }
       />
@@ -96,7 +101,7 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
       {cases.length > 0 ? (
         <div className="border-hairline rounded-lg border p-3">
           <FilterChips
-            label="Stage"
+            label={t('stageLabel')}
             param="status"
             pathname="/crm"
             options={options}
@@ -109,14 +114,14 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
       {cases.length === 0 ? (
         <EmptyState
           icon={Kanban}
-          title="No cases yet"
-          description="Cases appear here once discovery finds a company with at least one verified contact. Start by creating a campaign."
+          title={t('emptyTitle')}
+          description={t('emptyDescription')}
         />
       ) : ordered.length === 0 ? (
         <EmptyState
           icon={Kanban}
-          title={`Nothing in ${status ? CASE_STATUS[status].label.toLowerCase() : 'this view'}`}
-          description="No cases have reached this stage yet. Pick another stage above, or choose All to see everything."
+          title={status ? t('emptyStageTitle', { stage: CASE_STATUS[status].label.toLowerCase() }) : t('emptyStageTitleGeneric')}
+          description={t('emptyStageDescription')}
         />
       ) : (
         <div className="border-hairline divide-hairline bg-surface animate-rise divide-y overflow-hidden rounded-lg border">

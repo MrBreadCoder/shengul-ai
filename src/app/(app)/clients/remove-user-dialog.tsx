@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,12 +19,10 @@ import {
 
 type RemoveState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
-// The server re-checks the typed address against the real one, so this is a
-// deliberate-action gate rather than the security boundary.
-const ERROR_MESSAGES: Record<string, string> = {
-  email_mismatch: 'That address does not match this login.',
-  not_found: 'This login no longer exists. Refresh the page.',
-  forbidden: 'Only operators can remove a login.',
+type RemoveErrorCode = 'email_mismatch' | 'not_found' | 'forbidden'
+
+function isRemoveErrorCode(value: string): value is RemoveErrorCode {
+  return value === 'email_mismatch' || value === 'not_found' || value === 'forbidden'
 }
 
 interface RemoveUserDialogProps {
@@ -33,6 +32,7 @@ interface RemoveUserDialogProps {
 }
 
 export function RemoveUserDialog({ clientId, userId, email }: RemoveUserDialogProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [confirmEmail, setConfirmEmail] = useState('')
@@ -55,18 +55,20 @@ export function RemoveUserDialog({ clientId, userId, email }: RemoveUserDialogPr
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
             : ''
-        const message = ERROR_MESSAGES[code] ?? 'Could not remove this login.'
+        const message = isRemoveErrorCode(code)
+          ? t(`removeUserDialog.error.${code}` as 'removeUserDialog.error.email_mismatch')
+          : t('removeUserDialog.error.generic')
         setState({ status: 'error', message })
-        toast.error('Remove failed', { description: message })
+        toast.error(t('removeUserDialog.removeFailedToast'), { description: message })
         return
       }
-      toast.success(`${email} removed`)
+      toast.success(t('removeUserDialog.removedToast', { email }))
       setOpen(false)
       setConfirmEmail('')
       setState({ status: 'idle' })
       router.refresh()
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('removeUserDialog.networkError') })
     }
   }
 
@@ -87,10 +89,10 @@ export function RemoveUserDialog({ clientId, userId, email }: RemoveUserDialogPr
           variant="ghost"
           size="sm"
           className="text-muted-foreground hover:text-destructive shrink-0"
-          aria-label={`Remove ${email}`}
+          aria-label={t('removeUserDialog.trigger', { email })}
         >
           <Trash size={13} weight="light" />
-          Remove
+          {t('removeUserDialog.remove')}
         </Button>
       </DialogTrigger>
       {/* Deliberately unannotated for WebMCP, like the sign-in and set-password
@@ -99,18 +101,18 @@ export function RemoveUserDialog({ clientId, userId, email }: RemoveUserDialogPr
           `webmcp-form-coverage` is the intended state. */}
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Remove {email}</DialogTitle>
+          <DialogTitle>{t('removeUserDialog.title', { email })}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <p className="text-muted-foreground text-sm">
-            This deletes the login permanently. They lose access immediately, and the address becomes free to
-            invite again. There is no undo.
-          </p>
+          <p className="text-muted-foreground text-sm">{t('removeUserDialog.warning')}</p>
 
           <div className="flex flex-col gap-2">
             <Label htmlFor={`confirm-email-${userId}`} className="text-xs">
-              Type <span className="font-mono">{email}</span> to confirm
+              {t.rich('removeUserDialog.confirmLabel', {
+                email,
+                bold: (chunks) => <span className="font-mono">{chunks}</span>,
+              })}
             </Label>
             <Input
               id={`confirm-email-${userId}`}
@@ -135,7 +137,7 @@ export function RemoveUserDialog({ clientId, userId, email }: RemoveUserDialogPr
             disabled={!isArmed || state.status === 'submitting'}
             onClick={onConfirm}
           >
-            {state.status === 'submitting' ? 'Removing…' : 'Remove login'}
+            {state.status === 'submitting' ? t('removeUserDialog.removing') : t('removeUserDialog.removeLogin')}
           </Button>
         </DialogFooter>
       </DialogContent>

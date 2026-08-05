@@ -2,13 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import type { WarmupProfile } from '@/lib/mailbox/warmup'
 
-const OPTIONS: { value: WarmupProfile; label: string }[] = [
-  { value: 'standard', label: 'Warm up — raise the cap daily' },
-  { value: 'slow', label: 'Warm up slowly — raise the cap every 2 days' },
-  { value: 'none', label: 'Already warm — no ramp' },
-]
+const PROFILES: readonly WarmupProfile[] = ['standard', 'slow', 'none']
 
 interface WarmupProfileSelectProps {
   clientId: string
@@ -18,6 +15,7 @@ interface WarmupProfileSelectProps {
 // Applies to mailboxes connected *after* this change. Existing mailboxes keep
 // the profile they were connected with — change those on /settings.
 export function WarmupProfileSelect({ clientId, value }: WarmupProfileSelectProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -30,7 +28,7 @@ export function WarmupProfileSelect({ clientId, value }: WarmupProfileSelectProp
       body: JSON.stringify({ warmupProfile: profile }),
     })
     if (!response.ok) {
-      setError('Could not save that.')
+      setError(t('warmupProfileSelect.saveFailed'))
       return
     }
     startTransition(() => router.refresh())
@@ -39,7 +37,7 @@ export function WarmupProfileSelect({ clientId, value }: WarmupProfileSelectProp
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={`warmup-${clientId}`} className="text-faint text-[11px]">
-        New mailbox warmup
+        {t('warmupProfileSelect.label')}
       </label>
       <select
         id={`warmup-${clientId}`}
@@ -48,9 +46,9 @@ export function WarmupProfileSelect({ clientId, value }: WarmupProfileSelectProp
         onChange={(event) => void change(event.target.value)}
         className="border-hairline bg-surface rounded-md border px-2 py-1 text-[12px]"
       >
-        {OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
+        {PROFILES.map((profile) => (
+          <option key={profile} value={profile}>
+            {t(`warmupMailboxRow.warmupOption.${profile}` as 'warmupMailboxRow.warmupOption.standard')}
           </option>
         ))}
       </select>

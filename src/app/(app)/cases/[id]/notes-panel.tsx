@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { NotePencil, Trash, X } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -43,6 +44,8 @@ export function NotesPanel({
   notes,
   initialLeadId = null,
 }: NotesPanelProps): React.ReactElement {
+  const t = useTranslations('cases')
+  const tCommon = useTranslations('common')
   const [target, setTarget] = useState<string>(initialLeadId ?? COMPANY_VALUE)
   const [body, setBody] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -64,7 +67,7 @@ export function NotesPanel({
         await createNote(data)
         setBody('')
       } catch {
-        setError('Could not save that note. Try again.')
+        setError(t('notesPanel.createFailed'))
       }
     })
   }
@@ -80,7 +83,7 @@ export function NotesPanel({
         await editNote(data)
         setEditingId(null)
       } catch {
-        setError('Could not update that note. Try again.')
+        setError(t('notesPanel.editFailed'))
       }
     })
   }
@@ -94,7 +97,7 @@ export function NotesPanel({
       try {
         await removeNote(data)
       } catch {
-        setError('Could not delete that note. Try again.')
+        setError(t('notesPanel.removeFailed'))
       }
     })
   }
@@ -102,35 +105,35 @@ export function NotesPanel({
   return (
     <section
       id="notes"
-      aria-label="Notes"
+      aria-label={t('notesPanel.title')}
       className="border-hairline bg-surface flex flex-col gap-4 rounded-lg border p-4"
     >
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">
-          Notes <span className="text-faint tnum font-normal">{notes.length}</span>
+          {t('notesPanel.title')} <span className="text-faint tnum font-normal">{notes.length}</span>
         </h2>
-        <p className="text-faint ml-auto text-[11px]">Only your team sees these — the agent never reads them.</p>
+        <p className="text-faint ml-auto text-[11px]">{t('notesPanel.privacyHint')}</p>
       </div>
 
       <div className="flex flex-col gap-2">
         <Textarea
           value={body}
           onChange={(event) => setBody(event.target.value)}
-          placeholder="Anything you know about this company that the agent doesn't."
+          placeholder={t('notesPanel.newNotePlaceholder')}
           rows={3}
           maxLength={MAX_NOTE_CHARS}
-          aria-label="New note"
+          aria-label={t('notesPanel.newNoteLabel')}
         />
         <div className="flex flex-wrap items-center gap-2">
           <Select value={target} onValueChange={setTarget}>
-            <SelectTrigger className="w-56" aria-label="What this note is about">
+            <SelectTrigger className="w-56" aria-label={t('notesPanel.aboutLabel')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={COMPANY_VALUE}>About the company</SelectItem>
+              <SelectItem value={COMPANY_VALUE}>{t('notesPanel.aboutCompany')}</SelectItem>
               {contacts.map((contact) => (
                 <SelectItem key={contact.id} value={contact.id}>
-                  About {contact.fullName}
+                  {t('notesPanel.aboutContact', { fullName: contact.fullName })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -142,7 +145,7 @@ export function NotesPanel({
             disabled={isPending || body.trim().length === 0}
             className="ml-auto"
           >
-            {isPending ? 'Saving…' : 'Add note'}
+            {isPending ? t('notesPanel.saving') : t('notesPanel.addNote')}
           </Button>
         </div>
       </div>
@@ -155,7 +158,7 @@ export function NotesPanel({
 
       {notes.length === 0 ? (
         <p className="border-hairline text-muted-foreground rounded-lg border border-dashed px-4 py-5 text-center text-sm">
-          No notes yet.
+          {t('notesPanel.empty')}
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -164,10 +167,10 @@ export function NotesPanel({
               <div className="flex flex-wrap items-center gap-2">
                 {note.leadId ? (
                   <span className="bg-accent text-muted-foreground rounded-full px-2 py-0.5 text-[11px]">
-                    {nameByLeadId.get(note.leadId) ?? 'Contact'}
+                    {nameByLeadId.get(note.leadId) ?? t('notesPanel.contactFallback')}
                   </span>
                 ) : (
-                  <span className="text-faint text-[11px]">Company</span>
+                  <span className="text-faint text-[11px]">{t('notesPanel.company')}</span>
                 )}
                 <span className="text-faint text-[11px]">{note.authorLabel}</span>
                 <time
@@ -183,7 +186,7 @@ export function NotesPanel({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      aria-label="Edit note"
+                      aria-label={t('notesPanel.editNote')}
                       disabled={isPending}
                       onClick={() => {
                         setEditingId(note.id)
@@ -196,7 +199,7 @@ export function NotesPanel({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      aria-label="Delete note"
+                      aria-label={t('notesPanel.deleteNote')}
                       disabled={isPending}
                       onClick={() => submitRemove(note.id)}
                     >
@@ -209,7 +212,7 @@ export function NotesPanel({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    aria-label="Cancel editing"
+                    aria-label={t('notesPanel.cancelEditing')}
                     onClick={() => setEditingId(null)}
                   >
                     <X size={13} weight="light" />
@@ -224,7 +227,7 @@ export function NotesPanel({
                     onChange={(event) => setEditingBody(event.target.value)}
                     rows={3}
                     maxLength={MAX_NOTE_CHARS}
-                    aria-label="Edit note"
+                    aria-label={t('notesPanel.editNote')}
                   />
                   <Button
                     type="button"
@@ -233,7 +236,7 @@ export function NotesPanel({
                     disabled={isPending || editingBody.trim().length === 0}
                     onClick={() => submitEdit(note.id)}
                   >
-                    {isPending ? 'Saving…' : 'Save'}
+                    {isPending ? t('notesPanel.saving') : tCommon('save')}
                   </Button>
                 </div>
               ) : (

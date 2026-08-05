@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { z } from 'zod'
 import { Brain } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listKnowledgeForClient } from '@/lib/db/case-knowledge'
@@ -16,21 +17,6 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Knowledge' }
 
 const PAGE_SIZE = 100
-
-const KIND_OPTIONS: readonly FilterOption[] = [
-  { value: null, label: 'All' },
-  { value: 'company', label: 'Company' },
-  { value: 'person', label: 'Person' },
-  { value: 'news', label: 'News' },
-  { value: 'pain_point', label: 'Pain point' },
-  { value: 'answer', label: 'Answer' },
-]
-
-const AUTHOR_OPTIONS: readonly FilterOption[] = [
-  { value: null, label: 'Anyone' },
-  { value: 'agent', label: 'Agent' },
-  { value: 'human', label: 'Human' },
-]
 
 // Untrusted query input reaches an `.eq()` filter, so it is whitelisted against
 // the database enums rather than passed through.
@@ -48,6 +34,22 @@ export default async function KnowledgePage({
 }: KnowledgePageProps): Promise<React.ReactElement> {
   await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('knowledge')
+
+  const KIND_OPTIONS: readonly FilterOption[] = [
+    { value: null, label: t('kindAll') },
+    { value: 'company', label: t('kindCompany') },
+    { value: 'person', label: t('kindPerson') },
+    { value: 'news', label: t('kindNews') },
+    { value: 'pain_point', label: t('kindPainPoint') },
+    { value: 'answer', label: t('kindAnswer') },
+  ]
+
+  const AUTHOR_OPTIONS: readonly FilterOption[] = [
+    { value: null, label: t('authorAnyone') },
+    { value: 'agent', label: t('authorAgent') },
+    { value: 'human', label: t('authorHuman') },
+  ]
 
   const parsed = searchParamsSchema.safeParse(await searchParams)
   const kind = parsed.success ? (parsed.data.kind ?? null) : null
@@ -69,13 +71,13 @@ export default async function KnowledgePage({
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Knowledge"
-        description="Everything the agent knows, across every case. Research it gathered itself, and answers your operators supplied."
+        title={t('title')}
+        description={t('description')}
         actions={
           <span className="text-muted-foreground tnum text-sm">
             {knowledge.length === PAGE_SIZE
-              ? `Latest ${PAGE_SIZE}`
-              : `${knowledge.length} ${knowledge.length === 1 ? 'fact' : 'facts'}`}
+              ? t('latestCount', { count: PAGE_SIZE })
+              : t('factCount', { count: knowledge.length })}
           </span>
         }
       />
@@ -84,7 +86,7 @@ export default async function KnowledgePage({
 
       <div className="border-hairline flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border p-3">
         <FilterChips
-          label="Kind"
+          label={t('kindLabel')}
           param="kind"
           pathname="/knowledge"
           options={KIND_OPTIONS}
@@ -92,7 +94,7 @@ export default async function KnowledgePage({
           carry={carry}
         />
         <FilterChips
-          label="Author"
+          label={t('authorLabel')}
           param="author"
           pathname="/knowledge"
           options={AUTHOR_OPTIONS}
@@ -104,8 +106,8 @@ export default async function KnowledgePage({
       {knowledge.length === 0 ? (
         <EmptyState
           icon={Brain}
-          title="No knowledge matches this view"
-          description="Clear the filters above, or run research on a case to start building the library."
+          title={t('emptyTitle')}
+          description={t('emptyDescription')}
         />
       ) : (
         <div className="flex max-w-[80ch] flex-col gap-3">

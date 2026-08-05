@@ -19,6 +19,7 @@ export interface Database {
           mailreach_enabled: boolean
           reply_mode: Database['public']['Enums']['reply_mode']
           followup_delays_days: number[]
+          default_locale: Database['public']['Enums']['app_locale']
           domain: string | null
           logo_url: string | null
           created_at: string
@@ -33,6 +34,7 @@ export interface Database {
           mailreach_enabled?: boolean
           reply_mode?: Database['public']['Enums']['reply_mode']
           followup_delays_days?: number[]
+          default_locale?: Database['public']['Enums']['app_locale']
           domain?: string | null
           logo_url?: string | null
           created_at?: string
@@ -46,12 +48,14 @@ export interface Database {
           id: string
           role: Database['public']['Enums']['user_role']
           client_id: string | null
+          locale: Database['public']['Enums']['app_locale'] | null
           created_at: string
         }
         Insert: {
           id: string
           role?: Database['public']['Enums']['user_role']
           client_id?: string | null
+          locale?: Database['public']['Enums']['app_locale'] | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['app_users']['Insert']>
@@ -1033,6 +1037,7 @@ export interface Database {
     }
     Enums: {
       user_role: 'operator' | 'client'
+      app_locale: 'en' | 'tr'
       log_severity: 'info' | 'warn' | 'error'
       log_source:
         | 'app'

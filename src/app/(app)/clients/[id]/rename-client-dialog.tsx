@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { PencilSimple } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,6 +20,8 @@ import {
 type RenameState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
 export function RenameClientDialog({ clientId, currentName }: { clientId: string; currentName: string }): React.ReactElement {
+  const t = useTranslations('clients')
+  const tCommon = useTranslations('common')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(currentName)
@@ -38,17 +41,17 @@ export function RenameClientDialog({ clientId, currentName }: { clientId: string
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'Could not rename the client.'
+            : t('renameDialog.genericError')
         setState({ status: 'error', message })
-        toast.error('Rename failed', { description: message })
+        toast.error(t('renameDialog.renameFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
       setOpen(false)
-      toast.success('Client renamed')
+      toast.success(t('renameDialog.renamedToast'))
       router.refresh()
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('renameDialog.networkError') })
     }
   }
 
@@ -61,25 +64,25 @@ export function RenameClientDialog({ clientId, currentName }: { clientId: string
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" aria-label="Rename client">
+        <Button type="button" variant="ghost" size="sm" aria-label={t('renameDialog.trigger')}>
           <PencilSimple size={14} weight="light" />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rename client</DialogTitle>
+          <DialogTitle>{t('renameDialog.title')}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={onSubmit}
           // Declarative WebMCP: an agent may fill this in, but the operator
           // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
           toolname="renameClient"
-          tooldescription="Changes a client's display name across the console. Cosmetic only — campaigns, cases and mail are unaffected."
+          tooldescription={t('renameDialog.toolDescription')}
           className="flex flex-col gap-4"
         >
           <div className="flex flex-col gap-2">
             <Label htmlFor="clientName" className="text-xs">
-              Name
+              {t('renameDialog.nameLabel')}
             </Label>
             <Input
               id="clientName"
@@ -87,7 +90,7 @@ export function RenameClientDialog({ clientId, currentName }: { clientId: string
               value={name}
               onChange={(event) => setName(event.target.value)}
               required
-              toolparamdescription="The client's new name. Cannot be blank."
+              toolparamdescription={t('renameDialog.nameToolParamDescription')}
             />
           </div>
           {state.status === 'error' ? (
@@ -97,7 +100,7 @@ export function RenameClientDialog({ clientId, currentName }: { clientId: string
           ) : null}
           <DialogFooter>
             <Button type="submit" size="sm" disabled={state.status === 'submitting' || name.trim().length === 0}>
-              {state.status === 'submitting' ? 'Saving…' : 'Save'}
+              {state.status === 'submitting' ? tCommon('saving') : tCommon('save')}
             </Button>
           </DialogFooter>
         </form>

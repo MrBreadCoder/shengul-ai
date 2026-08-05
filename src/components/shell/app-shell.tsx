@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { List, SignOut, X } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Nav } from './nav'
 import { ThemeToggle } from './theme-toggle'
 import { Button } from '@/components/ui/button'
@@ -50,6 +51,7 @@ function SidebarBody({
   brand,
   onNavigate,
 }: Omit<AppShellProps, 'children'> & { onNavigate?: () => void }): React.ReactElement {
+  const t = useTranslations('nav')
   return (
     <div className="flex h-full flex-col gap-6 py-5">
       <Brand brand={brand} />
@@ -74,8 +76,8 @@ function SidebarBody({
             type="submit"
             variant="ghost"
             size="icon"
-            aria-label="Sign out"
-            title="Sign out"
+            aria-label={t('signOut')}
+            title={t('signOut')}
             className="text-muted-foreground hover:text-foreground size-8"
           >
             <SignOut size={16} weight="light" />

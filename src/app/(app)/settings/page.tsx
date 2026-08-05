@@ -9,6 +9,7 @@ import { getLatestCrmSyncAt } from '@/lib/db/case-crm-links'
 import { getCrmProvider } from '@/lib/crm/registry'
 import { parseCrmTokens } from '@/lib/crm/tokens'
 import type { CrmPipeline } from '@/lib/crm/provider'
+import { getTranslations } from 'next-intl/server'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { ConnectButtons } from './connect-buttons'
@@ -19,6 +20,8 @@ import { FollowupCadenceSection } from './followup-cadence-section'
 import { ConnectCrmButtons } from './connect-crm-buttons'
 import { PipelinePicker } from './pipeline-picker'
 import { ConnectionCard } from './connection-card'
+import { LanguageSection } from './language-section'
+import { resolveLocale } from '@/lib/i18n/resolve-locale'
 import type { MailboxHealthEntry } from '@/types/webmcp-app'
 
 export const dynamic = 'force-dynamic'
@@ -58,6 +61,8 @@ function toWebMcpEntry({
 
 export default async function SettingsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
+  const currentLocale = await resolveLocale()
+  const t = await getTranslations('settings')
   // RLS-scoped on purpose. The admin client would bypass `mailboxes_select` and
   // show a client-role user every other client's connected addresses.
   const supabase = await createServerClient()
@@ -88,35 +93,39 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
     <div className="flex max-w-3xl flex-col gap-10">
       <MailboxesWebMcpTools mailboxes={connected.map(toWebMcpEntry)} />
       <PageHeader
-        title="Settings"
-        description={`Signed in as ${appUser.role}. Mailboxes connected here are what the agent sends from.`}
+        title={t('pageTitle')}
+        description={t('pageDescription', { role: t(appUser.role === 'operator' ? 'roleOperator' : 'roleClient') })}
       />
 
+      <Section title={t('languageSectionTitle')}>
+        <LanguageSection currentLocale={currentLocale} />
+      </Section>
+
       {client ? (
-        <Section title="Reply mode">
+        <Section title={t('replyModeSectionTitle')}>
           <ReplyModeSection currentMode={client.reply_mode} />
         </Section>
       ) : null}
 
       {client ? (
-        <Section title="Follow-up cadence">
+        <Section title={t('followupCadenceSectionTitle')}>
           <FollowupCadenceSection initialDelaysDays={client.followup_delays_days} />
         </Section>
       ) : null}
 
-      <Section title="Connect a mailbox">
+      <Section title={t('connectMailboxSectionTitle')}>
         <ConnectButtons />
       </Section>
 
       <Section
-        title="Connected mailboxes"
-        aside={connected.length > 0 ? `${connected.length} connected` : undefined}
+        title={t('connectedMailboxesSectionTitle')}
+        aside={connected.length > 0 ? t('connectedMailboxesAside', { count: connected.length }) : undefined}
       >
         {connected.length === 0 ? (
           <EmptyState
             icon={Envelope}
-            title="No mailboxes connected"
-            description="The agent cannot send until at least one mailbox is connected and assigned to a campaign."
+            title={t('noMailboxesTitle')}
+            description={t('noMailboxesDescription')}
           />
         ) : (
           <ul className="flex flex-col gap-2">
@@ -149,37 +158,36 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
       </Section>
 
       {crmConnection === null ? (
-        <Section title="Connect a CRM">
+        <Section title={t('connectCrmSectionTitle')}>
           <EmptyState
             icon={Buildings}
-            title="No CRM connected"
-            description="Qualified companies stay in this app until you connect a CRM."
+            title={t('noCrmTitle')}
+            description={t('noCrmDescription')}
           />
           {canManageCrm ? <div className="mt-4"><ConnectCrmButtons /></div> : null}
         </Section>
       ) : crmConnection.status === 'error' ? (
-        <Section title="Reconnect required">
+        <Section title={t('reconnectRequiredSectionTitle')}>
           <div className="border-hairline rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-            <p className="text-[13px] font-medium">Syncing is paused</p>
+            <p className="text-[13px] font-medium">{t('syncingPaused')}</p>
             <p className="text-muted-foreground mt-1 text-[12px]">
-              Your CRM rejected our access ({crmConnection.status_reason ?? 'unknown reason'}). Reconnect to
-              resume pushing qualified companies.
+              {t('crmAccessRejected', { reason: crmConnection.status_reason ?? t('unknownReason') })}
             </p>
           </div>
           {canManageCrm ? <div className="mt-4"><ConnectCrmButtons /></div> : null}
         </Section>
       ) : crmConnection.pipeline_id === null ? (
-        <Section title="Choose where CRM deals land">
+        <Section title={t('chooseCrmPipelineSectionTitle')}>
           {canManageCrm ? (
             <PipelinePicker pipelines={crmPipelines} />
           ) : (
             <p className="text-muted-foreground text-[13px]">
-              This client has connected {crmConnection.provider} but has not chosen a pipeline yet.
+              {t('pipelineNotChosen', { provider: crmConnection.provider })}
             </p>
           )}
         </Section>
       ) : (
-        <Section title="Connected CRM">
+        <Section title={t('connectedCrmSectionTitle')}>
           <ConnectionCard
             provider={crmConnection.provider}
             accountLabel={crmConnection.account_label}

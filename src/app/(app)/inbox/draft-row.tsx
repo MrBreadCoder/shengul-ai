@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { CheckCircle, MagicWand, Paperclip, PaperPlaneTilt, PencilSimple } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { approveDraft, regenerateDraftContent, updateDraftAttachments, updateDraftContent } from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,9 +37,12 @@ interface DraftRowProps {
   resources: readonly ResourceSummary[]
 }
 
-function messageForRegenerateCode(code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT'): string {
-  if (code === 'VALIDATION_ERROR') return 'This draft was already sent, so it can no longer be redesigned.'
-  return 'Could not redesign that draft. Try again.'
+function messageForRegenerateCode(
+  t: ReturnType<typeof useTranslations<'inbox'>>,
+  code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT',
+): string {
+  if (code === 'VALIDATION_ERROR') return t('draftRow.regenerateValidationError')
+  return t('draftRow.regenerateGenericError')
 }
 
 export function DraftRow({
@@ -51,6 +55,8 @@ export function DraftRow({
   attachments,
   resources,
 }: DraftRowProps): React.ReactElement {
+  const t = useTranslations('inbox')
+  const tCommon = useTranslations('common')
   const [isPending, startTransition] = useTransition()
   const [isSent, setIsSent] = useState(false)
   const [isEditingAttachments, setIsEditingAttachments] = useState(false)
@@ -69,10 +75,10 @@ export function DraftRow({
       try {
         await updateDraftAttachments(formData)
         setIsEditingAttachments(false)
-        toast.success('Attachments updated')
+        toast.success(t('draftRow.toastAttachmentsUpdated'))
       } catch (error) {
-        toast.error('Could not update the attachments', {
-          description: error instanceof Error ? error.message : 'Please try again.',
+        toast.error(t('draftRow.toastAttachmentsUpdateFailed'), {
+          description: error instanceof Error ? error.message : t('draftRow.toastPleaseRetry'),
         })
       }
     })
@@ -105,10 +111,10 @@ export function DraftRow({
       try {
         await updateDraftContent(formData)
         setIsEditingContent(false)
-        toast.success('Draft updated')
+        toast.success(t('draftRow.toastDraftUpdated'))
       } catch (error) {
-        toast.error('Could not save that change', {
-          description: error instanceof Error ? error.message : 'Please try again.',
+        toast.error(t('draftRow.toastSaveFailed'), {
+          description: error instanceof Error ? error.message : t('draftRow.toastPleaseRetry'),
         })
       }
     })
@@ -122,7 +128,7 @@ export function DraftRow({
     startRedesignTransition(async () => {
       const result = await regenerateDraftContent(formData)
       if (!result.ok) {
-        setRedesignError(messageForRegenerateCode(result.code))
+        setRedesignError(messageForRegenerateCode(t, result.code))
         return
       }
       setDraftSubject(result.subject)
@@ -137,12 +143,12 @@ export function DraftRow({
       try {
         await approveDraft(formData)
         setIsSent(true)
-        toast.success('Email sent', { description: `To ${companyName}` })
+        toast.success(t('draftRow.toastEmailSent'), { description: t('draftRow.toastSentToPrefix', { companyName }) })
       } catch (error) {
         // The Server Action already logged the cause; the operator needs to
         // know the send did not happen and the draft is still theirs to retry.
-        toast.error('Could not send', {
-          description: error instanceof Error ? error.message : 'Please try again.',
+        toast.error(t('draftRow.toastSendFailed'), {
+          description: error instanceof Error ? error.message : t('draftRow.toastPleaseRetry'),
         })
       }
     })
@@ -171,7 +177,7 @@ export function DraftRow({
         {isEditingContent ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`draft-subject-${emailId}`}>Subject</Label>
+              <Label htmlFor={`draft-subject-${emailId}`}>{t('draftRow.subjectLabel')}</Label>
               <Input
                 id={`draft-subject-${emailId}`}
                 value={draftSubject}
@@ -180,7 +186,7 @@ export function DraftRow({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`draft-body-${emailId}`}>Body</Label>
+              <Label htmlFor={`draft-body-${emailId}`}>{t('draftRow.bodyLabel')}</Label>
               <Textarea
                 id={`draft-body-${emailId}`}
                 value={draftBody}
@@ -191,13 +197,13 @@ export function DraftRow({
             </div>
 
             <div className="border-hairline flex flex-col gap-2 rounded-md border border-dashed p-3">
-              <Label htmlFor={`draft-instruction-${emailId}`}>Redesign with AI</Label>
+              <Label htmlFor={`draft-instruction-${emailId}`}>{t('draftRow.redesignLabel')}</Label>
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   id={`draft-instruction-${emailId}`}
                   value={instruction}
                   onChange={(event) => setInstruction(event.target.value)}
-                  placeholder="e.g. make it shorter, lead with the pricing angle"
+                  placeholder={t('draftRow.redesignPlaceholder')}
                   maxLength={MAX_INSTRUCTION_CHARS}
                   className="min-w-56 flex-1"
                 />
@@ -209,7 +215,7 @@ export function DraftRow({
                   onClick={onRedesign}
                 >
                   <MagicWand size={13} weight="light" />
-                  {isRedesigning ? 'Redesigning…' : 'Redesign'}
+                  {isRedesigning ? t('draftRow.redesigning') : t('draftRow.redesign')}
                 </Button>
               </div>
               {redesignError ? (
@@ -226,13 +232,13 @@ export function DraftRow({
                 disabled={isSavingContent || draftSubject.trim().length === 0 || draftBody.trim().length === 0}
                 onClick={onSaveContent}
               >
-                {isSavingContent ? 'Saving…' : 'Save'}
+                {isSavingContent ? t('draftRow.saving') : tCommon('save')}
               </Button>
               <Button type="button" variant="ghost" size="sm" disabled={isSavingContent} onClick={onClear}>
-                Clear
+                {t('draftRow.clear')}
               </Button>
               <Button type="button" variant="ghost" size="sm" disabled={isSavingContent} onClick={onCancelEdit}>
-                Cancel
+                {tCommon('cancel')}
               </Button>
             </div>
           </div>
@@ -250,7 +256,7 @@ export function DraftRow({
             {!isEditingContent ? (
               <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onOpenEditor}>
                 <PencilSimple size={14} weight="light" />
-                Edit
+                {tCommon('edit')}
               </Button>
             ) : null}
 
@@ -268,7 +274,7 @@ export function DraftRow({
                 ))}
               </ul>
             ) : (
-              <p className="text-faint text-[11px]">No files attached.</p>
+              <p className="text-faint text-[11px]">{t('draftRow.noFilesAttached')}</p>
             )}
 
             {/* Its own form, so editing attachments can never submit the send.
@@ -287,7 +293,7 @@ export function DraftRow({
                   />
                   <div className="flex items-center gap-2">
                     <Button type="submit" variant="secondary" size="sm" disabled={isSavingAttachments}>
-                      {isSavingAttachments ? 'Saving…' : 'Save attachments'}
+                      {isSavingAttachments ? t('draftRow.saving') : t('draftRow.saveAttachments')}
                     </Button>
                     <Button
                       type="button"
@@ -296,7 +302,7 @@ export function DraftRow({
                       disabled={isSavingAttachments}
                       onClick={() => setIsEditingAttachments(false)}
                     >
-                      Cancel
+                      {tCommon('cancel')}
                     </Button>
                   </div>
                 </form>
@@ -309,7 +315,7 @@ export function DraftRow({
                   onClick={() => setIsEditingAttachments(true)}
                 >
                   <Paperclip size={14} weight="light" />
-                  {attachments.length > 0 ? 'Edit attachments' : 'Add from library'}
+                  {attachments.length > 0 ? t('draftRow.editAttachments') : t('draftRow.addFromLibrary')}
                 </Button>
               )
             ) : null}
@@ -330,7 +336,7 @@ export function DraftRow({
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
             >
               <CheckCircle size={14} weight="fill" />
-              Sent
+              {t('draftRow.sent')}
             </motion.span>
           ) : (
             <motion.div
@@ -341,12 +347,10 @@ export function DraftRow({
             >
               <Button type="button" size="sm" onClick={onApprove} disabled={isPending || isEditingContent}>
                 <PaperPlaneTilt size={14} weight="fill" />
-                {isPending ? 'Sending…' : 'Approve and send'}
+                {isPending ? t('draftRow.sending') : t('draftRow.approveAndSend')}
               </Button>
               <p className="text-faint text-[11px]">
-                {isEditingContent
-                  ? 'Save or cancel your edit before approving.'
-                  : 'Goes out from the campaign mailbox immediately.'}
+                {isEditingContent ? t('draftRow.editHint') : t('draftRow.sendHint')}
               </p>
             </motion.div>
           )}

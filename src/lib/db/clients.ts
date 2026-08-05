@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 import type { WarmupProfile } from '@/lib/mailbox/warmup'
+import type { AppLocale } from '@/types/i18n'
 
 export type ClientRow = Database['public']['Tables']['clients']['Row']
 export type ClientInsert = Database['public']['Tables']['clients']['Insert']
@@ -207,6 +208,23 @@ export async function updateClientReplyMode(
     .single()
   if (error || !data) {
     throw new AppError('DB_ERROR', 'Failed to update client reply mode', { id, cause: error?.message })
+  }
+  return data
+}
+
+export async function updateClientDefaultLocale(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  locale: AppLocale,
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ default_locale: locale })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client default locale', { id, cause: error?.message })
   }
   return data
 }

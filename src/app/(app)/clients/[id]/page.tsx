@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { z } from 'zod'
 import { ArrowLeft, Books, ChartLineUp, Lightning, ListMagnifyingGlass, Thermometer, UsersThree } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, listClientRoleAppUsers } from '@/lib/db/clients'
@@ -32,6 +33,7 @@ import { ClientLifecycleActions } from './client-lifecycle-actions'
 import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
 import { MailreachToggle } from './mailreach-toggle'
+import { DefaultLocaleSelect } from './default-locale-select'
 import { WarmupTab } from './warmup-tab'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
@@ -82,6 +84,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
   const admin = createAdminClient()
   const client = await getClientById(admin, clientId)
   if (!client) notFound()
+  const t = await getTranslations('clients')
 
   const [campaigns, clientAppUsers, authUsers] = await Promise.all([
     listCampaignsForClient(admin, clientId),
@@ -91,7 +94,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
   const emailById = new Map(authUsers.map((user) => [user.id, user.email]))
   const users = clientAppUsers
     .filter((row) => row.client_id === clientId)
-    .map((row) => ({ id: row.id, email: emailById.get(row.id) ?? 'unknown' }))
+    .map((row) => ({ id: row.id, email: emailById.get(row.id) ?? t('detail.unknownEmail') }))
 
   const rawSearchParams = await searchParams
   const requestedTab = tabSchema.safeParse(rawSearchParams.tab)
@@ -133,7 +136,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           className="text-muted-foreground hover:text-foreground inline-flex w-fit items-center gap-1.5 text-xs transition-colors duration-200"
         >
           <ArrowLeft size={13} weight="light" />
-          Clients
+          {t('pageTitle')}
         </Link>
 
         <div className="flex flex-wrap items-start gap-4">
@@ -151,9 +154,9 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
               <LogoUpload clientId={client.id} hasLogo={Boolean(client.logo_url)} />
             </div>
             <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span>Created {formatRelative(client.created_at, now)}</span>
-              <span>{campaigns.length} campaigns</span>
-              <span>{users.length} logins</span>
+              <span>{t('createdRelative', { relative: formatRelative(client.created_at, now) })}</span>
+              <span>{t('detail.campaignCount', { count: campaigns.length })}</span>
+              <span>{t('detail.loginCount', { count: users.length })}</span>
             </div>
           </div>
           <StatusPill meta={CLIENT_STATUS[client.status]} className="mt-1 px-2.5 py-1 text-xs" />
@@ -164,6 +167,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             <ClientLifecycleActions clientId={client.id} status={client.status} />
             <WarmupProfileSelect clientId={client.id} value={client.warmup_profile} />
             <MailreachToggle clientId={client.id} enabled={client.mailreach_enabled} />
+            <DefaultLocaleSelect clientId={client.id} value={client.default_locale} />
           </div>
           <DeleteClientDialog
             clientId={client.id}
@@ -179,40 +183,40 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           <TabsTrigger value="campaigns" asChild>
             <Link href={`/clients/${clientId}?tab=campaigns`}>
               <Lightning size={14} weight="light" />
-              Campaigns
+              {t('detail.tabCampaigns')}
               <span className="tnum text-faint">{campaigns.length}</span>
             </Link>
           </TabsTrigger>
           <TabsTrigger value="warmup" asChild>
             <Link href={`/clients/${clientId}?tab=warmup`}>
               <Thermometer size={14} weight="light" />
-              Warmup
+              {t('detail.tabWarmup')}
             </Link>
           </TabsTrigger>
           <TabsTrigger value="analytics" asChild>
             <Link href={`/clients/${clientId}?tab=analytics`}>
               <ChartLineUp size={14} weight="light" />
-              Analytics
+              {t('detail.tabAnalytics')}
             </Link>
           </TabsTrigger>
           <TabsTrigger value="users" asChild>
             <Link href={`/clients/${clientId}?tab=users`}>
               <UsersThree size={14} weight="light" />
-              Users
+              {t('detail.tabUsers')}
               <span className="tnum text-faint">{users.length}</span>
             </Link>
           </TabsTrigger>
           <TabsTrigger value="knowledge" asChild>
             <Link href={`/clients/${clientId}?tab=knowledge`}>
               <Books size={14} weight="light" />
-              Knowledge Base
+              {t('detail.tabKnowledge')}
               <span className="tnum text-faint">{knowledgeSources.length}</span>
             </Link>
           </TabsTrigger>
           <TabsTrigger value="logs" asChild>
             <Link href={`/clients/${clientId}?tab=logs`}>
               <ListMagnifyingGlass size={14} weight="light" />
-              Logs
+              {t('detail.tabLogs')}
             </Link>
           </TabsTrigger>
         </TabsList>
@@ -221,7 +225,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           <div className="flex max-w-3xl flex-col gap-6">
             <NewCampaignForm fixedClientId={client.id} fixedClientName={client.name} />
             {campaigns.length === 0 ? (
-              <EmptyState icon={Lightning} title="No campaigns yet" description="Create one above." />
+              <EmptyState icon={Lightning} title={t('detail.noCampaignsTitle')} description={t('detail.noCampaignsDescription')} />
             ) : (
               <ul className="flex flex-col gap-2">
                 {campaigns.map((campaign) => (
@@ -253,7 +257,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           <div className="flex max-w-2xl flex-col gap-3">
             <InviteUserDialog clientId={client.id} />
             {users.length === 0 ? (
-              <EmptyState icon={UsersThree} title="No logins yet" description="Invite one above." />
+              <EmptyState icon={UsersThree} title={t('detail.noLoginsTitle')} description={t('detail.noLoginsDescription')} />
             ) : (
               <ul className="flex flex-col gap-2">
                 {users.map((user) => (
@@ -274,11 +278,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
           <div className="flex flex-col gap-4">
             <KnowledgeRealtimeRefresher clientId={client.id} />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-muted-foreground max-w-[60ch] text-[13px]">
-                Scraped website pages and uploaded files the AI grounds its emails and
-                replies in for this client. This client&apos;s own logins can see these
-                and curate their own on /knowledge.
-              </p>
+              <p className="text-muted-foreground max-w-[60ch] text-[13px]">{t('detail.knowledgeIntro')}</p>
               <div className="flex items-center gap-2">
                 <KnowledgeRescrapeAllButton
                   clientId={client.id}

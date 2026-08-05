@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ListMagnifyingGlass } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import type { EventRow } from '@/lib/db/events'
 import type { LogSeverityFilter, LogSource } from '@/types/logs'
 import { LOG_SEVERITY_FILTERS, LOG_SOURCES } from '@/types/logs'
@@ -24,33 +25,33 @@ const SEVERITY_OPTIONS: readonly FilterOption[] = LOG_SEVERITY_FILTERS.map((valu
   label: LOG_SEVERITY_FILTER_LABEL[value],
 }))
 
-const SOURCE_OPTIONS: readonly FilterOption[] = [
-  { value: null, label: 'All sources' },
-  ...LOG_SOURCES.map((value) => ({
-    value,
-    label: LOG_SOURCE_META[value].label,
-    color: LOG_SOURCE_META[value].color,
-  })),
-]
-
-export function LogsFeed({
+export async function LogsFeed({
   clientId,
   events,
   severityFilter,
   source,
   nextCursor,
   now,
-}: LogsFeedProps): React.ReactElement {
+}: LogsFeedProps): Promise<React.ReactElement> {
+  const t = await getTranslations('clients')
   const pathname = `/clients/${clientId}`
   // `logBefore` is deliberately absent from `carry`: changing a filter must
   // start a fresh page rather than resume from the previous page's cursor.
   const carry = { tab: 'logs', logSeverity: severityFilter, logSource: source }
+  const sourceOptions: readonly FilterOption[] = [
+    { value: null, label: t('logsFeed.allSources') },
+    ...LOG_SOURCES.map((value) => ({
+      value,
+      label: LOG_SOURCE_META[value].label,
+      color: LOG_SOURCE_META[value].color,
+    })),
+  ]
 
   return (
     <div className="flex flex-col gap-5">
       <div className="border-hairline flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border p-3">
         <FilterChips
-          label="Show"
+          label={t('logsFeed.show')}
           param="logSeverity"
           options={SEVERITY_OPTIONS}
           active={severityFilter}
@@ -58,9 +59,9 @@ export function LogsFeed({
           pathname={pathname}
         />
         <FilterChips
-          label="Source"
+          label={t('logsFeed.source')}
           param="logSource"
-          options={SOURCE_OPTIONS}
+          options={sourceOptions}
           active={source}
           carry={carry}
           pathname={pathname}
@@ -70,12 +71,8 @@ export function LogsFeed({
       {events.length === 0 ? (
         <EmptyState
           icon={ListMagnifyingGlass}
-          title="Nothing logged here"
-          description={
-            severityFilter === 'all'
-              ? 'This client has no activity yet. Logs appear as soon as a campaign runs.'
-              : 'No problems recorded for this client. Switch to "Everything" to see normal activity.'
-          }
+          title={t('logsFeed.emptyTitle')}
+          description={severityFilter === 'all' ? t('logsFeed.emptyDescriptionAll') : t('logsFeed.emptyDescriptionFiltered')}
         />
       ) : (
         <ul className="flex flex-col gap-1.5">
@@ -108,7 +105,7 @@ export function LogsFeed({
           href={buildCursorHref(pathname, severityFilter, source, nextCursor)}
           className="border-hairline text-muted-foreground hover:bg-accent hover:text-foreground self-center rounded-full border px-4 py-1.5 text-[11px] font-medium transition-colors duration-200"
         >
-          Load older
+          {t('logsFeed.loadOlder')}
         </Link>
       ) : null}
     </div>

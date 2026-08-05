@@ -1,11 +1,13 @@
 import { Plus, Buildings, Kanban } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 
 const CRM_PROVIDERS = [
   { href: '/api/crm/hubspot/connect', label: 'HubSpot', icon: Buildings },
   { href: '/api/crm/pipedrive/connect', label: 'Pipedrive', icon: Kanban },
 ] as const
 
-export function ConnectCrmButtons(): React.ReactElement {
+export async function ConnectCrmButtons(): Promise<React.ReactElement> {
+  const t = await getTranslations('settings')
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {CRM_PROVIDERS.map(({ href, label, icon: Icon }) => (
@@ -20,8 +22,8 @@ export function ConnectCrmButtons(): React.ReactElement {
             <Icon size={18} weight="light" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-medium">Connect {label}</span>
-            <span className="text-faint block text-[11px]">Qualified leads are pushed to your pipeline</span>
+            <span className="block text-[13px] font-medium">{t('connectProvider', { provider: label })}</span>
+            <span className="text-faint block text-[11px]">{t('crmConnectHint')}</span>
           </span>
           <Plus
             size={15}

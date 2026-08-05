@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Copy, EnvelopeSimple, LinkSimple } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,6 +24,7 @@ type InviteState =
   | { status: 'success'; link: string; expiresInMinutes: number }
 
 export function InviteUserDialog({ clientId }: { clientId: string }): React.ReactElement {
+  const t = useTranslations('clients')
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [state, setState] = useState<InviteState>({ status: 'idle' })
@@ -41,7 +43,7 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'Could not create the invite.'
+            : t('inviteDialog.createFailed')
         setState({ status: 'error', message })
         return
       }
@@ -56,13 +58,13 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
           : INVITE_TTL_MINUTES
       setState({ status: 'success', link, expiresInMinutes })
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('inviteDialog.networkError') })
     }
   }
 
   async function copyLink(link: string): Promise<void> {
     await navigator.clipboard.writeText(link)
-    toast.success('Link copied')
+    toast.success(t('inviteDialog.copiedToast'))
   }
 
   function onOpenChange(next: boolean): void {
@@ -78,26 +80,24 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm">
           <EnvelopeSimple size={13} weight="light" />
-          Invite user
+          {t('inviteDialog.trigger')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create an account-creation link</DialogTitle>
+          <DialogTitle>{t('inviteDialog.title')}</DialogTitle>
         </DialogHeader>
 
         {state.status === 'success' ? (
           <div className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">
-              Send this link to the client. It lets them set their own password and sign in, and works for the
-              next {formatInviteTtl(state.expiresInMinutes)} — they can open it more than once in that time. After
-              that it stops working and you issue a new one.
+              {t('inviteDialog.successHint', { ttl: formatInviteTtl(state.expiresInMinutes) })}
             </p>
             <div className="flex items-center gap-2">
               <Input readOnly value={state.link} className="text-xs" />
               <Button type="button" variant="outline" size="sm" onClick={() => copyLink(state.link)}>
                 <Copy size={13} weight="light" />
-                Copy
+                {t('inviteDialog.copy')}
               </Button>
             </div>
           </div>
@@ -107,12 +107,12 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
             // Declarative WebMCP: an agent may fill this in, but the operator
             // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
             toolname="createClientInviteLink"
-            tooldescription="Generates a link that lets this client set their own password and sign in. It stays usable for a couple of hours and can be opened more than once in that time, then expires. The link is shown on screen to copy; nothing is emailed."
+            tooldescription={t('inviteDialog.toolDescription')}
             className="flex flex-col gap-4"
           >
             <div className="flex flex-col gap-2">
               <Label htmlFor={`invite-email-${clientId}`} className="text-xs">
-                Client&apos;s email
+                {t('inviteDialog.emailLabel')}
               </Label>
               <Input
                 id={`invite-email-${clientId}`}
@@ -122,7 +122,7 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="person@client.com"
-                toolparamdescription="The email address that will own the login. It becomes the account's identity, so it has to be one the client controls."
+                toolparamdescription={t('inviteDialog.emailToolParamDescription')}
               />
             </div>
             {state.status === 'error' ? (
@@ -133,7 +133,7 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
             <DialogFooter>
               <Button type="submit" size="sm" disabled={state.status === 'submitting'}>
                 <LinkSimple size={13} weight="light" />
-                {state.status === 'submitting' ? 'Generating…' : 'Generate link'}
+                {state.status === 'submitting' ? t('inviteDialog.generating') : t('inviteDialog.generateButton')}
               </Button>
             </DialogFooter>
           </form>

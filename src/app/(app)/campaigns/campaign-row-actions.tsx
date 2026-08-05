@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Pause, Play } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,12 +21,18 @@ type CampaignStatus = Database['public']['Enums']['campaign_status']
 
 type SubmitState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
-async function postAction(campaignId: string, action: 'stop' | 'resume'): Promise<{ ok: boolean; message?: string }> {
+async function postAction(
+  campaignId: string,
+  action: 'stop' | 'resume',
+  t: ReturnType<typeof useTranslations<'campaigns'>>,
+): Promise<{ ok: boolean; message?: string }> {
   const res = await fetch(`/api/campaigns/${campaignId}/${action}`, { method: 'POST' })
   if (res.ok) return { ok: true }
   const json: unknown = await res.json().catch(() => ({}))
   const message =
-    typeof json === 'object' && json !== null && 'error' in json ? String((json as { error: unknown }).error) : 'Request failed.'
+    typeof json === 'object' && json !== null && 'error' in json
+      ? String((json as { error: unknown }).error)
+      : t('rowActions.requestFailed')
   return { ok: false, message }
 }
 
@@ -40,21 +47,22 @@ interface StopCampaignDialogProps {
 // follow-ups halt), so it never fires on a single click. Resume, below, only
 // ever restores a safer prior state, so it stays a single click.
 function StopCampaignDialog({ campaignId, campaignName, onDone }: StopCampaignDialogProps): React.ReactElement {
+  const t = useTranslations('campaigns')
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<SubmitState>({ status: 'idle' })
 
   async function onConfirm(): Promise<void> {
     setState({ status: 'submitting' })
-    const result = await postAction(campaignId, 'stop')
+    const result = await postAction(campaignId, 'stop', t)
     if (!result.ok) {
-      const message = result.message ?? 'Request failed.'
+      const message = result.message ?? t('rowActions.requestFailed')
       setState({ status: 'error', message })
-      toast.error('Stop failed', { description: message })
+      toast.error(t('rowActions.stopFailedToast'), { description: message })
       return
     }
     setState({ status: 'idle' })
     setOpen(false)
-    toast.success(`${campaignName} stopped`)
+    toast.success(t('rowActions.stoppedToast', { campaignName }))
     onDone()
   }
 
@@ -69,17 +77,14 @@ function StopCampaignDialog({ campaignId, campaignName, onDone }: StopCampaignDi
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm">
           <Pause size={13} weight="light" />
-          Stop
+          {t('rowActions.stopTrigger')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Stop {campaignName}?</DialogTitle>
+          <DialogTitle>{t('rowActions.stopTitle', { campaignName })}</DialogTitle>
         </DialogHeader>
-        <p className="text-muted-foreground text-sm">
-          Discovery, research, writing, and follow-ups for this campaign halt on the next pipeline tick. Any
-          already-queued work for it will no-op safely. You can resume at any time.
-        </p>
+        <p className="text-muted-foreground text-sm">{t('rowActions.stopDescription')}</p>
         {state.status === 'error' ? (
           <p role="alert" className="text-destructive text-xs">
             {state.message}
@@ -87,7 +92,7 @@ function StopCampaignDialog({ campaignId, campaignName, onDone }: StopCampaignDi
         ) : null}
         <DialogFooter>
           <Button type="button" size="sm" disabled={state.status === 'submitting'} onClick={onConfirm}>
-            {state.status === 'submitting' ? 'Stopping…' : 'Yes, stop campaign'}
+            {state.status === 'submitting' ? t('rowActions.stopping') : t('rowActions.stopConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -106,18 +111,19 @@ interface CampaignRowActionsProps {
 // so an already-archived campaign is already considered halted — a
 // redundant Stop button there would be confusing.
 export function CampaignRowActions({ campaignId, campaignName, status }: CampaignRowActionsProps): React.ReactElement {
+  const t = useTranslations('campaigns')
   const router = useRouter()
   const [resumeState, setResumeState] = useState<SubmitState>({ status: 'idle' })
 
   async function runResume(): Promise<void> {
     setResumeState({ status: 'submitting' })
-    const result = await postAction(campaignId, 'resume')
+    const result = await postAction(campaignId, 'resume', t)
     if (!result.ok) {
-      toast.error('Resume failed', { description: result.message })
+      toast.error(t('rowActions.resumeFailedToast'), { description: result.message })
       setResumeState({ status: 'idle' })
       return
     }
-    toast.success(`${campaignName} resumed`)
+    toast.success(t('rowActions.resumedToast', { campaignName }))
     setResumeState({ status: 'idle' })
     router.refresh()
   }
@@ -137,7 +143,7 @@ export function CampaignRowActions({ campaignId, campaignName, status }: Campaig
           onClick={() => void runResume()}
         >
           <Play size={13} weight="light" />
-          {resumeState.status === 'submitting' ? 'Resuming…' : 'Resume'}
+          {resumeState.status === 'submitting' ? t('rowActions.resuming') : t('rowActions.resumeTrigger')}
         </Button>
       ) : null}
 

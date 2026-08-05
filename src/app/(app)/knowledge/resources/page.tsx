@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { canManageOwnRow } from '@/lib/auth/can-manage-client'
@@ -20,6 +21,7 @@ const PAGE_SIZE = 200
 export default async function ResourcesPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('knowledge')
 
   const [resources, clients] = await Promise.all([
     listActiveResourcesForVisibleClients(supabase, PAGE_SIZE),
@@ -47,11 +49,11 @@ export default async function ResourcesPage(): Promise<React.ReactElement> {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Resources"
-        description="Files the agent can send to a lead who asks to see something. The agent reads the ones whose format it can read, so it can also answer from what is inside."
+        title={t('resources.title')}
+        description={t('resources.description')}
         actions={
           <span className="text-muted-foreground tnum text-sm">
-            {summaries.length} {summaries.length === 1 ? 'resource' : 'resources'}
+            {t('resources.resourceCount', { count: summaries.length })}
           </span>
         }
       />

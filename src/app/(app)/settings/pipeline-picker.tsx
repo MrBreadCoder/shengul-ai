@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 import type { CrmPipeline } from '@/lib/crm/provider'
 import { selectCrmPipeline } from './crm-actions'
 
@@ -9,6 +10,7 @@ interface PipelinePickerProps {
 }
 
 export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactElement {
+  const t = useTranslations('settings')
   const [pipelineId, setPipelineId] = useState(pipelines[0]?.id ?? '')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +21,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
   if (pipelines.length === 0) {
     return (
       <p className="text-muted-foreground text-[13px]">
-        This account has no deal pipelines. Create one in your CRM, then reload this page.
+        {t('pipelinePicker.noPipelines')}
       </p>
     )
   }
@@ -30,7 +32,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
       try {
         await selectCrmPipeline(formData)
       } catch {
-        setError('Could not save that selection. Please try again.')
+        setError(t('pipelinePicker.saveFailed'))
       }
     })
   }
@@ -50,7 +52,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
       />
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium">Pipeline</span>
+        <span className="text-[13px] font-medium">{t('pipelinePicker.pipelineLabel')}</span>
         <select
           name="pipelineId"
           value={pipelineId}
@@ -64,7 +66,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium">Stage for new deals</span>
+        <span className="text-[13px] font-medium">{t('pipelinePicker.initialStageLabel')}</span>
         <select
           name="initialStageId"
           defaultValue={stages[0]?.id ?? ''}
@@ -84,7 +86,7 @@ export function PipelinePicker({ pipelines }: PipelinePickerProps): React.ReactE
         disabled={isPending || stages.length === 0}
         className="border-hairline bg-surface hover:border-hairline-strong self-start rounded-md border px-3 py-2 text-[13px] font-medium disabled:opacity-50"
       >
-        {isPending ? 'Saving…' : 'Save and start syncing'}
+        {isPending ? t('pipelinePicker.saving') : t('pipelinePicker.saveAndSync')}
       </button>
     </form>
   )

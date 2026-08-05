@@ -1,30 +1,28 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 import type { Database } from '@/types/database'
 import { updateReplyMode } from './reply-mode-actions'
 
 type ReplyMode = Database['public']['Enums']['reply_mode']
 
-const REPLY_MODE_LABEL: Record<ReplyMode, string> = {
-  auto_send: 'Automatic',
-  human_approve: 'Manual',
-  hybrid: 'Hybrid',
-}
+const REPLY_MODES: readonly ReplyMode[] = ['auto_send', 'human_approve', 'hybrid']
 
-const REPLY_MODE_HELP: Record<ReplyMode, string> = {
-  auto_send: 'The AI sends replies to leads immediately, with no review.',
-  human_approve: 'Every reply is drafted for your team to review and send from the Inbox.',
-  hybrid: 'The AI sends high-confidence replies automatically and drafts the rest for review.',
+// Keys, not literal English — REPLY_MODE_LABEL/HELP become functions of `t`.
+function replyModeLabel(t: ReturnType<typeof useTranslations<'settings'>>, mode: ReplyMode): string {
+  return t(`replyMode.${mode}.label` as 'replyMode.auto_send.label')
 }
-
-const REPLY_MODES = Object.keys(REPLY_MODE_LABEL) as ReplyMode[]
+function replyModeHelp(t: ReturnType<typeof useTranslations<'settings'>>, mode: ReplyMode): string {
+  return t(`replyMode.${mode}.help` as 'replyMode.auto_send.help')
+}
 
 interface ReplyModeSectionProps {
   currentMode: ReplyMode
 }
 
 export function ReplyModeSection({ currentMode }: ReplyModeSectionProps): React.ReactElement {
+  const t = useTranslations('settings')
   const [mode, setMode] = useState<ReplyMode>(currentMode)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +37,7 @@ export function ReplyModeSection({ currentMode }: ReplyModeSectionProps): React.
       try {
         await updateReplyMode(formData)
       } catch {
-        setError('Could not save that change. Please try again.')
+        setError(t('replyModeSaveFailed'))
         setMode(previous)
       }
     })
@@ -48,7 +46,7 @@ export function ReplyModeSection({ currentMode }: ReplyModeSectionProps): React.
   return (
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1.5">
-        <span className="sr-only">Reply mode</span>
+        <span className="sr-only">{t('replyModeSrOnly')}</span>
         <select
           value={mode}
           disabled={isPending}
@@ -57,12 +55,12 @@ export function ReplyModeSection({ currentMode }: ReplyModeSectionProps): React.
         >
           {REPLY_MODES.map((value) => (
             <option key={value} value={value}>
-              {REPLY_MODE_LABEL[value]}
+              {replyModeLabel(t, value)}
             </option>
           ))}
         </select>
       </label>
-      <p className="text-muted-foreground text-[12px]">{REPLY_MODE_HELP[mode]}</p>
+      <p className="text-muted-foreground text-[12px]">{replyModeHelp(t, mode)}</p>
       {error ? (
         <span role="alert" className="text-destructive text-[11px] font-medium">
           {error}

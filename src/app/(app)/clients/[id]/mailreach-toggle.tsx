@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { setClientMailreachEnabled } from './mailreach-actions'
 
 interface MailreachToggleProps {
@@ -14,6 +15,7 @@ interface MailreachToggleProps {
 // silently reconnects the SMTP ones and leaves gmail/outlook ones showing
 // "needs reconnect" on /settings, since OAuth needs interactive consent.
 export function MailreachToggle({ clientId, enabled }: MailreachToggleProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +26,7 @@ export function MailreachToggle({ clientId, enabled }: MailreachToggleProps): Re
     startTransition(async () => {
       const result = await setClientMailreachEnabled(clientId, next)
       if (!result.ok) {
-        setError('Could not save that.')
+        setError(t('mailreachToggle.saveFailed'))
         return
       }
       router.refresh()
@@ -40,7 +42,7 @@ export function MailreachToggle({ clientId, enabled }: MailreachToggleProps): Re
           disabled={isPending}
           onChange={(event) => toggle(event.target.checked)}
         />
-        Mailreach warmup for this client
+        {t('mailreachToggle.label')}
       </label>
       {error ? (
         <span role="alert" className="text-destructive text-[11px]">

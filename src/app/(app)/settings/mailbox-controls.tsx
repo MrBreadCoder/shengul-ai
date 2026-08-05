@@ -3,14 +3,11 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pause, Play } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import type { WarmupProfile } from '@/lib/mailbox/warmup'
 
-const WARMUP_LABEL: Record<WarmupProfile, string> = {
-  standard: 'Ramp daily',
-  slow: 'Ramp every 2 days',
-  none: 'Already warm',
-}
+const WARMUP_PROFILES: readonly WarmupProfile[] = ['standard', 'slow', 'none']
 
 interface MailboxControlsProps {
   id: string
@@ -19,6 +16,7 @@ interface MailboxControlsProps {
 }
 
 export function MailboxControls({ id, isBlocked, warmupProfile }: MailboxControlsProps): React.ReactElement {
+  const t = useTranslations('settings')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -36,12 +34,12 @@ export function MailboxControls({ id, isBlocked, warmupProfile }: MailboxControl
         body: body ? JSON.stringify(body) : undefined,
       })
       if (!response.ok) {
-        setError('Could not apply that change.')
+        setError(t('mailboxControls.applyFailed'))
         return
       }
       startTransition(() => router.refresh())
     } catch {
-      setError('network')
+      setError(t('mailboxControls.networkError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -50,7 +48,7 @@ export function MailboxControls({ id, isBlocked, warmupProfile }: MailboxControl
   return (
     <div className="flex flex-wrap items-center gap-2.5">
       <label className="sr-only" htmlFor={`warmup-${id}`}>
-        Warmup profile
+        {t('mailboxControls.warmupProfileSrOnly')}
       </label>
       <select
         id={`warmup-${id}`}
@@ -59,9 +57,9 @@ export function MailboxControls({ id, isBlocked, warmupProfile }: MailboxControl
         onChange={(event) => void post('warmup', { profile: event.target.value })}
         className="border-hairline bg-surface rounded-md border px-2 py-1 text-[11px]"
       >
-        {(Object.keys(WARMUP_LABEL) as WarmupProfile[]).map((profile) => (
+        {WARMUP_PROFILES.map((profile) => (
           <option key={profile} value={profile}>
-            {WARMUP_LABEL[profile]}
+            {t(`mailboxControls.warmupLabel.${profile}` as 'mailboxControls.warmupLabel.standard')}
           </option>
         ))}
       </select>
@@ -74,7 +72,7 @@ export function MailboxControls({ id, isBlocked, warmupProfile }: MailboxControl
         onClick={() => void post(isBlocked ? 'resume' : 'pause')}
       >
         {isBlocked ? <Play size={13} weight="light" /> : <Pause size={13} weight="light" />}
-        {isBlocked ? 'Resume' : 'Pause'}
+        {isBlocked ? t('mailboxControls.resume') : t('mailboxControls.pause')}
       </Button>
 
       {error ? (

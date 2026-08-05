@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import type { ComponentType } from 'react'
+import { useTranslations } from 'next-intl'
 import {
   ChartLineUp,
   Envelope,
@@ -18,24 +19,24 @@ import { cn } from '@/lib/utils'
 
 interface NavItem {
   readonly href: string
-  readonly label: string
+  readonly labelKey: 'pipeline' | 'inbox' | 'mail' | 'knowledge' | 'analytics' | 'clients' | 'campaigns' | 'settings'
   readonly icon: ComponentType<IconProps>
   /** Operator-only destinations are hidden from client-role users entirely. */
   readonly operatorOnly?: boolean
 }
 
 const PRIMARY_NAV: readonly NavItem[] = [
-  { href: '/crm', label: 'Pipeline', icon: Kanban },
-  { href: '/inbox', label: 'Inbox', icon: Tray },
-  { href: '/mail', label: 'Mail', icon: Envelope },
-  { href: '/knowledge', label: 'Knowledge', icon: Stack },
-  { href: '/analytics', label: 'Analytics', icon: ChartLineUp },
+  { href: '/crm', labelKey: 'pipeline', icon: Kanban },
+  { href: '/inbox', labelKey: 'inbox', icon: Tray },
+  { href: '/mail', labelKey: 'mail', icon: Envelope },
+  { href: '/knowledge', labelKey: 'knowledge', icon: Stack },
+  { href: '/analytics', labelKey: 'analytics', icon: ChartLineUp },
 ]
 
 const SECONDARY_NAV: readonly NavItem[] = [
-  { href: '/clients', label: 'Clients', icon: Buildings, operatorOnly: true },
-  { href: '/campaigns', label: 'Campaigns', icon: Lightning, operatorOnly: true },
-  { href: '/settings', label: 'Settings', icon: Gear },
+  { href: '/clients', labelKey: 'clients', icon: Buildings, operatorOnly: true },
+  { href: '/campaigns', labelKey: 'campaigns', icon: Lightning, operatorOnly: true },
+  { href: '/settings', labelKey: 'settings', icon: Gear },
 ]
 
 interface NavProps {
@@ -54,6 +55,7 @@ function isActive(pathname: string, href: string): boolean {
 
 export function Nav({ role, inboxCount, onNavigate }: NavProps): React.ReactElement {
   const pathname = usePathname()
+  const t = useTranslations('nav')
 
   const renderItem = (item: NavItem): React.ReactElement | null => {
     if (item.operatorOnly && role !== 'operator') return null
@@ -76,11 +78,11 @@ export function Nav({ role, inboxCount, onNavigate }: NavProps): React.ReactElem
         )}
       >
         <Icon size={17} weight={active ? 'fill' : 'light'} className="shrink-0" />
-        <span className="truncate">{item.label}</span>
+        <span className="truncate">{t(item.labelKey)}</span>
         {badge !== null ? (
           <span
             className="bg-primary/15 text-primary tnum ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-            aria-label={`${badge} awaiting you`}
+            aria-label={t('awaitingYou', { count: badge })}
           >
             {badge}
           </span>

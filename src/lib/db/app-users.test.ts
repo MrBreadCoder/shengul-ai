@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { getAppUser } from './app-users'
+import { describe, it, expect, vi } from 'vitest'
+import { getAppUser, updateUserLocale } from './app-users'
 import { AppError } from '@/lib/errors/app-error'
 
 function mockSupabase(result: { data: unknown; error: unknown }) {
@@ -25,6 +25,27 @@ describe('getAppUser', () => {
   it('should throw DB_ERROR when the query errors', async () => {
     await expect(
       getAppUser(mockSupabase({ data: null, error: { message: 'boom' } }), 'u1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateUserLocale', () => {
+  it('should persist the locale and return the updated row', async () => {
+    const row = { id: 'u1', role: 'client', client_id: 'c1', locale: 'tr' }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateUserLocale({ from: () => ({ update }) } as never, 'u1', 'tr')
+    expect(update).toHaveBeenCalledWith({ locale: 'tr' })
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateUserLocale({ from: () => ({ update }) } as never, 'u1', 'tr'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import type { Database } from '@/types/database'
 
 type MailboxProvider = Database['public']['Enums']['mailbox_provider']
@@ -16,6 +17,7 @@ interface MailreachControlsProps {
 // Gmail/Outlook mailboxes need Mailreach's own OAuth consent — checking the
 // box for those navigates the browser instead of firing an async POST.
 export function MailreachControls({ id, provider, enabled }: MailreachControlsProps): React.ReactElement {
+  const t = useTranslations('settings')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -41,9 +43,9 @@ export function MailreachControls({ id, provider, enabled }: MailreachControlsPr
           window.location.href = (json as { authorizeUrl: string }).authorizeUrl
           return
         }
-        setError('Could not start the Mailreach connection.')
+        setError(t('mailreachControls.startFailed'))
       } catch {
-        setError('Could not start the Mailreach connection.')
+        setError(t('mailreachControls.startFailed'))
       } finally {
         setIsSubmitting(false)
       }
@@ -55,12 +57,12 @@ export function MailreachControls({ id, provider, enabled }: MailreachControlsPr
       const path = next ? 'connect' : 'disconnect'
       const response = await fetch(`/api/mailboxes/${id}/mailreach/${path}`, { method: 'POST' })
       if (!response.ok) {
-        setError('Could not apply that change.')
+        setError(t('mailreachControls.applyFailed'))
         return
       }
       startTransition(() => router.refresh())
     } catch {
-      setError('Could not apply that change.')
+      setError(t('mailreachControls.applyFailed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -75,7 +77,7 @@ export function MailreachControls({ id, provider, enabled }: MailreachControlsPr
           disabled={isBusy}
           onChange={(event) => void toggle(event.target.checked)}
         />
-        Mailreach warmup
+        {t('mailreachControls.label')}
       </label>
       {error ? (
         <span role="alert" className="text-destructive text-[11px] font-medium">

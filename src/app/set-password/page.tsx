@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
+import { getTranslations } from 'next-intl/server'
 import { createServerClient } from '@/lib/supabase/server'
 import { SetPasswordForm } from './set-password-form'
 
@@ -14,17 +15,18 @@ export default async function SetPasswordPage(): Promise<React.ReactElement> {
   const supabase = await createServerClient()
   const { data } = await supabase.auth.getUser()
   if (!data.user) redirect('/login')
+  const t = await getTranslations('auth')
 
   return (
     <main className="grid min-h-[100dvh] place-items-center px-4 py-16">
       <div className="w-full max-w-[360px]">
         <div className="flex items-center">
-          <span className="text-sm font-semibold tracking-tight">Shengul AI</span>
+          <span className="text-sm font-semibold tracking-tight">{t('brand')}</span>
         </div>
 
-        <h1 className="mt-8 text-xl font-semibold tracking-tight">Set your password</h1>
+        <h1 className="mt-8 text-xl font-semibold tracking-tight">{t('setPasswordTitle')}</h1>
         <p className="text-muted-foreground mt-1.5 text-sm">
-          Signed in as {data.user.email}. Choose a password to finish setting up your account.
+          {t('setPasswordSubtitle', { email: data.user.email ?? '' })}
         </p>
 
         <SetPasswordForm />

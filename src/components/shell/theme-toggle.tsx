@@ -1,6 +1,7 @@
 'use client'
 
 import { Moon, Sun } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 
 const STORAGE_KEY = 'ai-b2b-theme'
@@ -12,6 +13,7 @@ const STORAGE_KEY = 'ai-b2b-theme'
  * render, with no hydration mismatch and no effect.
  */
 export function ThemeToggle(): React.ReactElement {
+  const t = useTranslations('common')
   const toggle = (): void => {
     const isDark = document.documentElement.classList.toggle('dark')
     try {
@@ -27,8 +29,8 @@ export function ThemeToggle(): React.ReactElement {
       variant="ghost"
       size="icon"
       onClick={toggle}
-      aria-label="Toggle colour theme"
-      title="Toggle colour theme"
+      aria-label={t('toggleTheme')}
+      title={t('toggleTheme')}
       className="text-muted-foreground hover:text-foreground size-8"
     >
       <Sun size={16} weight="light" className="hidden dark:block" />

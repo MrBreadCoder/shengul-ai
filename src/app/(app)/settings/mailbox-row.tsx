@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { EnvelopeSimple, GoogleLogo, MicrosoftOutlookLogo, PaperPlaneTilt } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { StatusPill } from '@/components/status-dot'
 import { MAILBOX_HEALTH } from '@/lib/ui/status'
@@ -36,19 +37,24 @@ interface MailboxRowProps {
   mailreachReputationScore: number | null
 }
 
-function mailreachStatusText(props: {
-  enabled: boolean
-  startedAt: string | null
-  status: MailreachStatus
-  reputationScore: number | null
-}): string | null {
+function mailreachStatusText(
+  t: ReturnType<typeof useTranslations<'settings'>>,
+  props: {
+    enabled: boolean
+    startedAt: string | null
+    status: MailreachStatus
+    reputationScore: number | null
+  },
+): string | null {
   if (!props.enabled || props.startedAt === null) return null
-  if (props.status !== 'connected') return 'Mailreach: needs reconnect'
+  if (props.status !== 'connected') return t('mailboxRow.mailreachNeedsReconnect')
   const elapsed = mailreachElapsedDays(props.startedAt, new Date())
   if (elapsed < MAILREACH_CAMPAIGN_GATE_DAYS) {
-    return `Mailreach: day ${elapsed}/${MAILREACH_CAMPAIGN_GATE_DAYS} · warming`
+    return t('mailboxRow.mailreachWarming', { elapsed, gate: MAILREACH_CAMPAIGN_GATE_DAYS })
   }
-  return props.reputationScore !== null ? `Mailreach: warm · reputation ${props.reputationScore}` : 'Mailreach: warm'
+  return props.reputationScore !== null
+    ? t('mailboxRow.mailreachWarmReputation', { score: props.reputationScore })
+    : t('mailboxRow.mailreachWarm')
 }
 
 type SendState =
@@ -64,6 +70,7 @@ const PROVIDER_ICON = {
 } as const
 
 export function MailboxRow(props: MailboxRowProps): React.ReactElement {
+  const t = useTranslations('settings')
   const [state, setState] = useState<SendState>({ status: 'idle' })
   const Icon = PROVIDER_ICON[props.provider]
   const now = new Date()
@@ -78,7 +85,7 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
   }
   const capToday = effectiveDailyCap(rampInput)
   const warmthStatus = getMailboxWarmthStatus(rampInput)
-  const mailreachText = mailreachStatusText({
+  const mailreachText = mailreachStatusText(t, {
     enabled: props.mailreachEnabled,
     startedAt: props.mailreachStartedAt,
     status: props.mailreachStatus,
@@ -94,7 +101,7 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'failed'
+            : t('mailboxRow.testFailedFallback')
         setState({ status: 'error', message })
         return
       }
@@ -104,7 +111,7 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
           : ''
       setState({ status: 'sent', providerMessageId })
     } catch {
-      setState({ status: 'error', message: 'network' })
+      setState({ status: 'error', message: t('mailboxRow.networkError') })
     }
   }
 
@@ -117,12 +124,10 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium">{props.emailAddress}</p>
         <p className="text-faint truncate text-[11px]">
-          {props.displayName ?? 'No display name'} · {props.provider} ·{' '}
-          <span className="tnum">
-            {props.sentToday}/{capToday} today
-          </span>
+          {props.displayName ?? t('mailboxRow.noDisplayName')} · {props.provider} ·{' '}
+          <span className="tnum">{t('mailboxRow.sentToday', { sentToday: props.sentToday, capToday })}</span>
           {warmthStatus.kind === 'ramping'
-            ? ` · warming up (day ${warmthStatus.dayNumber}, target ${props.warmupTargetCap})`
+            ? ` · ${t('mailboxRow.rampingSuffix', { day: warmthStatus.dayNumber, target: props.warmupTargetCap })}`
             : null}
           {props.healthReason ? ` · ${props.healthReason.replaceAll('_', ' ')}` : null}
           {mailreachText ? ` · ${mailreachText}` : null}
@@ -147,16 +152,16 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
           disabled={state.status === 'sending'}
         >
           <PaperPlaneTilt size={13} weight="light" />
-          {state.status === 'sending' ? 'Sending…' : 'Send test'}
+          {state.status === 'sending' ? t('mailboxRow.sending') : t('mailboxRow.sendTest')}
         </Button>
         {state.status === 'sent' ? (
           <span role="status" className="text-[11px] font-medium" style={{ color: 'var(--status-won)' }}>
-            Test delivered
+            {t('mailboxRow.testDelivered')}
           </span>
         ) : null}
         {state.status === 'error' ? (
           <span role="alert" className="text-destructive text-[11px] font-medium">
-            Failed: {state.message}
+            {t('mailboxRow.testFailedPrefix', { message: state.message })}
           </span>
         ) : null}
       </div>

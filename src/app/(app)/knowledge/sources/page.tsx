@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { canManageOwnRow } from '@/lib/auth/can-manage-client'
@@ -16,6 +17,7 @@ export const metadata: Metadata = { title: 'Knowledge sources' }
 export default async function KnowledgeSourcesPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('knowledge')
 
   const [sources, clients] = await Promise.all([
     listSourcesForVisibleClients(supabase),
@@ -40,11 +42,11 @@ export default async function KnowledgeSourcesPage(): Promise<React.ReactElement
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Knowledge sources"
-        description="Pages and files the agent reads to answer better. These are never sent to a lead."
+        title={t('sources.title')}
+        description={t('sources.description')}
         actions={
           <span className="text-muted-foreground tnum text-sm">
-            {summaries.length} {summaries.length === 1 ? 'source' : 'sources'}
+            {t('sources.sourceCount', { count: summaries.length })}
           </span>
         }
       />

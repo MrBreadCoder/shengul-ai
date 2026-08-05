@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { EnvelopeSimple, Plus } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -52,26 +53,25 @@ const INITIAL_VALUES: FormValues = {
   imapSecure: 'true',
 }
 
-const STAGE_LABEL: Record<string, string> = { smtp: 'sending (SMTP)', imap: 'reading (IMAP)' }
+type SmtpStage = 'smtp' | 'imap'
 
-function errorMessage(code: unknown, stage: unknown): string {
-  const leg = typeof stage === 'string' && stage in STAGE_LABEL ? ` on the ${STAGE_LABEL[stage]} server` : ''
-  if (code === 'auth_failed') {
-    return `The username or password was rejected${leg}. App passwords are often required instead of your account password.`
-  }
-  if (code === 'timeout') {
-    return `The server did not respond in time${leg}. Check the host and port.`
-  }
-  if (code === 'connection_failed') {
-    return `Could not reach the server${leg}. Check the host, port, and TLS mode.`
-  }
-  if (code === 'validation_error') {
-    return 'Some fields are missing or invalid. Check the email address and port numbers.'
-  }
-  return 'Could not connect the mailbox. Check the details and try again.'
+function isSmtpStage(value: unknown): value is SmtpStage {
+  return value === 'smtp' || value === 'imap'
+}
+
+function errorMessage(t: ReturnType<typeof useTranslations<'settings'>>, code: unknown, stage: unknown): string {
+  const leg = isSmtpStage(stage)
+    ? t('smtpDialog.errorLegSuffix', { stage: t(stage === 'smtp' ? 'smtpDialog.stageSmtp' : 'smtpDialog.stageImap') })
+    : ''
+  if (code === 'auth_failed') return t('smtpDialog.errorAuthFailed', { leg })
+  if (code === 'timeout') return t('smtpDialog.errorTimeout', { leg })
+  if (code === 'connection_failed') return t('smtpDialog.errorConnectionFailed', { leg })
+  if (code === 'validation_error') return t('smtpDialog.errorValidation')
+  return t('smtpDialog.errorGeneric')
 }
 
 export function ConnectSmtpDialog(): React.ReactElement {
+  const t = useTranslations('settings')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
@@ -117,13 +117,13 @@ export function ConnectSmtpDialog(): React.ReactElement {
       const json: unknown = await response.json().catch(() => ({}))
       if (!response.ok) {
         const body = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
-        setState({ status: 'error', message: errorMessage(body.error, body.stage) })
+        setState({ status: 'error', message: errorMessage(t, body.error, body.stage) })
         return
       }
       onOpenChange(false)
       startTransition(() => router.refresh())
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('smtpDialog.errorNetwork') })
     }
   }
 
@@ -138,8 +138,8 @@ export function ConnectSmtpDialog(): React.ReactElement {
             <EnvelopeSimple size={18} weight="light" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-medium">Connect SMTP</span>
-            <span className="text-faint block text-[11px]">Any provider, with a username and password</span>
+            <span className="block text-[13px] font-medium">{t('smtpDialog.triggerTitle')}</span>
+            <span className="text-faint block text-[11px]">{t('smtpDialog.triggerHint')}</span>
           </span>
           <Plus
             size={15}
@@ -151,7 +151,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
 
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect a mailbox over SMTP</DialogTitle>
+          <DialogTitle>{t('smtpDialog.title')}</DialogTitle>
         </DialogHeader>
 
         {/*
@@ -161,13 +161,11 @@ export function ConnectSmtpDialog(): React.ReactElement {
           Lighthouse listing it under `webmcp-form-coverage` is intended.
         */}
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <p className="text-muted-foreground text-xs">
-            Sending uses SMTP and reading replies uses IMAP. Both are checked before the mailbox is saved.
-          </p>
+          <p className="text-muted-foreground text-xs">{t('smtpDialog.intro')}</p>
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="smtp-email" className="text-xs">
-              Email address
+              {t('smtpDialog.emailLabel')}
             </Label>
             <Input
               id="smtp-email"
@@ -182,7 +180,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="smtp-display-name" className="text-xs">
-              Display name (optional)
+              {t('smtpDialog.displayNameLabel')}
             </Label>
             <Input
               id="smtp-display-name"
@@ -197,7 +195,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="smtp-first-name" className="text-xs">
-                First name
+                {t('smtpDialog.firstNameLabel')}
               </Label>
               <Input
                 id="smtp-first-name"
@@ -211,7 +209,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="smtp-last-name" className="text-xs">
-                Last name
+                {t('smtpDialog.lastNameLabel')}
               </Label>
               <Input
                 id="smtp-last-name"
@@ -228,7 +226,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="smtp-username" className="text-xs">
-                Username
+                {t('smtpDialog.usernameLabel')}
               </Label>
               <Input
                 id="smtp-username"
@@ -242,7 +240,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="smtp-password" className="text-xs">
-                Password
+                {t('smtpDialog.passwordLabel')}
               </Label>
               <Input
                 id="smtp-password"
@@ -258,7 +256,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="flex flex-col gap-2 sm:col-span-2">
               <Label htmlFor="smtp-host" className="text-xs">
-                SMTP host
+                {t('smtpDialog.smtpHostLabel')}
               </Label>
               <Input
                 id="smtp-host"
@@ -271,7 +269,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="smtp-port" className="text-xs">
-                SMTP port
+                {t('smtpDialog.smtpPortLabel')}
               </Label>
               <Input
                 id="smtp-port"
@@ -287,7 +285,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="smtp-secure" className="text-xs">
-              SMTP security
+              {t('smtpDialog.smtpSecureLabel')}
             </Label>
             <select
               id="smtp-secure"
@@ -295,15 +293,15 @@ export function ConnectSmtpDialog(): React.ReactElement {
               onChange={(event) => setField('smtpSecure', event.target.value)}
               className="border-hairline bg-surface rounded-md border px-2 py-2 text-[13px]"
             >
-              <option value="false">STARTTLS (usually port 587)</option>
-              <option value="true">SSL/TLS (usually port 465)</option>
+              <option value="false">{t('smtpDialog.smtpSecureStarttls')}</option>
+              <option value="true">{t('smtpDialog.smtpSecureSsl')}</option>
             </select>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="flex flex-col gap-2 sm:col-span-2">
               <Label htmlFor="imap-host" className="text-xs">
-                IMAP host
+                {t('smtpDialog.imapHostLabel')}
               </Label>
               <Input
                 id="imap-host"
@@ -316,7 +314,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="imap-port" className="text-xs">
-                IMAP port
+                {t('smtpDialog.imapPortLabel')}
               </Label>
               <Input
                 id="imap-port"
@@ -332,7 +330,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="imap-secure" className="text-xs">
-              IMAP security
+              {t('smtpDialog.imapSecureLabel')}
             </Label>
             <select
               id="imap-secure"
@@ -340,8 +338,8 @@ export function ConnectSmtpDialog(): React.ReactElement {
               onChange={(event) => setField('imapSecure', event.target.value)}
               className="border-hairline bg-surface rounded-md border px-2 py-2 text-[13px]"
             >
-              <option value="true">SSL/TLS (usually port 993)</option>
-              <option value="false">STARTTLS (usually port 143)</option>
+              <option value="true">{t('smtpDialog.imapSecureSsl')}</option>
+              <option value="false">{t('smtpDialog.imapSecureStarttls')}</option>
             </select>
           </div>
 
@@ -354,7 +352,7 @@ export function ConnectSmtpDialog(): React.ReactElement {
           <DialogFooter>
             <Button type="submit" size="sm" disabled={isBusy}>
               <EnvelopeSimple size={13} weight="light" />
-              {isBusy ? 'Checking connection…' : 'Connect mailbox'}
+              {isBusy ? t('smtpDialog.checking') : t('smtpDialog.connectButton')}
             </Button>
           </DialogFooter>
         </form>

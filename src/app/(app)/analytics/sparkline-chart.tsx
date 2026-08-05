@@ -1,3 +1,4 @@
+import { getTranslations } from 'next-intl/server'
 import { buildSparkline } from '@/lib/analytics/sparkline'
 
 interface SparklineChartProps {
@@ -12,13 +13,14 @@ interface SparklineChartProps {
 
 const STAGGER_STEP_MS = 40
 
-export function SparklineChart({
+export async function SparklineChart({
   title,
   values,
   color,
   total,
   index,
-}: SparklineChartProps): React.ReactElement {
+}: SparklineChartProps): Promise<React.ReactElement> {
+  const t = await getTranslations('analytics')
   const { width, height, max, bars } = buildSparkline(values)
   const style = index !== undefined ? { animationDelay: `${index * STAGGER_STEP_MS}ms` } : undefined
 
@@ -30,11 +32,11 @@ export function SparklineChart({
       </div>
 
       {bars.length === 0 ? (
-        <p className="text-faint mt-3 text-xs">No days in this range.</p>
+        <p className="text-faint mt-3 text-xs">{t('sparkline.noData')}</p>
       ) : (
         <svg
           role="img"
-          aria-label={`${title}: ${total} over ${bars.length} days, peak ${max} per day`}
+          aria-label={t('sparkline.ariaLabel', { title, total, days: bars.length, max })}
           width={width}
           height={height}
           viewBox={`0 0 ${width} ${height}`}
@@ -58,7 +60,7 @@ export function SparklineChart({
       )}
 
       <p className="text-faint tnum mt-2 text-[11px]">
-        Peak {max}/day over {bars.length} days
+        {t('sparkline.peakLabel', { max, days: bars.length })}
       </p>
     </div>
   )

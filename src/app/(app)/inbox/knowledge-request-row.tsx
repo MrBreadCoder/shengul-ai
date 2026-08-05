@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { motion, useReducedMotion } from 'motion/react'
 import { CheckCircle, PaperPlaneTilt, Question } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { answerKnowledgeRequest } from './actions'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -44,6 +45,7 @@ export function KnowledgeRequestRow({
   age,
   resources,
 }: KnowledgeRequestRowProps): React.ReactElement {
+  const t = useTranslations('inbox')
   const [isPending, startTransition] = useTransition()
   const [isAnswered, setIsAnswered] = useState(false)
   const [answer, setAnswer] = useState('')
@@ -67,13 +69,13 @@ export function KnowledgeRequestRow({
       body.set('file', file)
       const res = await fetch(`/api/clients/${clientId}/knowledge/file`, { method: 'POST', body })
       if (!res.ok) {
-        toast.warning('The answer was sent, but the file was not saved', {
-          description: await extractErrorMessage(res, 'Could not read the file.'),
+        toast.warning(t('knowledgeRequestRow.toastFileWarningTitle'), {
+          description: await extractErrorMessage(res, t('knowledgeRequestRow.toastFileReadError')),
         })
       }
     } catch {
-      toast.warning('The answer was sent, but the file was not saved', {
-        description: 'Network request failed. Check your connection and retry the upload.',
+      toast.warning(t('knowledgeRequestRow.toastFileWarningTitle'), {
+        description: t('knowledgeRequestRow.toastFileNetworkError'),
       })
     }
   }
@@ -88,10 +90,12 @@ export function KnowledgeRequestRow({
       try {
         await answerKnowledgeRequest(formData)
         setIsAnswered(true)
-        toast.success('Answer sent', { description: `The agent replied to ${companyName}.` })
+        toast.success(t('knowledgeRequestRow.toastAnswerSent'), {
+          description: t('knowledgeRequestRow.toastAnswerSentDescription', { companyName }),
+        })
       } catch (error) {
-        toast.error('Could not send the answer', {
-          description: error instanceof Error ? error.message : 'Please try again.',
+        toast.error(t('knowledgeRequestRow.toastAnswerFailed'), {
+          description: error instanceof Error ? error.message : t('knowledgeRequestRow.toastPleaseRetry'),
         })
         return
       }
@@ -113,7 +117,8 @@ export function KnowledgeRequestRow({
       >
         <CheckCircle size={16} weight="fill" className="shrink-0" style={{ color: 'var(--status-won)' }} />
         <p className="text-sm">
-          Answered <span className="text-muted-foreground">for {companyName}.</span>
+          {t('knowledgeRequestRow.answeredPrefix')}{' '}
+          <span className="text-muted-foreground">{t('knowledgeRequestRow.answeredSuffix', { companyName })}</span>
         </p>
       </motion.article>
     )
@@ -126,7 +131,7 @@ export function KnowledgeRequestRow({
       // presses the button — submitting this sends mail to the prospect. No
       // `toolautosubmit` — see `@/types/webmcp`.
       toolname="answerKnowledgeRequest"
-      tooldescription="Answers a question the outreach agent is blocked on, saves it as knowledge for this company, and replies to the prospect. Files from the resource library may be attached to that reply, and a file may be supplied for the agent to learn from. Submitting sends an email."
+      tooldescription={t('knowledgeRequestRow.toolDescription')}
       className="bg-surface rounded-lg border"
       // Open questions block the agent mid-conversation, so this row carries a
       // warmer edge than a draft: it is the thing to deal with first.
@@ -150,7 +155,7 @@ export function KnowledgeRequestRow({
           >
             {companyName}
           </Link>
-          <p className="text-faint truncate text-[11px]">Agent is blocked · {age}</p>
+          <p className="text-faint truncate text-[11px]">{t('knowledgeRequestRow.agentBlocked', { age })}</p>
         </div>
       </header>
 
@@ -161,12 +166,12 @@ export function KnowledgeRequestRow({
           type="hidden"
           name="knowledgeRequestId"
           value={knowledgeRequestId}
-          toolparamdescription="Prefilled. Identifies which blocked question this answers — leave it exactly as it is."
+          toolparamdescription={t('knowledgeRequestRow.knowledgeRequestIdToolParamDescription')}
         />
 
         <div className="flex flex-col gap-2">
           <Label htmlFor={`answer-${knowledgeRequestId}`} className="text-xs">
-            Your answer
+            {t('knowledgeRequestRow.yourAnswerLabel')}
           </Label>
           <Textarea
             id={`answer-${knowledgeRequestId}`}
@@ -175,12 +180,12 @@ export function KnowledgeRequestRow({
             rows={3}
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}
-            placeholder="State the fact plainly. The agent rewrites it in its own voice before replying."
+            placeholder={t('knowledgeRequestRow.answerPlaceholder')}
             className="max-w-[75ch] resize-y"
-            toolparamdescription="The factual answer to the question shown above, stated plainly. It is rewritten in the sender's voice before it goes out, so phrasing does not matter but accuracy does. Never guess here."
+            toolparamdescription={t('knowledgeRequestRow.answerToolParamDescription')}
           />
           <p className="text-faint text-[11px]">
-            Saved as case knowledge, so the agent can reuse it on this company later.
+            {t('knowledgeRequestRow.answerHint')}
           </p>
         </div>
 
@@ -188,7 +193,7 @@ export function KnowledgeRequestRow({
 
         <div className="flex flex-col gap-2">
           <Label htmlFor={`knowledge-file-${knowledgeRequestId}`} className="text-xs">
-            Add knowledge — teaches the agent
+            {t('knowledgeRequestRow.addKnowledgeLabel')}
           </Label>
           <Input
             id={`knowledge-file-${knowledgeRequestId}`}
@@ -196,10 +201,10 @@ export function KnowledgeRequestRow({
             type="file"
             accept="application/pdf,text/plain,text/markdown,.md"
             className="max-w-[45ch]"
-            toolparamdescription="Optional. A file the agent should learn from. Not sent to the lead."
+            toolparamdescription={t('knowledgeRequestRow.knowledgeFileToolParamDescription')}
           />
           <p className="text-faint text-[11px]">
-            Read, chunked and embedded for future answers. Never sent to the lead.
+            {t('knowledgeRequestRow.knowledgeFileHint')}
           </p>
         </div>
       </div>
@@ -207,7 +212,7 @@ export function KnowledgeRequestRow({
       <footer className="border-hairline border-t px-4 py-3">
         <Button type="submit" size="sm" disabled={isPending || isEmpty}>
           <PaperPlaneTilt size={14} weight="fill" />
-          {isPending ? 'Sending…' : 'Answer and send'}
+          {isPending ? t('knowledgeRequestRow.sending') : t('knowledgeRequestRow.answerAndSend')}
         </Button>
       </footer>
     </form>

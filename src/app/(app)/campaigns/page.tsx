@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Lightning } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listCampaignsForClient, type CampaignRow } from '@/lib/db/campaigns'
@@ -49,6 +50,7 @@ function toWebMcpEntry({
 export default async function CampaignsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
   if (appUser.role !== 'operator') redirect('/crm')
+  const t = await getTranslations('campaigns')
 
   const admin = createAdminClient()
   const [campaigns, clients] = await Promise.all([
@@ -60,17 +62,14 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <CampaignsWebMcpTools campaigns={campaigns.map(toWebMcpEntry)} />
-      <PageHeader
-        title="Campaigns"
-        description="A campaign defines who the agent looks for and what it says. Discovery runs daily against these filters."
-      />
+      <PageHeader title={t('pageTitle')} description={t('pageDescription')} />
 
-      <Section title="New campaign">
+      <Section title={t('newCampaignSectionTitle')}>
         {clients.length === 0 ? (
           <EmptyState
             icon={Lightning}
-            title="No clients yet"
-            description="A campaign belongs to a client. Seed or create a client before setting up outreach."
+            title={t('noClientsTitle')}
+            description={t('noClientsDescription')}
           />
         ) : (
           <NewCampaignForm clients={clients} />
@@ -78,14 +77,14 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
       </Section>
 
       <Section
-        title="All campaigns"
-        aside={campaigns.length > 0 ? `${campaigns.length} total` : undefined}
+        title={t('allCampaignsSectionTitle')}
+        aside={campaigns.length > 0 ? t('allCampaignsAside', { count: campaigns.length }) : undefined}
       >
         {campaigns.length === 0 ? (
           <EmptyState
             icon={Lightning}
-            title="No campaigns yet"
-            description="Create one above. The discovery cron picks it up on its next run."
+            title={t('noCampaignsTitle')}
+            description={t('noCampaignsDescription')}
           />
         ) : (
           <ul className="flex flex-col gap-2">
@@ -105,9 +104,9 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
                 </p>
 
                 <div className="text-faint mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-                  <span className="tnum">{campaign.daily_target} leads/day</span>
-                  <span className="tnum">{campaign.mailbox_ids.length} mailboxes</span>
-                  <span className="ml-auto">Created {formatRelative(campaign.created_at, now)}</span>
+                  <span className="tnum">{t('leadsPerDay', { count: campaign.daily_target })}</span>
+                  <span className="tnum">{t('mailboxCount', { count: campaign.mailbox_ids.length })}</span>
+                  <span className="ml-auto">{t('createdRelative', { relative: formatRelative(campaign.created_at, now) })}</span>
                 </div>
 
                 <div className="border-hairline mt-3 flex items-center gap-2 border-t pt-3">

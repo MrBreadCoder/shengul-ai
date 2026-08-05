@@ -16,6 +16,7 @@ import {
   updateClientMailreachEnabled,
   updateClientReplyMode,
   updateClientFollowupDelays,
+  updateClientDefaultLocale,
   resolveMailboxClientId,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
@@ -341,6 +342,27 @@ describe('updateClientReplyMode', () => {
     })
     await expect(
       updateClientReplyMode({ from: () => ({ update }) } as never, 'c1', 'auto_send'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientDefaultLocale', () => {
+  it('should persist the default locale and return the updated row', async () => {
+    const row = { id: 'c1', default_locale: 'tr' }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateClientDefaultLocale({ from: () => ({ update }) } as never, 'c1', 'tr')
+    expect(update).toHaveBeenCalledWith({ default_locale: 'tr' })
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateClientDefaultLocale({ from: () => ({ update }) } as never, 'c1', 'tr'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

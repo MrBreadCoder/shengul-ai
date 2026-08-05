@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Files, Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import type { Database } from '@/types/database'
 import { KNOWLEDGE_SOURCE_STATUS } from '@/lib/ui/status'
 import { StatusPill } from '@/components/status-dot'
@@ -15,11 +16,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 // mislabelled cell. 'pdf' is the legacy value; 'file' covers pdf/txt/md uploads.
 // 'resource' is the companion row behind a sendable file — filtered out of this
 // list, and labelled here only so the map stays total over the enum.
-const SOURCE_TYPE_LABEL: Record<Database['public']['Enums']['knowledge_source_type'], string> = {
-  website_page: 'Web page',
-  pdf: 'PDF',
-  file: 'File',
-  resource: 'Resource file',
+const SOURCE_TYPE_KEY: Record<Database['public']['Enums']['knowledge_source_type'], 'typeWebPage' | 'typePdf' | 'typeFile' | 'typeResource'> = {
+  website_page: 'typeWebPage',
+  pdf: 'typePdf',
+  file: 'typeFile',
+  resource: 'typeResource',
 }
 
 export interface KnowledgeSourceSummary {
@@ -46,6 +47,7 @@ export function KnowledgeSourcesTable({
   sources,
   clientNameById,
 }: KnowledgeSourcesTableProps): React.ReactElement {
+  const t = useTranslations('knowledge')
   const router = useRouter()
   const [deletingIds, setDeletingIds] = useState<readonly string[]>([])
   const [removedIds, setRemovedIds] = useState<readonly string[]>([])
@@ -53,22 +55,22 @@ export function KnowledgeSourcesTable({
   const visible = sources.filter((source) => !removedIds.includes(source.id))
 
   async function onDelete(source: KnowledgeSourceSummary): Promise<void> {
-    if (!window.confirm('Remove this from the knowledge base?')) return
+    if (!window.confirm(t('sources.deleteConfirm'))) return
     setDeletingIds((ids) => [...ids, source.id])
     try {
       const res = await fetch(`/api/clients/${source.clientId}/knowledge/${source.id}`, {
         method: 'DELETE',
       })
       if (!res.ok) {
-        toast.error('Could not delete this source')
+        toast.error(t('sources.deleteFailed'))
         return
       }
       setRemovedIds((ids) => [...ids, source.id])
-      toast.success('Removed from the knowledge base')
+      toast.success(t('sources.removedToast'))
       router.refresh()
     } catch {
-      toast.error('Could not delete this source', {
-        description: 'Network request failed. Check your connection and retry.',
+      toast.error(t('sources.deleteFailed'), {
+        description: t('sources.networkError'),
       })
     } finally {
       setDeletingIds((ids) => ids.filter((id) => id !== source.id))
@@ -79,8 +81,8 @@ export function KnowledgeSourcesTable({
     return (
       <EmptyState
         icon={Files}
-        title="No knowledge sources yet"
-        description="Upload a PDF, .txt or .md file so the agent can answer from it. Web pages are added by an operator from the client page."
+        title={t('sources.emptyTitle')}
+        description={t('sources.emptyDescription')}
       />
     )
   }
@@ -90,12 +92,12 @@ export function KnowledgeSourcesTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">Source</TableHead>
-            <TableHead scope="col">Type</TableHead>
-            {clientNameById ? <TableHead scope="col">Client</TableHead> : null}
-            <TableHead scope="col">Status</TableHead>
-            <TableHead scope="col" className="text-right">Characters</TableHead>
-            <TableHead scope="col" className="text-right">Actions</TableHead>
+            <TableHead scope="col">{t('sources.tableSource')}</TableHead>
+            <TableHead scope="col">{t('sources.tableType')}</TableHead>
+            {clientNameById ? <TableHead scope="col">{t('sources.tableClient')}</TableHead> : null}
+            <TableHead scope="col">{t('sources.tableStatus')}</TableHead>
+            <TableHead scope="col" className="text-right">{t('sources.tableCharacters')}</TableHead>
+            <TableHead scope="col" className="text-right">{t('sources.tableActions')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -105,7 +107,7 @@ export function KnowledgeSourcesTable({
               <TableRow key={source.id}>
                 <TableCell className="max-w-xs truncate text-[13px]">{source.title}</TableCell>
                 <TableCell className="text-muted-foreground text-[13px]">
-                  {SOURCE_TYPE_LABEL[source.sourceType]}
+                  {t(`sources.${SOURCE_TYPE_KEY[source.sourceType]}`)}
                 </TableCell>
                 {clientNameById ? (
                   <TableCell className="text-muted-foreground text-[13px]">
@@ -124,7 +126,7 @@ export function KnowledgeSourcesTable({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      aria-label={`Delete ${source.title}`}
+                      aria-label={t('sources.deleteAriaLabel', { title: source.title })}
                       disabled={isDeleting}
                       onClick={() => void onDelete(source)}
                     >

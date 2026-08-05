@@ -2563,3 +2563,148 @@ needed, since it's derived purely from the existing `delaysDays` prop.
 No test file (this component has none, per the no-`.tsx`-tests
 convention); verified with `pnpm typecheck && pnpm lint && pnpm exec
 vitest run` — still clean, 185/1945.
+
+---
+
+## Dashboard i18n (English / Turkish) — Tasks 1–18 of 18 DONE
+
+**Design:** `docs/superpowers/specs/2026-08-05-dashboard-i18n-design.md`.
+**Plan:** `docs/superpowers/plans/2026-08-05-dashboard-i18n.md`.
+
+Per-user dashboard language (`en`/`tr`), with an operator-set per-client
+default that unset client users inherit. `next-intl` wired in no-URL-routing
+mode — locale resolved server-side per request from `app_users.locale` →
+`clients.default_locale` (client role) → `'en'` (operator role), or from
+`Accept-Language` pre-login. No cookies, no `/en/...` prefix.
+
+- [x] **Task 1** — Migration `0029_locale_preferences.sql` (`app_locale`
+  enum, `clients.default_locale` not-null default `'en'`,
+  `app_users.locale` nullable override); `src/types/i18n.ts`
+  (`SUPPORTED_LOCALES`, `AppLocale`); hand-edited `database.ts` to match
+  (no live DB to regenerate from). Fixed a knock-on typecheck break in
+  `can-manage-client.test.ts`'s `AppUser` fixtures (now-required `locale`
+  field) that the plan hadn't anticipated.
+- [x] **Task 2** — `src/lib/validation/locale.ts`: `localeSchema =
+  z.enum(SUPPORTED_LOCALES)`.
+- [x] **Task 3** — `src/lib/i18n/resolve-locale.ts`: `resolveLocale()`,
+  `cache()`-wrapped, single source of truth for the current request's
+  locale.
+- [x] **Task 4** — Added `next-intl` dependency (needed enabling
+  `@parcel/watcher`/`@swc/core` builds in `pnpm-workspace.yaml`'s
+  `allowBuilds`, previously left as placeholder strings). `src/messages/{en,tr}.json`
+  (`common` namespace) + `messages.test.ts` key-parity test.
+  `src/i18n/request.ts` + `next.config.ts` wrapped with
+  `createNextIntlPlugin`.
+- [x] **Task 5** — Root layout (`src/app/layout.tsx`) made async,
+  `<html lang>` now dynamic, body wrapped in `NextIntlClientProvider`.
+- [x] **Task 6** — `/settings` language switcher: `updateUserLocale` (db),
+  `updateMyLocale` Server Action (no role gate), `LanguageSection`, wired
+  into `page.tsx`.
+- [x] **Task 7** — `/clients/[id]` operator-only default-language control:
+  `updateClientDefaultLocale` (db + Server Action, `{ok}`-shaped result
+  matching `mailreach-actions.ts`), `DefaultLocaleSelect`.
+- [x] **Task 8** — Shell/nav namespace: `nav.tsx`, `app-shell.tsx` (sign-out
+  button), `theme-toggle.tsx` (added a `common.toggleTheme` key the plan
+  flagged as a possible gap — it was real).
+- [x] **Task 9** — Auth namespace: `/login`, `/set-password` +
+  `set-password-form.tsx`.
+- [x] **Task 10** — Full `settings` namespace for every remaining file in
+  the directory (`connect-buttons.tsx`, `connect-crm-buttons.tsx` —
+  converted to async Server Components to call `getTranslations`;
+  `connect-smtp-dialog.tsx`'s multi-stage error-message builder threaded
+  through `t`; `connection-card.tsx`, `error.tsx`,
+  `followup-cadence-section.tsx`, `mailbox-controls.tsx`,
+  `mailbox-delete-control.tsx`, `mailbox-row.tsx` — incidentally fixed a
+  pre-existing bug where a caught network error rendered the literal
+  string `"network"` to the user instead of a real message,
+  `mailreach-controls.tsx`, `pipeline-picker.tsx`, `page.tsx`'s remaining
+  strings). `loading.tsx` and `mailboxes-webmcp-tools.tsx` confirmed to
+  own no literal strings and explicitly skipped.
+- [x] **Task 11** — Clients namespace: `error.tsx`/`not-found.tsx` (both
+  `/clients` and `/clients/[id]`), `new-client-form.tsx`,
+  `invite-user-dialog.tsx`, `remove-user-dialog.tsx` (rich-text
+  `t.rich(...)` for the "type X to confirm" bold span, same pattern used
+  again in `delete-client-dialog.tsx`), `clients/page.tsx`, and every
+  remaining `clients/[id]/` file: `client-lifecycle-actions.tsx`,
+  `delete-client-dialog.tsx`, `edit-domain-dialog.tsx`,
+  `knowledge-file-upload.tsx`, `knowledge-rescrape-all-button.tsx`,
+  `knowledge-sitemap-picker.tsx`, `knowledge-source-actions.tsx`,
+  `knowledge-sources-list.tsx` (converted to an async Server Component),
+  `logo-upload.tsx`, `logs-feed.tsx`, `mailreach-toggle.tsx`,
+  `rename-client-dialog.tsx`, `resources-section.tsx`,
+  `warmup-mailbox-row.tsx`, `warmup-profile-select.tsx` (reuses
+  `warmupMailboxRow.warmupOption.*` keys — same three profile labels),
+  `warmup-tab.tsx`, and `page.tsx`'s remaining header/tab/log copy.
+  `clients-webmcp-tools.tsx` and `knowledge-realtime-refresher.tsx`
+  confirmed to own no literal strings and explicitly skipped.
+- [x] **Task 12** — Campaigns namespace: `error.tsx`,
+  `new-campaign-form.tsx` (the large ICP form — seniority/contact-email-
+  status option labels moved into keyed lookup tables), `campaign-row-
+  actions.tsx`, `delete-campaign-dialog.tsx`, `page.tsx`. `loading.tsx`
+  and `campaigns-webmcp-tools.tsx` confirmed to own no literal strings.
+- [x] **Task 13** — Cases namespace: `error.tsx`, `not-found.tsx`,
+  `stop-lead-button.tsx` (per the plan's fully-worked example),
+  `crm-link-badge.tsx`, `lead-followup-control.tsx`, `mail-tab.tsx`,
+  `compose-form.tsx` and `notes-panel.tsx` (the plan's flagged largest
+  files — every validation/error string extracted, not just the happy
+  path), and `page.tsx`'s header/contacts/tabs/activity-feed copy.
+  `loading.tsx` confirmed to own no literal strings.
+- [x] **Task 14** — CRM namespace: `crm/page.tsx`, `error.tsx`. Shared
+  `case-row.tsx` (its only caller) converted to an async Server Component
+  for `getTranslations` — translated its "No contacts" fallback.
+  `filter-chips.tsx` confirmed fully prop-driven, no own strings.
+- [x] **Task 15** — Inbox namespace: `page.tsx`, `error.tsx`, `draft-row.tsx`
+  (subject/body editor, attachment editor, redesign-with-AI panel, every
+  toast), `knowledge-request-row.tsx` (including its declarative-WebMCP
+  `tooldescription`/`toolparamdescription` attributes, per the precedent
+  set in Task 11's `new-client-form.tsx`). `loading.tsx` confirmed to own
+  no literal strings.
+- [x] **Task 16** — Knowledge namespace: `page.tsx`, `error.tsx`,
+  `knowledge-tabs.tsx`, `resources/page.tsx`, `resources/error.tsx`,
+  `sources/page.tsx`, `sources/error.tsx`, `sources/sources-list.tsx`
+  (table headers, source-type labels, delete confirm/toast — added a
+  `sources.networkError` key the plan's key list hadn't spelled out).
+  Every `loading.tsx` (3) confirmed to own no literal strings.
+- [x] **Task 17** — Mail namespace: `page.tsx`, `error.tsx`, matching the
+  plan's fully-worked example almost verbatim. `loading.tsx` confirmed to
+  own no literal strings.
+- [x] **Task 18** — Analytics namespace: `page.tsx`, `error.tsx`,
+  `analytics-view.tsx` (every section title, all 6+4 stat-tile
+  label/hint pairs, trend/campaigns/mailboxes/activity table headers),
+  `filters.tsx`, `sparkline-chart.tsx` (converted to an async Server
+  Component for `getTranslations`). `stat-tile.tsx` confirmed
+  fully prop-driven; `realtime-refresher.tsx` confirmed to render nothing
+  and own no strings.
+
+Several shared-lib-driven labels were deliberately left untranslated and
+flagged in code comments rather than fixed, per the plan's own precedent
+(§Task 14's `CASE_STATUS` note): `formatRelative`/`formatFollowupStatus`/
+`humanizeEnum` (`@/lib/format`), `CASE_STATUS`/`CLIENT_STATUS`/
+`CAMPAIGN_STATUS`/`MAILBOX_HEALTH`/`KNOWLEDGE_SOURCE_STATUS`/
+`LOG_SOURCE_META` (`@/lib/ui/status`, `@/lib/ui/log`), and shared
+components (`FollowupDelaysEditor`, `ResourceUpload`/`ResourceList`,
+`EmailMessage`, `KnowledgeItem`) — none are in these tasks' file lists,
+and fixing them is out of scope here.
+
+Executed inline in the main session per user instruction (no worktree, no
+per-task git commits — this repo's `git add`+`commit` steps in the plan
+were skipped throughout the whole feature; nothing from this feature has
+been committed). Verified after every task: `pnpm typecheck && pnpm
+vitest run` clean throughout, **190 files / 1969 tests passing**
+(unchanged since Task 13 — Tasks 14-18 were pure string-extraction, same
+as 11-13, adding no new testable logic or test files). `pnpm build`
+confirmed green after Tasks 5, 10, 11, 12, 13, and again after 18 (full
+final build, all ~53 routes compiled clean, including the two new async
+Server Components — `case-row.tsx`, `sparkline-chart.tsx`). Manual `pnpm
+dev` verification (every task's "Manually verify" step) not run in this
+session, per this codebase's convention of leaving `.tsx`/browser
+behavior to manual QA.
+
+**Feature complete: all 18 tasks done.** Every static UI string across the
+`(app)` route group, the shell/nav, and `/login`+`/set-password` is now
+extracted to `messages/{en,tr}.json` and rendered through `t(...)`, with
+real (non-machine-placeholder) Turkish throughout. Remaining before this
+can ship: review and commit the accumulated uncommitted diff (nothing
+staged/committed during this whole feature per instruction), then the
+plan's manual `pnpm dev` walk-through of every route in both languages
+(§Task 18 Step 5) as a final regression pass.

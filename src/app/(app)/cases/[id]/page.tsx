@@ -10,6 +10,7 @@ import {
   Question,
   Pulse,
 } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { getCaseById } from '@/lib/db/cases'
@@ -78,6 +79,7 @@ export default async function CasePage({
   // RLS makes an out-of-scope case indistinguishable from a missing one, which
   // is the behaviour we want: no existence leak across clients.
   if (!kase) notFound()
+  const t = await getTranslations('cases')
 
   const [leads, emails, knowledge, requests, events, campaign, notes, resources, crmLink, sequences] = await Promise.all([
     listLeadsForCase(supabase, caseId),
@@ -111,7 +113,7 @@ export default async function CasePage({
     id: note.id,
     body: note.body,
     leadId: note.lead_id,
-    authorLabel: note.created_by === appUser.id ? 'You' : 'Teammate',
+    authorLabel: note.created_by === appUser.id ? t('page.noteAuthorYou') : t('page.noteAuthorTeammate'),
     canManage: appUser.role === 'operator' || note.created_by === appUser.id,
     createdAt: note.created_at,
   }))
@@ -155,7 +157,7 @@ export default async function CasePage({
           className="text-muted-foreground hover:text-foreground inline-flex w-fit items-center gap-1.5 text-xs transition-colors duration-200"
         >
           <ArrowLeft size={13} weight="light" />
-          Pipeline
+          {t('page.pipeline')}
         </Link>
 
         <div className="flex flex-wrap items-start gap-4">
@@ -173,9 +175,9 @@ export default async function CasePage({
                   {kase.company_domain}
                 </a>
               ) : null}
-              {campaign ? <span>Campaign: {campaign.name}</span> : null}
+              {campaign ? <span>{t('page.campaignLabel', { name: campaign.name })}</span> : null}
               <span title={formatAbsolute(kase.created_at)}>
-                Opened {formatRelative(kase.created_at, now)}
+                {t('page.openedRelative', { relative: formatRelative(kase.created_at, now) })}
               </span>
               {crmLink && crmConnection ? (
                 <CrmLinkBadge
@@ -207,13 +209,13 @@ export default async function CasePage({
         initialLeadId={initialNoteLeadId}
       />
 
-      <section aria-label="Contacts" className="flex flex-col gap-3">
+      <section aria-label={t('page.contacts')} className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">
-          Contacts <span className="text-faint tnum font-normal">{leads.length}</span>
+          {t('page.contacts')} <span className="text-faint tnum font-normal">{leads.length}</span>
         </h2>
         {leads.length === 0 ? (
           <p className="border-hairline text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
-            No contacts attached to this case yet.
+            {t('page.noContacts')}
           </p>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -226,7 +228,7 @@ export default async function CasePage({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium">{lead.full_name}</p>
-                    <p className="text-faint truncate text-[11px]">{lead.title ?? 'Title unknown'}</p>
+                    <p className="text-faint truncate text-[11px]">{lead.title ?? t('page.titleUnknown')}</p>
                     {lead.email ? (
                       <p className="text-muted-foreground mt-1.5 truncate font-mono text-[11px]">
                         {lead.email}
@@ -239,7 +241,7 @@ export default async function CasePage({
                           href={lead.linkedin_url}
                           target="_blank"
                           rel="noreferrer noopener"
-                          aria-label={`${lead.full_name} on LinkedIn`}
+                          aria-label={t('page.linkedInLabel', { fullName: lead.full_name })}
                           className="text-faint hover:text-foreground transition-colors duration-200"
                         >
                           <LinkedinLogo size={14} weight="light" />
@@ -253,8 +255,8 @@ export default async function CasePage({
                         className="text-faint hover:text-foreground text-[11px] underline underline-offset-2 transition-colors duration-200"
                       >
                         {(noteCountByLeadId.get(lead.id) ?? 0) > 0
-                          ? `${noteCountByLeadId.get(lead.id)} note${noteCountByLeadId.get(lead.id) === 1 ? '' : 's'}`
-                          : 'Add note'}
+                          ? t('page.noteCount', { count: noteCountByLeadId.get(lead.id) ?? 0 })
+                          : t('page.addNote')}
                       </Link>
                     </div>
                     {sequence ? (
@@ -268,7 +270,7 @@ export default async function CasePage({
                     ) : null}
                   </div>
                   {lead.status === 'parked' ? (
-                    <span className="text-faint shrink-0 text-[11px]">Stopped</span>
+                    <span className="text-faint shrink-0 text-[11px]">{t('page.stopped')}</span>
                   ) : (
                     <StopLeadButton leadId={lead.id} caseId={kase.id} fullName={lead.full_name} />
                   )}
@@ -283,22 +285,22 @@ export default async function CasePage({
         <TabsList>
           <TabsTrigger value="mail">
             <Envelope size={14} weight="light" />
-            Mail
+            {t('page.tabMail')}
             <span className="tnum text-faint">{emails.length}</span>
           </TabsTrigger>
           <TabsTrigger value="knowledge">
             <Brain size={14} weight="light" />
-            Knowledge
+            {t('page.tabKnowledge')}
             <span className="tnum text-faint">{knowledge.length}</span>
           </TabsTrigger>
           <TabsTrigger value="requests">
             <Question size={14} weight="light" />
-            Questions
+            {t('page.tabQuestions')}
             <span className="tnum text-faint">{requests.length}</span>
           </TabsTrigger>
           <TabsTrigger value="activity">
             <Pulse size={14} weight="light" />
-            Activity
+            {t('page.tabActivity')}
           </TabsTrigger>
         </TabsList>
 
@@ -316,8 +318,8 @@ export default async function CasePage({
           {knowledge.length === 0 ? (
             <EmptyState
               icon={Brain}
-              title="Nothing researched yet"
-              description="The research agent writes company facts, news and pain points here before the first email is drafted."
+              title={t('page.noResearchTitle')}
+              description={t('page.noResearchDescription')}
             />
           ) : (
             <div className="flex max-w-[80ch] flex-col gap-3">
@@ -341,16 +343,16 @@ export default async function CasePage({
           {requests.length === 0 ? (
             <EmptyState
               icon={Question}
-              title="The agent has not needed you"
-              description="When a reply asks something the agent cannot answer from its research, it raises a question here and waits for a human."
+              title={t('page.noQuestionsTitle')}
+              description={t('page.noQuestionsDescription')}
             />
           ) : (
             <div className="flex max-w-[80ch] flex-col gap-3">
               {openRequests > 0 ? (
                 <p className="text-muted-foreground text-xs">
-                  {openRequests} open. Answer them from the{' '}
+                  {t('page.openRequestsCount', { count: openRequests })}{' '}
                   <Link href="/inbox" className="text-primary underline underline-offset-2">
-                    inbox
+                    {t('page.inboxLink')}
                   </Link>
                   .
                 </p>
@@ -373,7 +375,7 @@ export default async function CasePage({
                       className="mt-3 border-l-2 pl-3"
                       style={{ borderColor: 'color-mix(in oklch, var(--status-won) 45%, transparent)' }}
                     >
-                      <p className="text-faint text-[11px]">Operator answered</p>
+                      <p className="text-faint text-[11px]">{t('page.operatorAnswered')}</p>
                       <p className="text-muted-foreground mt-1 text-sm leading-relaxed whitespace-pre-wrap">
                         {request.human_answer}
                       </p>
@@ -389,8 +391,8 @@ export default async function CasePage({
           {events.length === 0 ? (
             <EmptyState
               icon={Pulse}
-              title="No activity logged"
-              description="Every pipeline step the agent takes on this case is recorded here as it happens."
+              title={t('page.noActivityTitle')}
+              description={t('page.noActivityDescription')}
             />
           ) : (
             <ol className="max-w-[80ch]">

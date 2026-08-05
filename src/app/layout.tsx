@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import { Inter } from 'next/font/google'
 import { GeistMono } from 'geist/font/mono'
+import { getLocale, getMessages } from 'next-intl/server'
+import { NextIntlClientProvider } from 'next-intl'
 import { ConsentBanner } from '@/components/consent-banner'
 import { Toaster } from '@/components/ui/sonner'
 import { publicEnv } from '@/lib/env-public'
@@ -81,10 +83,20 @@ const GTM_SCRIPT = GTM_ID
   ? `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${GTM_ID}');`
   : null
 
-export default function RootLayout({ children }: { children: ReactNode }): React.ReactElement {
+// Note: an unauthenticated visitor on a (marketing) page (out of scope for
+// translated content) still resolves a locale via resolvePreloginLocale's
+// Accept-Language parsing, so <html lang> may occasionally read "tr" while
+// marketing copy stays English. Accepted — marketing i18n is explicitly out
+// of scope (see docs/superpowers/specs/2026-08-05-dashboard-i18n-design.md
+// §2), this is a cosmetic attribute only, and today's behavior (lang="en"
+// always) was already only "correct" by coincidence.
+export default async function RootLayout({ children }: { children: ReactNode }): Promise<React.ReactElement> {
+  const locale = await getLocale()
+  const messages = await getMessages()
+
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${inter.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
@@ -109,9 +121,11 @@ export default function RootLayout({ children }: { children: ReactNode }): React
             />
           </noscript>
         )}
-        {children}
-        {GTM_ID !== undefined && <ConsentBanner />}
-        <Toaster position="bottom-right" />
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          {children}
+          {GTM_ID !== undefined && <ConsentBanner />}
+          <Toaster position="bottom-right" />
+        </NextIntlClientProvider>
       </body>
     </html>
   )

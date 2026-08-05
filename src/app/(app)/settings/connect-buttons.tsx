@@ -1,4 +1,5 @@
 import { GoogleLogo, MicrosoftOutlookLogo, Plus } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { ConnectSmtpDialog } from './connect-smtp-dialog'
 
 const OAUTH_PROVIDERS = [
@@ -6,7 +7,8 @@ const OAUTH_PROVIDERS = [
   { href: '/api/mailboxes/outlook/connect', label: 'Outlook', icon: MicrosoftOutlookLogo },
 ] as const
 
-export function ConnectButtons(): React.ReactElement {
+export async function ConnectButtons(): Promise<React.ReactElement> {
+  const t = await getTranslations('settings')
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {OAUTH_PROVIDERS.map(({ href, label, icon: Icon }) => (
@@ -21,8 +23,8 @@ export function ConnectButtons(): React.ReactElement {
             <Icon size={18} weight="light" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-medium">Connect {label}</span>
-            <span className="text-faint block text-[11px]">Sends and reads on your behalf</span>
+            <span className="block text-[13px] font-medium">{t('connectProvider', { provider: label })}</span>
+            <span className="text-faint block text-[11px]">{t('connectHint')}</span>
           </span>
           <Plus
             size={15}

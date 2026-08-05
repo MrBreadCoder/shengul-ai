@@ -1,3 +1,4 @@
+import { getTranslations } from 'next-intl/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listActiveResourcesForClient } from '@/lib/db/client-resources'
 import { ResourceList, type ResourceSummary } from '@/components/resource-list'
@@ -12,6 +13,7 @@ interface ResourcesSectionProps {
 }
 
 export async function ResourcesSection({ clientId }: ResourcesSectionProps): Promise<React.ReactElement> {
+  const t = await getTranslations('clients')
   const admin = createAdminClient()
   const resources = await listActiveResourcesForClient(admin, clientId, PAGE_SIZE)
 
@@ -31,11 +33,7 @@ export async function ResourcesSection({ clientId }: ResourcesSectionProps): Pro
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-muted-foreground max-w-[60ch] text-[13px]">
-        Resources — files the agent can send to a lead who asks to see something. The agent
-        reads the ones whose format it can read, so it can answer from what is inside as well
-        as attach it.
-      </p>
+      <p className="text-muted-foreground max-w-[60ch] text-[13px]">{t('resourcesSection.description')}</p>
       <ResourceUpload clientId={clientId} />
       <ResourceList resources={summaries} />
     </div>

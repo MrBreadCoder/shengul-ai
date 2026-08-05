@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { Warning } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +12,7 @@ import { Label } from '@/components/ui/label'
 const MIN_PASSWORD_LENGTH = 8
 
 export function SetPasswordForm(): React.ReactElement {
+  const t = useTranslations('auth')
   const router = useRouter()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -22,11 +24,11 @@ export function SetPasswordForm(): React.ReactElement {
     setError(null)
 
     if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`)
+      setError(t('passwordTooShort', { min: MIN_PASSWORD_LENGTH }))
       return
     }
     if (password !== confirm) {
-      setError('Passwords do not match.')
+      setError(t('passwordMismatch'))
       return
     }
 
@@ -34,7 +36,7 @@ export function SetPasswordForm(): React.ReactElement {
     const supabase = createBrowserClient()
     const { error: updateError } = await supabase.auth.updateUser({ password })
     if (updateError) {
-      setError('Could not set your password. Try requesting a new invite link.')
+      setError(t('setPasswordError'))
       setIsSubmitting(false)
       return
     }
@@ -49,7 +51,7 @@ export function SetPasswordForm(): React.ReactElement {
     <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="password" className="text-xs">
-          New password
+          {t('newPasswordLabel')}
         </Label>
         <Input
           id="password"
@@ -64,7 +66,7 @@ export function SetPasswordForm(): React.ReactElement {
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="confirm" className="text-xs">
-          Confirm password
+          {t('confirmPasswordLabel')}
         </Label>
         <Input
           id="confirm"
@@ -88,7 +90,7 @@ export function SetPasswordForm(): React.ReactElement {
       ) : null}
 
       <Button type="submit" disabled={isSubmitting} className="mt-1 w-full">
-        {isSubmitting ? 'Saving…' : 'Set password and continue'}
+        {isSubmitting ? t('settingPassword') : t('setPasswordButton')}
       </Button>
     </form>
   )

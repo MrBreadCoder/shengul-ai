@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,6 +33,7 @@ interface DeleteCampaignDialogProps {
 // which fetches and states the blast radius, (2) type the exact campaign
 // name to arm the button, (3) click the armed button.
 export function DeleteCampaignDialog({ campaignId, campaignName }: DeleteCampaignDialogProps): React.ReactElement {
+  const t = useTranslations('campaigns')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -69,16 +71,16 @@ export function DeleteCampaignDialog({ campaignId, campaignName }: DeleteCampaig
         const message =
           typeof json === 'object' && json !== null && 'error' in json
             ? String((json as { error: unknown }).error)
-            : 'Could not delete the campaign.'
+            : t('deleteDialog.deleteFailed')
         setState({ status: 'error', message })
-        toast.error('Delete failed', { description: message })
+        toast.error(t('deleteDialog.deleteFailedToast'), { description: message })
         return
       }
-      toast.success(`${campaignName} deleted`)
+      toast.success(t('deleteDialog.deletedToast', { campaignName }))
       setOpen(false)
       router.refresh()
     } catch {
-      setState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setState({ status: 'error', message: t('deleteDialog.networkError') })
     }
   }
 
@@ -98,32 +100,33 @@ export function DeleteCampaignDialog({ campaignId, campaignName }: DeleteCampaig
       <DialogTrigger asChild>
         <Button type="button" variant="destructive" size="sm">
           <Trash size={13} weight="light" />
-          Delete
+          {t('deleteDialog.trigger')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {campaignName} permanently</DialogTitle>
+          <DialogTitle>{t('deleteDialog.title', { campaignName })}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           {stats.status === 'loading' ? (
-            <p className="text-muted-foreground text-sm">Checking what this deletes…</p>
+            <p className="text-muted-foreground text-sm">{t('deleteDialog.checking')}</p>
           ) : stats.status === 'error' ? (
             <p role="alert" className="text-destructive text-sm">
-              Could not load the case and lead counts for this campaign. Close and reopen this dialog to retry.
+              {t('deleteDialog.statsLoadFailed')}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm">
-              This deletes {stats.caseCount} case{stats.caseCount === 1 ? '' : 's'} and {stats.leadCount} lead
-              {stats.leadCount === 1 ? '' : 's'} under this campaign, plus every email and sequence tied to them.
-              There is no undo.
+              {t('deleteDialog.warning', { caseCount: stats.caseCount, leadCount: stats.leadCount })}
             </p>
           )}
 
           <div className="flex flex-col gap-2">
             <Label htmlFor={`confirmName-${campaignId}`} className="text-xs">
-              Type <span className="font-mono">{campaignName}</span> to confirm
+              {t.rich('deleteDialog.confirmLabel', {
+                name: campaignName,
+                bold: (chunks) => <span className="font-mono">{chunks}</span>,
+              })}
             </Label>
             <Input
               id={`confirmName-${campaignId}`}
@@ -148,7 +151,7 @@ export function DeleteCampaignDialog({ campaignId, campaignName }: DeleteCampaig
             disabled={!isArmed || state.status === 'submitting'}
             onClick={onConfirm}
           >
-            {state.status === 'submitting' ? 'Deleting…' : 'Delete forever'}
+            {state.status === 'submitting' ? t('deleteDialog.deleting') : t('deleteDialog.deleteForever')}
           </Button>
         </DialogFooter>
       </DialogContent>

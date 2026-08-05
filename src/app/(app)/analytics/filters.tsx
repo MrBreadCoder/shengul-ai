@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 import { RANGE_OPTIONS, type RangeDays } from '@/lib/analytics/range'
 import {
   Select,
@@ -48,6 +49,7 @@ export function AnalyticsFilters({
   basePath = '/analytics',
   fixedParams = {},
 }: AnalyticsFiltersProps): React.ReactElement {
+  const t = useTranslations('analytics')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -88,8 +90,8 @@ export function AnalyticsFilters({
 
   return (
     <div className="border-hairline flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border p-3">
-      <div role="group" aria-label="Date range" className="flex items-center gap-1.5">
-        <span className="text-faint mr-0.5 text-[11px]">Range</span>
+      <div role="group" aria-label={t('filters.rangeAriaLabel')} className="flex items-center gap-1.5">
+        <span className="text-faint mr-0.5 text-[11px]">{t('filters.rangeLabel')}</span>
         {RANGE_OPTIONS.map((option) => (
           <button
             key={option}
@@ -106,20 +108,20 @@ export function AnalyticsFilters({
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >
-            {option}d
+            {t('filters.rangeDays', { count: option })}
           </button>
         ))}
       </div>
 
       {clients.length > 0 ? (
         <div className="flex items-center gap-2">
-          <span className="text-faint text-[11px]">Client</span>
+          <span className="text-faint text-[11px]">{t('filters.clientLabel')}</span>
           <Select value={clientId ?? ALL_CLIENTS} onValueChange={onClientChange} disabled={isPending}>
-            <SelectTrigger size="sm" className="w-[200px]" aria-label="Client">
-              <SelectValue placeholder="All clients" />
+            <SelectTrigger size="sm" className="w-[200px]" aria-label={t('filters.clientLabel')}>
+              <SelectValue placeholder={t('filters.allClients')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_CLIENTS}>All clients</SelectItem>
+              <SelectItem value={ALL_CLIENTS}>{t('filters.allClients')}</SelectItem>
               {clients.map((client) => (
                 <SelectItem key={client.id} value={client.id}>
                   {client.name}
@@ -131,17 +133,17 @@ export function AnalyticsFilters({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <span className="text-faint text-[11px]">Campaign</span>
+        <span className="text-faint text-[11px]">{t('filters.campaignLabel')}</span>
         <Select
           value={campaignId ?? ALL_CAMPAIGNS}
           onValueChange={onCampaignChange}
           disabled={isPending || visibleCampaigns.length === 0}
         >
-          <SelectTrigger size="sm" className="w-[200px]" aria-label="Campaign">
-            <SelectValue placeholder="All campaigns" />
+          <SelectTrigger size="sm" className="w-[200px]" aria-label={t('filters.campaignLabel')}>
+            <SelectValue placeholder={t('filters.allCampaigns')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL_CAMPAIGNS}>All campaigns</SelectItem>
+            <SelectItem value={ALL_CAMPAIGNS}>{t('filters.allCampaigns')}</SelectItem>
             {visibleCampaigns.map((campaign) => (
               <SelectItem key={campaign.id} value={campaign.id}>
                 {campaign.name}
@@ -153,7 +155,7 @@ export function AnalyticsFilters({
 
       {isPending ? (
         <span role="status" className="text-faint text-[11px]">
-          Updating…
+          {t('filters.updating')}
         </span>
       ) : null}
     </div>

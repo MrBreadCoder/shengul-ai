@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { z } from 'zod'
 import { Envelope } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listEmailsForClient } from '@/lib/db/emails'
@@ -17,21 +18,6 @@ export const metadata: Metadata = { title: 'Mail' }
 
 const PAGE_SIZE = 100
 
-const DIRECTION_OPTIONS: readonly FilterOption[] = [
-  { value: null, label: 'All' },
-  { value: 'outbound', label: 'Outbound' },
-  { value: 'inbound', label: 'Replies' },
-]
-
-const STATUS_OPTIONS: readonly FilterOption[] = [
-  { value: null, label: 'Any' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'sent', label: 'Sent' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'bounced', label: 'Bounced' },
-  { value: 'failed', label: 'Failed' },
-]
-
 // Untrusted query input reaches an `.eq()` filter, so it is whitelisted against
 // the database enums rather than passed through.
 const searchParamsSchema = z.object({
@@ -46,6 +32,21 @@ interface MailPageProps {
 export default async function MailPage({ searchParams }: MailPageProps): Promise<React.ReactElement> {
   await requireUser()
   const supabase = await createServerClient()
+  const t = await getTranslations('mail')
+
+  const DIRECTION_OPTIONS: readonly FilterOption[] = [
+    { value: null, label: t('directionAll') },
+    { value: 'outbound', label: t('directionOutbound') },
+    { value: 'inbound', label: t('directionReplies') },
+  ]
+  const STATUS_OPTIONS: readonly FilterOption[] = [
+    { value: null, label: t('statusAny') },
+    { value: 'draft', label: t('statusDraft') },
+    { value: 'sent', label: t('statusSent') },
+    { value: 'delivered', label: t('statusDelivered') },
+    { value: 'bounced', label: t('statusBounced') },
+    { value: 'failed', label: t('statusFailed') },
+  ]
 
   const parsed = searchParamsSchema.safeParse(await searchParams)
   const direction = parsed.success ? (parsed.data.direction ?? null) : null
@@ -67,20 +68,18 @@ export default async function MailPage({ searchParams }: MailPageProps): Promise
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Mail"
-        description="Every message the agent has sent and every reply it has received, newest first."
+        title={t('title')}
+        description={t('description')}
         actions={
           <span className="text-muted-foreground tnum text-sm">
-            {emails.length === PAGE_SIZE
-              ? `Latest ${PAGE_SIZE}`
-              : `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`}
+            {emails.length === PAGE_SIZE ? t('latestCount', { count: PAGE_SIZE }) : t('messageCount', { count: emails.length })}
           </span>
         }
       />
 
       <div className="border-hairline flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border p-3">
         <FilterChips
-          label="Direction"
+          label={t('directionLabel')}
           param="direction"
           pathname="/mail"
           options={DIRECTION_OPTIONS}
@@ -88,7 +87,7 @@ export default async function MailPage({ searchParams }: MailPageProps): Promise
           carry={carry}
         />
         <FilterChips
-          label="Status"
+          label={t('statusLabel')}
           param="status"
           pathname="/mail"
           options={STATUS_OPTIONS}
@@ -100,8 +99,8 @@ export default async function MailPage({ searchParams }: MailPageProps): Promise
       {emails.length === 0 ? (
         <EmptyState
           icon={Envelope}
-          title="No mail matches this view"
-          description="Clear the filters above, or wait for the writer agent to draft its next batch."
+          title={t('emptyTitle')}
+          description={t('emptyDescription')}
         />
       ) : (
         <ul className="flex max-w-[80ch] flex-col gap-3">
@@ -114,10 +113,10 @@ export default async function MailPage({ searchParams }: MailPageProps): Promise
                     href={`/cases/${email.case_id}`}
                     className="text-muted-foreground hover:text-foreground w-fit text-[11px] transition-colors duration-200"
                   >
-                    {company ?? 'Unknown company'}
+                    {company ?? t('unknownCompany')}
                   </Link>
                 ) : (
-                  <span className="text-faint text-[11px]">Not linked to a case</span>
+                  <span className="text-faint text-[11px]">{t('notLinkedToCase')}</span>
                 )}
                 <EmailMessage
                   direction={email.direction}

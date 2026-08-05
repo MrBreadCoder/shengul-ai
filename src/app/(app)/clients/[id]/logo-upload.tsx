@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Image as ImageIcon, Trash } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 
 type UploadState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
@@ -29,6 +30,7 @@ async function extractErrorMessage(res: Response, fallback: string): Promise<str
 // Sits next to the client's CompanyMark on /clients/[id]. Uploading replaces
 // any existing logo; removing reverts to the domain favicon or initials.
 export function LogoUpload({ clientId, hasLogo }: LogoUploadProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<UploadState>({ status: 'idle' })
@@ -44,18 +46,18 @@ export function LogoUpload({ clientId, hasLogo }: LogoUploadProps): React.ReactE
       formData.set('file', file)
       const res = await fetch(`/api/clients/${clientId}/logo`, { method: 'POST', body: formData })
       if (!res.ok) {
-        const message = await extractErrorMessage(res, 'Could not upload the logo.')
+        const message = await extractErrorMessage(res, t('logoUpload.uploadFailed'))
         setState({ status: 'error', message })
-        toast.error('Upload failed', { description: message })
+        toast.error(t('logoUpload.uploadFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
-      toast.success('Logo updated')
+      toast.success(t('logoUpload.updatedToast'))
       router.refresh()
     } catch {
-      const message = 'Network request failed. Check your connection and retry.'
+      const message = t('logoUpload.networkError')
       setState({ status: 'error', message })
-      toast.error('Upload failed', { description: message })
+      toast.error(t('logoUpload.uploadFailedToast'), { description: message })
     }
   }
 
@@ -64,18 +66,18 @@ export function LogoUpload({ clientId, hasLogo }: LogoUploadProps): React.ReactE
     try {
       const res = await fetch(`/api/clients/${clientId}/logo`, { method: 'DELETE' })
       if (!res.ok) {
-        const message = await extractErrorMessage(res, 'Could not remove the logo.')
+        const message = await extractErrorMessage(res, t('logoUpload.removeFailed'))
         setState({ status: 'error', message })
-        toast.error('Remove failed', { description: message })
+        toast.error(t('logoUpload.removeFailedToast'), { description: message })
         return
       }
       setState({ status: 'idle' })
-      toast.success('Logo removed')
+      toast.success(t('logoUpload.removedToast'))
       router.refresh()
     } catch {
-      const message = 'Network request failed. Check your connection and retry.'
+      const message = t('logoUpload.networkError')
       setState({ status: 'error', message })
-      toast.error('Remove failed', { description: message })
+      toast.error(t('logoUpload.removeFailedToast'), { description: message })
     }
   }
 
@@ -89,13 +91,13 @@ export function LogoUpload({ clientId, hasLogo }: LogoUploadProps): React.ReactE
         accept={ACCEPTED_TYPES}
         className="sr-only"
         onChange={(event) => void onFileSelected(event)}
-        aria-label="Upload logo"
+        aria-label={t('logoUpload.uploadLabel')}
       />
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        aria-label={hasLogo ? 'Replace logo' : 'Upload logo'}
+        aria-label={hasLogo ? t('logoUpload.replaceLabel') : t('logoUpload.uploadLabel')}
         disabled={isSubmitting}
         onClick={() => inputRef.current?.click()}
       >
@@ -106,7 +108,7 @@ export function LogoUpload({ clientId, hasLogo }: LogoUploadProps): React.ReactE
           type="button"
           variant="ghost"
           size="sm"
-          aria-label="Remove logo"
+          aria-label={t('logoUpload.removeLabel')}
           disabled={isSubmitting}
           onClick={() => void onRemove()}
         >

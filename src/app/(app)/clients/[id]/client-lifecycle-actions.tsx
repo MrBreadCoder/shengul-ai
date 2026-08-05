@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Lock, Pause, Play } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -19,12 +20,18 @@ type ClientStatus = Database['public']['Enums']['client_status']
 
 type SubmitState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
-async function postAction(clientId: string, action: 'pause' | 'resume' | 'archive'): Promise<{ ok: boolean; message?: string }> {
+async function postAction(
+  clientId: string,
+  action: 'pause' | 'resume' | 'archive',
+  t: ReturnType<typeof useTranslations<'clients'>>,
+): Promise<{ ok: boolean; message?: string }> {
   const res = await fetch(`/api/clients/${clientId}/${action}`, { method: 'POST' })
   if (res.ok) return { ok: true }
   const json: unknown = await res.json().catch(() => ({}))
   const message =
-    typeof json === 'object' && json !== null && 'error' in json ? String((json as { error: unknown }).error) : 'Request failed.'
+    typeof json === 'object' && json !== null && 'error' in json
+      ? String((json as { error: unknown }).error)
+      : t('lifecycle.requestFailed')
   return { ok: false, message }
 }
 
@@ -58,16 +65,17 @@ function ConfirmLifecycleDialog({
   successMessage,
   onDone,
 }: ConfirmLifecycleDialogProps): React.ReactElement {
+  const t = useTranslations('clients')
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<SubmitState>({ status: 'idle' })
 
   async function onConfirm(): Promise<void> {
     setState({ status: 'submitting' })
-    const result = await postAction(clientId, action)
+    const result = await postAction(clientId, action, t)
     if (!result.ok) {
-      const message = result.message ?? 'Request failed.'
+      const message = result.message ?? t('lifecycle.requestFailed')
       setState({ status: 'error', message })
-      toast.error('Action failed', { description: message })
+      toast.error(t('lifecycle.actionFailedToast'), { description: message })
       return
     }
     setState({ status: 'idle' })
@@ -111,14 +119,15 @@ function ConfirmLifecycleDialog({
 }
 
 export function ClientLifecycleActions({ clientId, status }: { clientId: string; status: ClientStatus }): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [resumeState, setResumeState] = useState<SubmitState>({ status: 'idle' })
 
   async function runResume(successMessage: string): Promise<void> {
     setResumeState({ status: 'submitting' })
-    const result = await postAction(clientId, 'resume')
+    const result = await postAction(clientId, 'resume', t)
     if (!result.ok) {
-      toast.error('Action failed', { description: result.message })
+      toast.error(t('lifecycle.actionFailedToast'), { description: result.message })
       setResumeState({ status: 'idle' })
       return
     }
@@ -136,20 +145,26 @@ export function ClientLifecycleActions({ clientId, status }: { clientId: string;
           clientId={clientId}
           action="pause"
           icon={<Pause size={13} weight="light" />}
-          triggerLabel="Pause operations"
-          confirmLabel="Yes, pause operations"
-          pendingLabel="Pausing…"
-          title="Pause operations?"
-          description="Discovery stops immediately and every active campaign for this client is paused. Logins are unaffected. You can resume at any time."
-          successMessage="Operations paused"
+          triggerLabel={t('lifecycle.pauseTrigger')}
+          confirmLabel={t('lifecycle.pauseConfirm')}
+          pendingLabel={t('lifecycle.pausing')}
+          title={t('lifecycle.pauseTitle')}
+          description={t('lifecycle.pauseDescription')}
+          successMessage={t('lifecycle.pausedToast')}
           onDone={() => router.refresh()}
         />
       ) : null}
 
       {status === 'paused' ? (
-        <Button type="button" variant="outline" size="sm" disabled={isResuming} onClick={() => runResume('Operations resumed')}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isResuming}
+          onClick={() => runResume(t('lifecycle.resumedToast'))}
+        >
           <Play size={13} weight="light" />
-          {isResuming ? 'Resuming…' : 'Resume operations'}
+          {isResuming ? t('lifecycle.resuming') : t('lifecycle.resumeTrigger')}
         </Button>
       ) : null}
 
@@ -158,18 +173,24 @@ export function ClientLifecycleActions({ clientId, status }: { clientId: string;
           clientId={clientId}
           action="archive"
           icon={<Lock size={13} weight="light" />}
-          triggerLabel="Stop + block login"
-          confirmLabel="Yes, stop and block login"
-          pendingLabel="Archiving…"
-          title="Stop operations and block login?"
-          description="Every active campaign for this client is paused and every client-role login is banned immediately. No data is deleted — you can reactivate at any time."
-          successMessage="Client archived — login blocked"
+          triggerLabel={t('lifecycle.archiveTrigger')}
+          confirmLabel={t('lifecycle.archiveConfirm')}
+          pendingLabel={t('lifecycle.archiving')}
+          title={t('lifecycle.archiveTitle')}
+          description={t('lifecycle.archiveDescription')}
+          successMessage={t('lifecycle.archivedToast')}
           onDone={() => router.refresh()}
         />
       ) : (
-        <Button type="button" variant="outline" size="sm" disabled={isResuming} onClick={() => runResume('Client reactivated')}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isResuming}
+          onClick={() => runResume(t('lifecycle.reactivatedToast'))}
+        >
           <Play size={13} weight="light" />
-          {isResuming ? 'Reactivating…' : 'Reactivate'}
+          {isResuming ? t('lifecycle.reactivating') : t('lifecycle.reactivateTrigger')}
         </Button>
       )}
     </div>

@@ -1,12 +1,14 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { ErrorPanel } from '@/components/error-panel'
 
 export default function Error({ reset }: { error: Error; reset: () => void }): React.ReactElement {
+  const t = useTranslations('crm')
   return (
     <ErrorPanel
-      title="Pipeline unavailable"
-      description="The case board could not be loaded. This is usually a transient database issue."
+      title={t('errorTitle')}
+      description={t('errorDescription')}
       reset={reset}
     />
   )

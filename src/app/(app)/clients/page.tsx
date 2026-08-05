@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Buildings, Warning } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listClientsFull, type ClientRow } from '@/lib/db/clients'
@@ -35,20 +36,20 @@ function toWebMcpEntry({ id, name, status, domain, created_at }: ClientRow): Cli
 
 interface ClientHealthChipProps {
   counts: ClientErrorCount | undefined
+  t: Awaited<ReturnType<typeof getTranslations<'clients'>>>
 }
 
 /**
  * Renders nothing when a client is healthy — an all-green list of "0 errors"
  * chips would train the operator to stop reading the column.
  */
-function ClientHealthChip({ counts }: ClientHealthChipProps): React.ReactElement | null {
+function ClientHealthChip({ counts, t }: ClientHealthChipProps): React.ReactElement | null {
   if (!counts) return null
   const { errorCount, warnCount } = counts
   if (errorCount === 0 && warnCount === 0) return null
 
   const isError = errorCount > 0
   const count = isError ? errorCount : warnCount
-  const noun = isError ? 'error' : 'warning'
   const color = isError ? 'var(--status-lost)' : 'var(--status-hot-handoff)'
 
   return (
@@ -58,7 +59,7 @@ function ClientHealthChip({ counts }: ClientHealthChipProps): React.ReactElement
     >
       <Warning size={11} weight="fill" aria-hidden />
       <span className="tnum">{count}</span>
-      {count === 1 ? noun : `${noun}s`} in {HEALTH_WINDOW_HOURS}h
+      {t(isError ? 'healthChip.errorSuffix' : 'healthChip.warningSuffix', { count, hours: HEALTH_WINDOW_HOURS })}
     </span>
   )
 }
@@ -66,6 +67,7 @@ function ClientHealthChip({ counts }: ClientHealthChipProps): React.ReactElement
 export default async function ClientsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
   if (appUser.role !== 'operator') redirect('/crm')
+  const t = await getTranslations('clients')
 
   const admin = createAdminClient()
   const now = new Date()
@@ -78,21 +80,21 @@ export default async function ClientsPage(): Promise<React.ReactElement> {
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <ClientsWebMcpTools clients={clients.map(toWebMcpEntry)} />
-      <PageHeader
-        title="Clients"
-        description="Every client the agent runs campaigns for. Open one to manage its campaigns, analytics, and logins."
-      />
+      <PageHeader title={t('pageTitle')} description={t('pageDescription')} />
 
-      <Section title="New client">
+      <Section title={t('newClientSectionTitle')}>
         <NewClientForm />
       </Section>
 
-      <Section title="All clients" aside={clients.length > 0 ? `${clients.length} total` : undefined}>
+      <Section
+        title={t('allClientsSectionTitle')}
+        aside={clients.length > 0 ? t('allClientsAside', { count: clients.length }) : undefined}
+      >
         {clients.length === 0 ? (
           <EmptyState
             icon={Buildings}
-            title="No clients yet"
-            description="Create one above, then open it to set up a campaign and invite a login."
+            title={t('noClientsTitle')}
+            description={t('noClientsDescription')}
           />
         ) : (
           <ul className="flex flex-col gap-2">
@@ -109,8 +111,10 @@ export default async function ClientsPage(): Promise<React.ReactElement> {
                   <CompanyMark name={client.name} domain={client.domain} logoUrl={client.logo_url} />
                   <p className="min-w-0 flex-1 truncate text-[13px] font-medium">{client.name}</p>
                   <StatusPill meta={CLIENT_STATUS[client.status]} />
-                  <ClientHealthChip counts={errorCounts.get(client.id)} />
-                  <span className="text-faint text-[11px]">Created {formatRelative(client.created_at, now)}</span>
+                  <ClientHealthChip counts={errorCounts.get(client.id)} t={t} />
+                  <span className="text-faint text-[11px]">
+                    {t('createdRelative', { relative: formatRelative(client.created_at, now) })}
+                  </span>
                 </Link>
               </li>
             ))}

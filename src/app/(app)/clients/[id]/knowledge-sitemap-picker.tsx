@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { MagnifyingGlass, PlusIcon, XIcon } from '@phosphor-icons/react'
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -27,6 +28,7 @@ async function extractErrorMessage(res: Response, fallback: string): Promise<str
 // Enter a website -> discover its pages via sitemap.xml (Brightdata crawl
 // fallback server-side) -> pick which ones to scrape into the knowledge base.
 export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps): React.ReactElement {
+  const t = useTranslations('clients')
   const router = useRouter()
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [discoverState, setDiscoverState] = useState<DiscoverState>({ status: 'idle' })
@@ -62,16 +64,16 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
         body: JSON.stringify({ websiteUrl }),
       })
       if (!res.ok) {
-        const message = await extractErrorMessage(res, 'Could not discover pages for this site.')
+        const message = await extractErrorMessage(res, t('sitemapPicker.discoverFailed'))
         setDiscoverState({ status: 'error', message })
         return
       }
       const json = (await res.json()) as { urls: string[] }
       addUrls(json.urls, false)
       setDiscoverState({ status: 'idle' })
-      if (json.urls.length === 0) toast.info('No pages found on this site.')
+      if (json.urls.length === 0) toast.info(t('sitemapPicker.noPagesFound'))
     } catch {
-      setDiscoverState({ status: 'error', message: 'Network request failed. Check your connection and retry.' })
+      setDiscoverState({ status: 'error', message: t('sitemapPicker.networkError') })
     }
   }
 
@@ -83,11 +85,11 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
     try {
       normalized = new URL(trimmed).toString()
     } catch {
-      toast.error('Enter a valid page URL, e.g. https://example.com/pricing')
+      toast.error(t('sitemapPicker.invalidUrl'))
       return
     }
     if (urls.includes(normalized)) {
-      toast.info('That page is already in the list.')
+      toast.info(t('sitemapPicker.alreadyInList'))
       setManualUrl('')
       return
     }
@@ -128,14 +130,16 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
         body: JSON.stringify({ urls: Array.from(selected) }),
       })
       if (!res.ok) {
-        const message = await extractErrorMessage(res, 'Could not add the selected pages.')
-        toast.error('Add failed', { description: message })
+        const message = await extractErrorMessage(res, t('sitemapPicker.addFailed'))
+        toast.error(t('sitemapPicker.addFailedToast'), { description: message })
         setSubmitState({ status: 'idle' })
         return
       }
       const json = (await res.json()) as { insertedCount: number }
       toast.success(
-        json.insertedCount > 0 ? `${json.insertedCount} page(s) queued for scraping` : 'Those pages were already added',
+        json.insertedCount > 0
+          ? t('sitemapPicker.queuedForScraping', { count: json.insertedCount })
+          : t('sitemapPicker.alreadyAdded'),
       )
       setUrls([])
       setSelected(new Set())
@@ -143,7 +147,7 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
       setSubmitState({ status: 'idle' })
       router.refresh()
     } catch {
-      toast.error('Add failed', { description: 'Network request failed. Check your connection and retry.' })
+      toast.error(t('sitemapPicker.addFailedToast'), { description: t('sitemapPicker.networkError') })
       setSubmitState({ status: 'idle' })
     }
   }
@@ -159,7 +163,7 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
         // Declarative WebMCP: an agent may fill this in, but the operator
         // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
         toolname="discoverClientWebsitePages"
-        tooldescription="Lists the pages on a website by reading its sitemap, falling back to a crawl. Only lists them for review — nothing is scraped until pages are selected and added."
+        tooldescription={t('sitemapPicker.discoverToolDescription')}
         className="flex items-center gap-2"
       >
         <Input
@@ -169,12 +173,12 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
           placeholder="https://client-website.com"
           value={websiteUrl}
           onChange={(e) => setWebsiteUrl(e.target.value)}
-          aria-label="Website URL"
-          toolparamdescription="The site's home page URL, including https://. Its sitemap is read to find every page."
+          aria-label={t('sitemapPicker.websiteUrlLabel')}
+          toolparamdescription={t('sitemapPicker.websiteUrlToolParamDescription')}
         />
         <Button type="submit" disabled={isDiscovering}>
           <MagnifyingGlass size={14} weight="light" />
-          {isDiscovering ? 'Discovering…' : 'Discover pages'}
+          {isDiscovering ? t('sitemapPicker.discovering') : t('sitemapPicker.discoverButton')}
         </Button>
       </form>
 
@@ -187,7 +191,7 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
         // Declarative WebMCP: an agent may fill this in, but the operator
         // presses the button. No `toolautosubmit` — see `@/types/webmcp`.
         toolname="addKnowledgePageUrl"
-        tooldescription="Adds one page URL to the list below and ticks it, for a page the sitemap missed. The page is only queued for scraping once the list is submitted with Add selected."
+        tooldescription={t('sitemapPicker.addUrlToolDescription')}
         className="flex items-center gap-2"
       >
         <Input
@@ -196,12 +200,12 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
           placeholder="https://client-website.com/specific-page"
           value={manualUrl}
           onChange={(e) => setManualUrl(e.target.value)}
-          aria-label="Add a page URL manually"
-          toolparamdescription="The full URL of a single page, including https://."
+          aria-label={t('sitemapPicker.addUrlLabel')}
+          toolparamdescription={t('sitemapPicker.addUrlToolParamDescription')}
         />
         <Button type="submit" variant="outline" disabled={manualUrl.trim().length === 0}>
           <PlusIcon size={14} weight="light" />
-          Add page
+          {t('sitemapPicker.addPageButton')}
         </Button>
       </form>
 
@@ -210,14 +214,14 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={selected.size === urls.length} onChange={toggleAll} />
-              Select all ({urls.length} listed)
+              {t('sitemapPicker.selectAll', { count: urls.length })}
             </label>
             <Button type="button" size="sm" disabled={selected.size === 0 || overBatchLimit || isSubmitting} onClick={() => void onAddSelected()}>
-              {isSubmitting ? 'Adding…' : `Add selected (${selected.size})`}
+              {isSubmitting ? t('sitemapPicker.adding') : t('sitemapPicker.addSelected', { count: selected.size })}
             </Button>
           </div>
           {overBatchLimit ? (
-            <p className="text-destructive text-[12px]">Select 50 or fewer pages at a time.</p>
+            <p className="text-destructive text-[12px]">{t('sitemapPicker.batchLimitExceeded')}</p>
           ) : null}
           <ul className="border-hairline max-h-80 overflow-y-auto rounded-md border">
             {urls.map((url) => (
@@ -227,7 +231,7 @@ export function KnowledgeSitemapPicker({ clientId }: KnowledgeSitemapPickerProps
                 <button
                   type="button"
                   onClick={() => removeUrl(url)}
-                  aria-label={`Remove ${url}`}
+                  aria-label={t('sitemapPicker.removeUrl', { url })}
                   className="text-muted-foreground hover:text-foreground shrink-0"
                 >
                   <XIcon size={14} weight="light" />
