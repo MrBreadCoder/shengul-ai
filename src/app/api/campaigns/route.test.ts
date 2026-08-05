@@ -96,4 +96,48 @@ describe('POST /api/campaigns', () => {
     expect(res.status).toBe(404)
     expect(insertCampaignMock).not.toHaveBeenCalled()
   })
+
+  it('should pass personSeniorities and contactEmailStatuses through into the stored ICP', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req({
+      ...validBody,
+      personSeniorities: ['vp', 'director'],
+      contactEmailStatuses: ['verified'],
+    }))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        icp: expect.objectContaining({
+          personSeniorities: ['vp', 'director'],
+          contactEmailStatuses: ['verified'],
+        }),
+      }),
+    )
+  })
+
+  it('should default personSeniorities and contactEmailStatuses to empty arrays when omitted', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req(validBody))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        icp: expect.objectContaining({ personSeniorities: [], contactEmailStatuses: [] }),
+      }),
+    )
+  })
+
+  it('should reject an unrecognized seniority value with a 400', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+
+    const res = await POST(req({ ...validBody, personSeniorities: ['not_a_real_seniority'] }))
+
+    expect(res.status).toBe(400)
+    expect(insertCampaignMock).not.toHaveBeenCalled()
+  })
 })

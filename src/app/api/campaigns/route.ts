@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertCampaign } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
-import { apolloIcpSchema } from '@/lib/apollo/types'
+import { apolloIcpSchema, apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -23,6 +23,8 @@ const createCampaignSchema = z.object({
   keywords: z.array(z.string()).default([]),
   excludeOrganizationLocations: z.array(z.string()).default([]),
   excludeKeywords: z.array(z.string()).default([]),
+  personSeniorities: z.array(z.enum(apolloPersonSeniorities)).default([]),
+  contactEmailStatuses: z.array(z.enum(apolloContactEmailStatuses)).default([]),
 })
 
 export async function POST(request: Request) {
@@ -41,6 +43,8 @@ export async function POST(request: Request) {
       keywords: body.keywords,
       excludeOrganizationLocations: body.excludeOrganizationLocations,
       excludeKeywords: body.excludeKeywords,
+      personSeniorities: body.personSeniorities,
+      contactEmailStatuses: body.contactEmailStatuses,
     })
     const admin = createAdminClient()
     // The campaign inherits the client's current reply-mode preference rather
