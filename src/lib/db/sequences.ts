@@ -177,3 +177,39 @@ export async function consumeFollowupSkip(
   }
   return (data?.length ?? 0) > 0
 }
+
+// Every sequence for a case in one query — the case page renders every
+// contact's status at once and must not issue one query per lead.
+export async function listSequencesForCase(
+  supabase: SupabaseClient<Database>,
+  caseId: string,
+): Promise<SequenceRow[]> {
+  const { data, error } = await supabase.from('sequences').select('*').eq('case_id', caseId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list sequences for case', { caseId, cause: error.message })
+  }
+  return data ?? []
+}
+
+// Overwrites the effective cadence for one lead's sequence — the per-lead
+// override. Guarded to active/paused sequences only: a stopped/completed
+// sequence has nothing left to reschedule, so this returns null rather than
+// silently writing to a dead row (same "already gone" shape as
+// updateDraftContent in lib/db/emails.ts).
+export async function updateSequenceFollowupDelays(
+  supabase: SupabaseClient<Database>,
+  leadId: string,
+  delaysDays: number[],
+): Promise<SequenceRow | null> {
+  const { data, error } = await supabase
+    .from('sequences')
+    .update({ followup_delays_days: delaysDays })
+    .eq('lead_id', leadId)
+    .in('state', ['active', 'paused'])
+    .select('*')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to update sequence follow-up delays', { leadId, cause: error.message })
+  }
+  // length check guarantees index 0 exists.
+  return data && data.length > 0 ? data[0]! : null
+}

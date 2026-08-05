@@ -9,6 +9,8 @@ import {
   isSequenceActiveForLead,
   requestFollowupSkip,
   consumeFollowupSkip,
+  listSequencesForCase,
+  updateSequenceFollowupDelays,
 } from './sequences'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -228,5 +230,50 @@ describe('consumeFollowupSkip', () => {
       }),
     } as never
     await expect(consumeFollowupSkip(supabase, 'seq1')).rejects.toMatchObject({ code: 'DB_ERROR' })
+  })
+})
+
+describe('listSequencesForCase', () => {
+  it('should return every sequence for the case', async () => {
+    const rows = [{ id: 'seq1', case_id: 'case1', lead_id: 'lead1' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    const result = await listSequencesForCase(supabase, 'case1')
+    expect(result).toEqual(rows)
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(listSequencesForCase(supabase, 'case1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+function mockUpdateInSelect(result: { data: unknown; error: unknown }) {
+  return {
+    from: () => ({
+      update: () => ({ eq: () => ({ in: () => ({ select: () => Promise.resolve(result) }) }) }),
+    }),
+  } as never
+}
+
+describe('updateSequenceFollowupDelays', () => {
+  it('should persist the cadence and return the updated row', async () => {
+    const row = { id: 'seq1', lead_id: 'lead1', followup_delays_days: [2, 5] }
+    const result = await updateSequenceFollowupDelays(mockUpdateInSelect({ data: [row], error: null }), 'lead1', [2, 5])
+    expect(result).toEqual(row)
+  })
+
+  it('should return null when the lead has no active or paused sequence', async () => {
+    const result = await updateSequenceFollowupDelays(mockUpdateInSelect({ data: [], error: null }), 'lead1', [2, 5])
+    expect(result).toBeNull()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(
+      updateSequenceFollowupDelays(mockUpdateInSelect({ data: null, error: { message: 'boom' } }), 'lead1', [2, 5]),
+    ).rejects.toBeInstanceOf(AppError)
   })
 })
