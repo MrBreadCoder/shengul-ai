@@ -94,12 +94,36 @@ function vendorContext(
   }
 }
 
+// Apollo's q_keywords param is a single free-text field, not an OR-list —
+// confirmed live 2026-08-06: two keywords joined into one q_keywords string
+// returned total_entries: 0, and a longer join returned HTTP 422 "Value too
+// long". buildPeopleSearchParams still joins icp.keywords.join(' ') for a
+// single call, so an ICP with more than one keyword must never be handed to
+// it directly; each pass instead searches one keyword at a time via this
+// list of per-call ICPs. `null` in the return array means "no keyword
+// filter" (icp.keywords was empty) — buildPeopleSearchParams already omits
+// q_keywords in that case.
+function searchTargets(icp: ApolloIcpFilters): (string | null)[] {
+  return icp.keywords.length > 0 ? icp.keywords : [null]
+}
+
+function icpForTarget(icp: ApolloIcpFilters, target: string | null): ApolloIcpFilters {
+  return target === null ? icp : { ...icp, keywords: [target] }
+}
+
 // Pass 1 (breadth): at most 1 person per brand-new company, regardless of
 // how many people from that company appear in the results — a second
 // contact is deliberately left to runSecondPass, never picked up here.
 // companyPickCounts / domainBackedCompanyKeys are shared, mutated state
 // threaded through both passes on purpose: they are how pass 2 learns which
 // companies pass 1 (and earlier days) left at exactly 1 verified contact.
+//
+// Iterates (keyword, page) pairs rather than just pages — see
+// searchTargets — cycling to the next keyword once the current one's page
+// comes back empty. `call` is the real page-budget counter (MAX_SEARCH_PAGES
+// total Apollo calls for the whole pass, same invariant as before this
+// keyword-cycling existed); `page` only counts pages within the current
+// keyword.
 async function runFirstPass(
   campaign: CampaignForDiscovery,
   quota: number,
@@ -110,15 +134,22 @@ async function runFirstPass(
   const { icp } = campaign
   const picks: FreshCandidate[] = []
   let candidatesSeen = 0
-  for (let page = 1; page <= MAX_SEARCH_PAGES && picks.length < quota; page++) {
-    const params = buildPeopleSearchParams(icp, page, SEARCH_PER_PAGE)
+  const targets = searchTargets(icp)
+  let targetIndex = 0
+  let page = 1
+  for (let call = 0; call < MAX_SEARCH_PAGES && picks.length < quota && targetIndex < targets.length; call++) {
+    const params = buildPeopleSearchParams(icpForTarget(icp, targets[targetIndex]!), page, SEARCH_PER_PAGE)
     const { candidates } = await withExternalLogging(
       'apollo',
       vendorContext(campaign, 'apollo.search.failed', { pass: 1, page }),
       () => withRetry(() => searchPeople(params)),
     )
     candidatesSeen += candidates.length
-    if (candidates.length === 0) break
+    if (candidates.length === 0) {
+      targetIndex += 1
+      page = 1
+      continue
+    }
     for (const candidate of candidates) {
       if (picks.length >= quota) break
       if (matchesExcludedKeywords(candidate, icp.excludeKeywords)) continue
@@ -130,6 +161,7 @@ async function runFirstPass(
       if (candidate.organizationDomain) domainBackedCompanyKeys.add(companyKey)
       picks.push(toFreshCandidate(candidate))
     }
+    page += 1
   }
   return { picks, candidatesSeen }
 }
@@ -143,8 +175,10 @@ async function runFirstPass(
 // The domain filter narrows every time a target is found (remainingTargets
 // shrinks), so `page` is reset to 1 whenever that happens — page N of a
 // freshly narrowed filter is not a continuation of page N against the old,
-// wider filter, and would silently skip results. `pagesSearched` is the
-// real page-budget counter since `page` no longer counts monotonically.
+// wider filter, and would silently skip results. `call` is the real
+// page-budget counter since `page` no longer counts monotonically (it also
+// resets whenever runFirstPass's keyword-cycling — see searchTargets — moves
+// to the next keyword).
 async function runSecondPass(
   campaign: CampaignForDiscovery,
   quota: number,
@@ -157,17 +191,27 @@ async function runSecondPass(
   const picks: FreshCandidate[] = []
   let candidatesSeen = 0
   const remainingTargets = new Set(targetDomains)
+  const targets = searchTargets(icp)
+  let targetIndex = 0
   let page = 1
-  for (let pagesSearched = 0; pagesSearched < MAX_SEARCH_PAGES && picks.length < quota && remainingTargets.size > 0; pagesSearched++) {
+  for (
+    let call = 0;
+    call < MAX_SEARCH_PAGES && picks.length < quota && remainingTargets.size > 0 && targetIndex < targets.length;
+    call++
+  ) {
     const targetsBefore = remainingTargets.size
-    const params = buildPeopleSearchParams(icp, page, SEARCH_PER_PAGE, [...remainingTargets])
+    const params = buildPeopleSearchParams(icpForTarget(icp, targets[targetIndex]!), page, SEARCH_PER_PAGE, [...remainingTargets])
     const { candidates } = await withExternalLogging(
       'apollo',
       vendorContext(campaign, 'apollo.search.failed', { pass: 2, page }),
       () => withRetry(() => searchPeople(params)),
     )
     candidatesSeen += candidates.length
-    if (candidates.length === 0) break
+    if (candidates.length === 0) {
+      targetIndex += 1
+      page = 1
+      continue
+    }
     for (const candidate of candidates) {
       if (picks.length >= quota) break
       const companyKey = computeCompanyKey(candidate.organizationDomain, candidate.organizationName)

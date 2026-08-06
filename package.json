@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "seed:operator": "tsx scripts/seed-operator.ts",
-    "seed:dev": "tsx scripts/seed-dev.ts"
+    "seed:dev": "tsx scripts/seed-dev.ts",
+    "test:apollo-schools": "tsx scripts/test-apollo-schools-search.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.21",

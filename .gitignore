@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ad hoc script run output (may contain real prospect data pulled from Apollo)
+/scripts/.output/

@@ -797,3 +797,95 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
     expect(mockGetKnownSourceIds).toHaveBeenCalledWith({}, 'client1')
   })
 })
+
+describe('runDiscoveryForCampaign — multi-keyword organization search', () => {
+  // Apollo's q_keywords field only accepts one free-text phrase at a time —
+  // joining multiple organization keywords into one q_keywords string
+  // returns 0 results (or HTTP 422 "Value too long" once long enough),
+  // confirmed live against Apollo 2026-08-06. An ICP with more than one
+  // keyword must search once per keyword instead of joining them.
+  const multiKeywordIcp: ApolloIcpFilters = { ...icp, keywords: ['private school', 'academy'] }
+
+  beforeEach(() => {
+    mockSearchPeople.mockReset()
+    mockBulkMatchPeople.mockReset()
+    mockGetKnownSourceIds.mockReset()
+    mockInsertLeads.mockReset()
+    mockGetVerifiedLeadCompanies.mockReset()
+    mockGroupVerifiedLead.mockReset()
+    mockLogEvent.mockReset()
+    mockLogError.mockReset()
+    mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
+    mockVerifyEmail.mockResolvedValue(verification('deliverable'))
+    mockGetKnownSourceIds.mockResolvedValue(new Set())
+    mockGetVerifiedLeadCompanies.mockResolvedValue([])
+    mockGetSuppressions.mockResolvedValue(new Set())
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+  })
+
+  it('should search Apollo once per organization keyword during pass 1, moving to the next keyword when one returns nothing', async () => {
+    // dailyTarget 2 -> firstPassQuota = ceil(2/2) = 1, so the single
+    // "academy" pick fills pass 1 immediately.
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "private school": nothing
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // pass 1, "academy": found, fills quota
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "private school": no second contact
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "academy": no second contact either
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: multiKeywordIcp },
+    )
+
+    expect(mockSearchPeople.mock.calls[0]![0]).toMatchObject({ q_keywords: 'private school' })
+    expect(mockSearchPeople.mock.calls[1]![0]).toMatchObject({ q_keywords: 'academy' })
+    expect(summary.firstPassCandidates).toBe(1)
+  })
+
+  it('should stop calling Apollo once the pass-1 quota is met, without searching remaining keywords', async () => {
+    // dailyTarget 1 -> firstPassQuota = ceil(1/2) = 1, filled by "private
+    // school" alone; secondPassQuota (1 - 1 = 0) means pass 2 never runs.
+    mockSearchPeople.mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', dailyTarget: 1, icp: multiKeywordIcp },
+    )
+
+    // Only the one call that met quota — "academy" is never searched.
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1)
+  })
+
+  it('should cycle through organization keywords during pass 2 as well, alongside the domain filter', async () => {
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "private school": nothing new
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "academy": nothing new
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "private school": nothing
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // pass 2, "academy": found
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: multiKeywordIcp },
+    )
+
+    const pass2SecondCallParams = mockSearchPeople.mock.calls[3]![0] as Record<string, string | string[]>
+    expect(pass2SecondCallParams).toMatchObject({ q_keywords: 'academy', 'q_organization_domains_list[]': ['acme.com'] })
+    expect(summary.secondPassCandidates).toBe(1)
+  })
+})
