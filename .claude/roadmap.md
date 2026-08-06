@@ -2711,3 +2711,131 @@ fully signed off: the plan's manual `pnpm dev` walk-through of every
 route in both languages (§Task 18 Step 5) as a final regression pass —
 not yet done, per this codebase's convention of leaving that to manual
 QA rather than this session.
+
+## 2026-08-06 — Apollo audience/filter test script (private K-12 school ICP)
+
+Added `scripts/test-apollo-schools-search.ts` (`pnpm test:apollo-schools`),
+a diagnostic-only script that runs a real Apollo People Search for the
+private K-12 school ICP the user supplied (21 `person_titles[]`, 33
+organization keywords, 22 client-side exclude keywords) and reports what
+comes back — audience-quality/filter inspection only, no Supabase writes,
+no `bulk_match`/enrichment call (so no Apollo reveal credits spent). Reuses
+the real production building blocks unmodified: `buildPeopleSearchParams`,
+`searchPeople`, `matchesExcludedKeywords`, `apolloIcpSchema` from
+`src/lib/apollo/`.
+
+**Bug found in the real campaign system, not just this test:** live curl
+testing against the account's Apollo key proved `q_keywords` is a single
+free-text field, not an OR-list — `build-search-params.ts`'s
+`icp.keywords.join(' ')` silently breaks any ICP with more than one
+organization keyword (a 2-phrase join already returned `total_entries: 0`;
+this ICP's full 33-phrase join returned HTTP 422 `{"error":"Value too
+long"}`). **Any saved campaign with multiple organization keywords is
+likely returning zero or erroring today** — `runFirstPass`/`runSecondPass`
+in `src/lib/pipeline/discover.ts` call `buildPeopleSearchParams` the same
+way. Not fixed yet (wasn't asked); the test script works around it by
+calling Apollo once per organization keyword and de-duplicating by
+`apolloId`, which is also how it surfaces a per-keyword total_entries
+breakdown. `src/lib/apollo/build-search-params.ts` should be revisited
+(loop per keyword, or drop multi-keyword q_keywords support) before this
+ICP — or any multi-keyword ICP — is run through the real pipeline.
+
+Real run (`--pages=1 --per-page=25`, 33 Apollo calls): 801 raw candidates,
+785 unique after de-dup, 780 kept / 5 excluded (matched `university` or
+`college`). Output written to `scripts/.output/` (gitignored — contains
+real prospect names/titles/orgs pulled from Apollo). Verified: `pnpm
+typecheck`, `pnpm eslint scripts/test-apollo-schools-search.ts`, `pnpm
+vitest run src/lib/apollo` (59 tests, unchanged — no production code
+touched) all clean.
+
+### Follow-up same day: fixed the multi-keyword bug in the real pipeline
+
+User asked "how can we fix this?" — fixed `src/lib/pipeline/discover.ts`
+(`runFirstPass`/`runSecondPass`), via TDD (`superpowers:test-driven-development`).
+Root cause is at the call-site, not in `build-search-params.ts` itself
+(that function was always correct for a *single* keyword) — the pipeline
+was just handing it an ICP with every keyword joined. Fix: both passes now
+iterate `(keyword, page)` pairs instead of just `page` — new
+`searchTargets(icp)` returns `icp.keywords` (or `[null]` meaning "no
+keyword filter" when empty, preserving today's exact behavior for every
+existing single/no-keyword campaign) and `icpForTarget(icp, target)` builds
+the one-keyword ICP for each call. Cycles to the next keyword when the
+current one's page comes back empty; stops the instant quota is met, same
+as before. `call` (not `page`) is the real budget counter, so total Apollo
+calls per pass is still capped at `MAX_SEARCH_PAGES` — no change to
+runtime/timeout risk for the QStash-invoked `/api/pipeline/discover` route.
+Pass 2's existing page-reset-on-narrow logic is preserved unchanged, now
+also resetting on keyword-advance.
+
+TDD: 3 new tests added to `discover.test.ts` under `describe('runDiscoveryForCampaign
+— multi-keyword organization search')` — RED confirmed first (2 of 3 failed
+for the right reason: joined `q_keywords` string, and a missing 4th mock
+call; the 3rd trivially passed both before/after as a quota-short-circuit
+regression guard, kept anyway). GREEN after the fix. Full suite: **190
+files / 1972 tests passing** (1969 prior + 3 new), `pnpm typecheck` and
+`pnpm eslint` both clean. No live Supabase-backed pipeline run performed
+(would create real fake leads in the DB and wasn't asked for) — correctness
+relies on the mocked-Apollo unit tests plus the already-proven live
+single-keyword Apollo call semantics from [[test-apollo-schools-search]]
+above.
+
+files / 1972 tests passing** (1969 prior + 3 new), `pnpm typecheck` and
+`pnpm eslint` both clean. No live Supabase-backed pipeline run performed
+(would create real fake leads in the DB and wasn't asked for) — correctness
+relies on the mocked-Apollo unit tests plus the already-proven live
+single-keyword Apollo call semantics from the diagnostic script above.
+
+Not committed yet (`.claude/roadmap.md`, `.gitignore`, `package.json`,
+`src/lib/pipeline/discover.ts`, `src/lib/pipeline/discover.test.ts`
+modified; `scripts/test-apollo-schools-search.ts` new/untracked) — waiting
+on user to confirm before committing/pushing to `master`.
+
+## Lazy-start warmup ramp (2026-08-06)
+
+User reported: connecting a mailbox to Mailreach warmup starts the 14-day
+send gate, but the daily-cap ramp was climbing every day anyway, even
+though nothing had actually been sent yet. Root cause: `warmup_started_at`
+(the ramp clock, `src/lib/mailbox/warmup.ts`) was stamped at mailbox
+*connect* time — completely independent of `mailreach_started_at` (the
+14-day outreach gate) — so the ramp advanced through the whole idle/gated
+period.
+
+Spec: [[2026-08-06-lazy-start-warmup-ramp-design]]
+(`docs/superpowers/specs/2026-08-06-lazy-start-warmup-ramp-design.md`).
+Plan: `docs/superpowers/plans/2026-08-06-lazy-start-warmup-ramp.md`, 7
+tasks, executed via subagent-driven-development for Tasks 1-4 (each with
+an independent implementer + reviewer, all reviews clean — one deferred
+Minor on Task 4's report-hygiene, non-blocking) then inline for Tasks
+5-7 at the user's request ("skip commits, inline execution").
+
+Shipped:
+- Migration `0030`: `claim_mailbox_send`/`claim_mailbox_send_uncapped` now
+  stamp `warmup_started_at = coalesce(warmup_started_at, now())` on a
+  mailbox's first successful send (any purpose), guarded to
+  `warmup_profile <> 'none'`. One-time backfill resets mailboxes that are
+  ramping but have never sent back to `null`.
+- `src/lib/mailbox/warmup.ts`: `computeRampState`/`effectiveDailyCap`/
+  `getMailboxWarmthStatus` now treat "ramping profile, never sent" as day
+  one (new `WarmthStatus` variant `not_started`), distinct from `'none'`
+  (`not_ramping`). `warmupInsertFields` no longer stamps a timestamp at
+  connect time; the old immediate-stamp behavior moved to a new
+  `warmupRestartFields`, used only by the explicit profile-change route.
+- The three connect routes (`google/callback`, `outlook/callback`,
+  `smtp/connect`) leave `warmup_started_at` null on insert.
+  `POST /api/mailboxes/[id]/warmup` now calls `warmupRestartFields` —
+  unchanged immediate-restart behavior for an explicit operator profile
+  change.
+- Settings `mailbox-row.tsx` and Clients-page `warmup-mailbox-row.tsx` both
+  render the new `not_started` status via an exhaustive switch
+  (`assertNever` default) instead of the old two-way ternary that would
+  have silently shown no suffix for it. New en/tr copy in
+  `src/messages/{en,tr}.json`.
+
+Verification: `pnpm typecheck` clean, `pnpm test` → **190 files / 1980
+tests passing**. Both message JSON files parse. Manual in-browser check
+(Task 7's Step 2) not yet performed.
+
+Not committed yet for Tasks 5-7 (`src/app/(app)/settings/mailbox-row.tsx`,
+`src/app/(app)/clients/[id]/warmup-mailbox-row.tsx`, `src/messages/en.json`,
+`src/messages/tr.json`, this roadmap entry) — user asked to skip commits;
+Tasks 1-4 are already committed (`a1dbfd4`..`58f343a`).
