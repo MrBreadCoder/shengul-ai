@@ -210,7 +210,7 @@ describe('POST /api/mailboxes/smtp/connect', () => {
       // constraint" on every connect attempt).
       warmup_target_cap: 20,
     })
-    expect(row.warmup_started_at).toEqual(expect.any(String))
+    expect(row.warmup_started_at).toBeNull()
     expect(JSON.stringify(row.oauth)).not.toContain('smtp-password-fixture')
   })
 

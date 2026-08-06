@@ -160,7 +160,7 @@ export async function POST(request: Request) {
       // ramp's target has to match that same default — it has no default of
       // its own (see the constant's own comment).
       warmup_target_cap: DEFAULT_MAILBOX_DAILY_CAP,
-      ...warmupInsertFields(client?.warmup_profile ?? 'standard', new Date()),
+      ...warmupInsertFields(client?.warmup_profile ?? 'standard'),
     })
     await logEvent({
       clientId,
