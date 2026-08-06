@@ -78,6 +78,18 @@ describe('POST /api/mailboxes/[id]/warmup', () => {
     })
   })
 
+  it('should stamp a fresh start time when the profile changes to a ramping one', async () => {
+    getMailboxById.mockResolvedValue({
+      id: 'm1', client_id: 'c1', warmup_profile: 'none',
+      warmup_start_cap: 5, warmup_increment: 3, warmup_target_cap: 40, daily_cap: 40,
+    })
+    const response = await POST(req({ profile: 'standard' }), context)
+    expect(response.status).toBe(200)
+    const call = updateMailboxWarmup.mock.calls[0]?.[2] as Record<string, unknown>
+    expect(call.warmup_profile).toBe('standard')
+    expect(typeof call.warmup_started_at).toBe('string')
+  })
+
   it('should not reset the ramp clock when the same profile value is resent', async () => {
     const response = await POST(req({ profile: 'standard', warmupIncrement: 4 }), context)
     expect(response.status).toBe(200)

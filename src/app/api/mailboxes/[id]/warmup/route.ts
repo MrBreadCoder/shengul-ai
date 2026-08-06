@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getMailboxById, updateMailboxWarmup } from '@/lib/db/mailboxes'
-import { warmupInsertFields } from '@/lib/mailbox/warmup'
+import { warmupRestartFields } from '@/lib/mailbox/warmup'
 import { logEventSafe } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -39,7 +39,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (body.warmupTargetCap !== undefined) fields.warmup_target_cap = body.warmupTargetCap
     if (body.dailyCap !== undefined) fields.daily_cap = body.dailyCap
     if (body.profile !== undefined && body.profile !== mailbox.warmup_profile) {
-      Object.assign(fields, warmupInsertFields(body.profile, new Date()))
+      Object.assign(fields, warmupRestartFields(body.profile, new Date()))
     }
 
     if (Object.keys(fields).length > 0) {
