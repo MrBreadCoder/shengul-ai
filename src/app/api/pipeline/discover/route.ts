@@ -37,6 +37,8 @@ export async function POST(request: Request) {
     const summary = await runDiscoveryForCampaign(admin, {
       id: campaign.id,
       clientId: campaign.client_id,
+      name: campaign.name,
+      valueProp: campaign.value_prop,
       dailyTarget: campaign.daily_target,
       icp,
     })

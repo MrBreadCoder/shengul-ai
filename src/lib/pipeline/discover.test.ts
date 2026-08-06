@@ -10,6 +10,7 @@ const mockLogEvent = vi.hoisted(() => vi.fn())
 const mockLogError = vi.hoisted(() => vi.fn())
 const mockVerifyEmail = vi.hoisted(() => vi.fn())
 const mockGetSuppressions = vi.hoisted(() => vi.fn())
+const mockCheckCompanyRelevance = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/apollo/client', () => ({ searchPeople: mockSearchPeople, bulkMatchPeople: mockBulkMatchPeople }))
 vi.mock('@/lib/db/leads', () => ({
@@ -24,6 +25,7 @@ vi.mock('./group-lead', async (importOriginal) => {
 vi.mock('@/lib/events/log-event', () => ({ logEvent: mockLogEvent, logError: mockLogError }))
 vi.mock('@/lib/emailable/client', () => ({ verifyEmail: mockVerifyEmail }))
 vi.mock('@/lib/db/suppressions', () => ({ getSuppressions: mockGetSuppressions }))
+vi.mock('./ai-relevance', () => ({ checkCompanyRelevance: mockCheckCompanyRelevance }))
 
 import { runDiscoveryForCampaign } from './discover'
 import type { ApolloIcpFilters } from '@/lib/apollo/types'
@@ -58,6 +60,20 @@ function insertedRows(rows: { source_id: string | null | undefined; email_status
 function verification(state: string) {
   return { state, reason: 'x', email: 'jo@acme.com', score: state === 'deliverable' ? 100 : 10 }
 }
+
+// Every test in this file exercises a code path that may reach the AI
+// relevance check (it runs on any row eligible for Emailable, which is most
+// rows in most tests here) — default it to an unconditional pass, once, at
+// the file level, so tests that don't care about AI relevance behavior don't
+// have to configure it individually. The dedicated 'AI relevance filter'
+// describe block below overrides this per-test with
+// mockResolvedValueOnce/mockRejectedValueOnce. Root-level beforeEach hooks
+// run before every nested describe's own beforeEach, so this always applies
+// first.
+beforeEach(() => {
+  mockCheckCompanyRelevance.mockReset()
+  mockCheckCompanyRelevance.mockResolvedValue({ pass: true, reason: 'ai default pass' })
+})
 
 describe('runDiscoveryForCampaign', () => {
   beforeEach(() => {
@@ -96,7 +112,7 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     expect(summary.firstPassCandidates).toBe(2)
@@ -123,7 +139,7 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 1, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 1, icp })
 
     // firstPassQuota = ceil(1/2) = 1, so exactly one pick is enriched and
     // grouped, and secondPassQuota (1 - 1 = 0) means no second search call
@@ -148,7 +164,7 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(3)
     expect(summary.firstPassCandidates).toBe(1)
@@ -169,7 +185,7 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     const secondCallParams = mockSearchPeople.mock.calls[1]![0] as Record<string, string | string[]>
@@ -184,7 +200,7 @@ describe('runDiscoveryForCampaign', () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
     mockInsertLeads.mockResolvedValue([])
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(1)
     expect(summary.secondPassCandidates).toBe(0)
@@ -198,7 +214,7 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, page 2: empty, stop
     mockInsertLeads.mockResolvedValue([])
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(3)
     expect(summary.secondPassCandidates).toBe(0)
@@ -212,7 +228,7 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
     mockInsertLeads.mockResolvedValue([])
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 5, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
@@ -237,7 +253,7 @@ describe('runDiscoveryForCampaign', () => {
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 0, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 0, icp })
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     expect(summary.firstPassCandidates).toBe(25)
@@ -248,7 +264,7 @@ describe('runDiscoveryForCampaign', () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
     mockInsertLeads.mockResolvedValue([])
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 5, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp })
 
     expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 'client1', type: 'pipeline.discover.completed',
@@ -259,7 +275,7 @@ describe('runDiscoveryForCampaign', () => {
     mockSearchPeople.mockRejectedValue(new Error('apollo down'))
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 5, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp }),
     ).rejects.toThrow('apollo down')
 
     expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -276,7 +292,7 @@ describe('runDiscoveryForCampaign', () => {
     mockLogEvent.mockRejectedValue(new Error('audit db down'))
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 5, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp }),
     ).resolves.toMatchObject({ campaignId: 'camp1' })
   })
 
@@ -285,7 +301,7 @@ describe('runDiscoveryForCampaign', () => {
     mockLogEvent.mockRejectedValue(new Error('audit db down'))
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 5, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp }),
     ).rejects.toThrow('apollo down')
   })
 
@@ -306,7 +322,7 @@ describe('runDiscoveryForCampaign', () => {
       .mockRejectedValueOnce(new Error('db hiccup'))
       .mockResolvedValueOnce('case2')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
 
     expect(mockGroupVerifiedLead).toHaveBeenCalledTimes(2)
     expect(summary.inserted).toBe(2)
@@ -328,7 +344,7 @@ describe('runDiscoveryForCampaign', () => {
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp }),
     ).rejects.toThrow('apollo down')
 
     // insertLeads was still called with the pass-1 row even though the whole
@@ -361,7 +377,7 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: excludingIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
     expect(summary.firstPassCandidates).toBe(1)
@@ -381,7 +397,7 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: excludingIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
     expect(summary.firstPassCandidates).toBe(0)
@@ -402,7 +418,7 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: excludingIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
     expect(summary.secondPassCandidates).toBe(0)
@@ -435,7 +451,7 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: excludingIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
     const secondPageParams = mockSearchPeople.mock.calls[2]![0] as Record<string, string | string[]>
@@ -490,7 +506,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockResolvedValue(verification('deliverable'))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(insertedRow()).toMatchObject({ email_status: 'verified', status: 'active' })
     expect(insertedRow().email_verified_at).toEqual(expect.any(String))
@@ -506,7 +522,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockResolvedValue(verification('undeliverable'))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(insertedRow()).toMatchObject({ email_status: 'invalid', status: 'parked', email_verified_at: null })
     expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
@@ -521,7 +537,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockResolvedValue(verification(state))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(insertedRow()).toMatchObject({ email_status: expectedStatus, status: 'parked' })
     expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
@@ -532,7 +548,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockRejectedValue(new Error('HTTP 402'))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(insertedRow()).toMatchObject({ email_status: 'verified', status: 'active' })
     expect(insertedRow().email_verification).toMatchObject({ outcome: 'failed', error: 'HTTP 402' })
@@ -545,7 +561,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockRejectedValue(new Error('HTTP 402'))
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockLogError).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 'client1',
@@ -558,7 +574,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     singleCandidateRun()
     mockVerifyEmail.mockRejectedValue(new Error('HTTP 402'))
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     const logged = JSON.stringify(mockLogError.mock.calls[0]?.[0])
     expect(logged).toContain('acme.com')
@@ -568,7 +584,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
   it('should not call Emailable for a lead Apollo did not mark verified', async () => {
     singleCandidateRun('unverified')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockVerifyEmail).not.toHaveBeenCalled()
     expect(insertedRow()).toMatchObject({ email_status: 'unverified', status: 'parked', email_verification: null })
@@ -584,7 +600,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
       details.map((d) => ({ ...enriched(d.id, 'verified'), email: null })),
     )
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockVerifyEmail).not.toHaveBeenCalled()
     expect(insertedRow()).toMatchObject({ status: 'parked' })
@@ -602,7 +618,7 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce(verification('undeliverable'))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
 
     const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
     expect(rows[0]).toMatchObject({ status: 'active' })
@@ -634,7 +650,7 @@ describe('apollo failure attribution', () => {
     mockSearchPeople.mockRejectedValue(new AppError('EXTERNAL_TIMEOUT', 'HTTP request failed', {}))
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp }),
     ).rejects.toBeInstanceOf(AppError)
 
     expect(mockLogError.mock.calls[0]?.[0]).toMatchObject({
@@ -651,7 +667,7 @@ describe('apollo failure attribution', () => {
     mockBulkMatchPeople.mockRejectedValue(new AppError('RATE_LIMITED', 'quota exhausted', {}))
 
     await expect(
-      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 4, icp }),
+      runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp }),
     ).rejects.toBeInstanceOf(AppError)
 
     expect(mockLogError.mock.calls[0]?.[0]).toMatchObject({
@@ -697,7 +713,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
     )
     mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockVerifyEmail).not.toHaveBeenCalled()
     expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
@@ -714,7 +730,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
     )
     mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 'client1',
@@ -733,7 +749,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: icpWithExclude },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp: icpWithExclude },
     )
 
     expect(mockVerifyEmail).not.toHaveBeenCalled()
@@ -754,7 +770,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: icpWithExclude },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp: icpWithExclude },
     )
 
     // Post-enrich exclude runs first and already parks the row, so the
@@ -767,7 +783,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
   it('should never call getSuppressions with an empty email list', async () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockGetSuppressions).not.toHaveBeenCalled()
   })
@@ -780,7 +796,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
     mockVerifyEmail.mockResolvedValue(verification('deliverable'))
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockVerifyEmail).toHaveBeenCalledTimes(1)
     expect(mockGroupVerifiedLead).toHaveBeenCalledTimes(1)
@@ -792,7 +808,7 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
   it('should pass campaign.clientId, not campaign.id, to getKnownSourceIds', async () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp })
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
     expect(mockGetKnownSourceIds).toHaveBeenCalledWith({}, 'client1')
   })
@@ -841,7 +857,7 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 2, icp: multiKeywordIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp: multiKeywordIcp },
     )
 
     expect(mockSearchPeople.mock.calls[0]![0]).toMatchObject({ q_keywords: 'private school' })
@@ -860,7 +876,7 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
     await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 1, icp: multiKeywordIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 1, icp: multiKeywordIcp },
     )
 
     // Only the one call that met quota — "academy" is never searched.
@@ -881,11 +897,204 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', dailyTarget: 10, icp: multiKeywordIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: multiKeywordIcp },
     )
 
     const pass2SecondCallParams = mockSearchPeople.mock.calls[3]![0] as Record<string, string | string[]>
     expect(pass2SecondCallParams).toMatchObject({ q_keywords: 'academy', 'q_organization_domains_list[]': ['acme.com'] })
     expect(summary.secondPassCandidates).toBe(1)
+  })
+})
+
+describe('runDiscoveryForCampaign — AI relevance filter', () => {
+  beforeEach(() => {
+    mockSearchPeople.mockReset()
+    mockBulkMatchPeople.mockReset()
+    mockGetKnownSourceIds.mockReset()
+    mockInsertLeads.mockReset()
+    mockGetVerifiedLeadCompanies.mockReset()
+    mockGroupVerifiedLead.mockReset()
+    mockLogEvent.mockReset()
+    mockLogError.mockReset()
+    mockVerifyEmail.mockReset()
+    mockGetSuppressions.mockReset()
+    mockGetKnownSourceIds.mockResolvedValue(new Set())
+    mockGetVerifiedLeadCompanies.mockResolvedValue([])
+    mockGetSuppressions.mockResolvedValue(new Set())
+    mockVerifyEmail.mockResolvedValue(verification('deliverable'))
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+  })
+
+  function singleCandidateRun() {
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+  }
+
+  it('should park a lead the AI rejects, without calling Emailable, and never group it', async () => {
+    singleCandidateRun()
+    mockCheckCompanyRelevance.mockResolvedValueOnce({ pass: false, reason: 'Wrong industry for this campaign.' })
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled()
+    expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+    const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
+    expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
+    expect(summary.aiChecked).toBe(1)
+    expect(summary.aiRejected).toBe(1)
+    expect(summary.verified).toBe(0)
+  })
+
+  it('should log a pipeline.discover.ai_rejected event with the model reason', async () => {
+    singleCandidateRun()
+    mockCheckCompanyRelevance.mockResolvedValueOnce({ pass: false, reason: 'Wrong industry for this campaign.' })
+
+    await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client1',
+      type: 'pipeline.discover.ai_rejected',
+      source: 'pipeline',
+      payload: expect.objectContaining({
+        campaignId: 'camp1', leadSourceId: 'p1', companyKey: 'acme.com', reason: 'Wrong industry for this campaign.',
+      }),
+    }))
+  })
+
+  it('should still activate and group a lead the AI approves', async () => {
+    singleCandidateRun()
+    mockCheckCompanyRelevance.mockResolvedValueOnce({ pass: true, reason: 'Matches target profile.' })
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockVerifyEmail).toHaveBeenCalledTimes(1)
+    expect(mockGroupVerifiedLead).toHaveBeenCalledTimes(1)
+    expect(summary.aiChecked).toBe(1)
+    expect(summary.aiRejected).toBe(0)
+    expect(summary.verified).toBe(1)
+  })
+
+  it('should call checkCompanyRelevance only once for two eligible rows at the same company in one run', async () => {
+    // Mirrors the very first test in this file: pass 1 finds a brand-new
+    // company (p1 @ acme.com), it verifies this run, so pass 2 targets
+    // acme.com for a second contact (p5) — both share a company_key within
+    // one discovery run, the exact scenario the cache exists for.
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // pass 1, page 1
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: stop
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // pass 2: second contact
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockCheckCompanyRelevance.mockResolvedValue({ pass: true, reason: 'Matches target profile.' })
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp },
+    )
+
+    expect(mockCheckCompanyRelevance).toHaveBeenCalledTimes(1)
+    expect(summary.aiChecked).toBe(2)
+    expect(summary.secondPassCandidates).toBe(1)
+  })
+
+  it('should not call checkCompanyRelevance for a lead already parked by suppression', async () => {
+    singleCandidateRun()
+    mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockCheckCompanyRelevance).not.toHaveBeenCalled()
+    expect(summary.aiChecked).toBe(0)
+  })
+
+  it('should not call checkCompanyRelevance for a lead Apollo did not mark verified', async () => {
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'unverified')),
+    )
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockCheckCompanyRelevance).not.toHaveBeenCalled()
+    expect(summary.aiChecked).toBe(0)
+  })
+
+  it('should fail open and still activate the lead when the AI check throws', async () => {
+    singleCandidateRun()
+    mockCheckCompanyRelevance.mockRejectedValueOnce(new Error('gemini down'))
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockVerifyEmail).toHaveBeenCalledTimes(1)
+    expect(mockGroupVerifiedLead).toHaveBeenCalledTimes(1)
+    expect(summary.aiFailedOpen).toBe(1)
+    expect(summary.aiRejected).toBe(0)
+    expect(summary.verified).toBe(1)
+  })
+
+  it('should log a pipeline.discover.ai_check_failed event when the AI check throws', async () => {
+    singleCandidateRun()
+    mockCheckCompanyRelevance.mockRejectedValueOnce(new Error('gemini down'))
+
+    await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp },
+    )
+
+    expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client1',
+      type: 'pipeline.discover.ai_check_failed',
+      source: 'pipeline',
+      payload: expect.objectContaining({ campaignId: 'camp1', companyKey: 'acme.com', error: 'gemini down' }),
+    }))
+  })
+
+  it('should pass the campaign name, value prop, and ICP keywords to checkCompanyRelevance', async () => {
+    singleCandidateRun()
+    const keywordIcp: ApolloIcpFilters = { ...icp, keywords: ['private school'], excludeKeywords: ['staffing'] }
+
+    await runDiscoveryForCampaign(
+      {} as never,
+      {
+        id: 'camp1', clientId: 'client1', name: 'School Outreach', valueProp: 'We help schools hire.',
+        dailyTarget: 2, icp: keywordIcp,
+      },
+    )
+
+    expect(mockCheckCompanyRelevance).toHaveBeenCalledWith(
+      { clientId: 'client1', actor: 'system' },
+      { name: 'School Outreach', valueProp: 'We help schools hire.', keywords: ['private school'], excludeKeywords: ['staffing'] },
+      expect.objectContaining({ companyName: 'Acme', companyDomain: 'acme.com' }),
+    )
   })
 })

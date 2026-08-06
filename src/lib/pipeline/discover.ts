@@ -8,6 +8,7 @@ import type { ApolloIcpFilters, ApolloSearchCandidate } from '@/lib/apollo/types
 import { getKnownSourceIds, insertLeads, getVerifiedLeadCompanies, type LeadInsert, type LeadRow } from '@/lib/db/leads'
 import { getSuppressions } from '@/lib/db/suppressions'
 import { groupVerifiedLead, computeCompanyKey } from './group-lead'
+import { checkCompanyRelevance, type RelevanceVerdict, type CampaignRelevanceContext, type CompanySnapshot } from './ai-relevance'
 import { logEvent } from '@/lib/events/log-event'
 import { withExternalLogging, type ExternalCallContext } from '@/lib/events/with-external-logging'
 import { withRetry } from '@/lib/http/with-retry'
@@ -26,9 +27,18 @@ const DEFAULT_DAILY_QUOTA = 50
 // rather than normal load.
 const VERIFY_CONCURRENCY = 5
 
+// Same conservative-default reasoning as VERIFY_CONCURRENCY: not tuned to a
+// documented Gemini RPM ceiling, just a sane number of in-flight relevance
+// checks per enrich batch.
+const AI_RELEVANCE_CONCURRENCY = 5
+
 export interface CampaignForDiscovery {
   id: string
   clientId: string
+  /** Campaign display name — part of the context handed to the AI relevance filter (see ai-relevance.ts). */
+  name: string
+  /** Campaign value proposition — same purpose as `name` above. Nullable: not every campaign has one set. */
+  valueProp: string | null
   dailyTarget: number
   icp: ApolloIcpFilters
 }
@@ -50,6 +60,12 @@ export interface DiscoverySummary {
   suppressedSkipped: number
   /** Apollo-verified leads parked without an Emailable call: matched an exclude keyword post-enrich. */
   excludedPostEnrich: number
+  /** Rows evaluated against the AI relevance filter (cache hits included). */
+  aiChecked: number
+  /** Rows parked because the AI relevance filter rejected their company. */
+  aiRejected: number
+  /** Rows that passed through unaffected because the AI relevance check itself failed (timeout/error). */
+  aiFailedOpen: number
   inserted: number
 }
 
@@ -348,6 +364,21 @@ interface EnrichResult {
   emailableFailedOpen: number
   suppressedSkipped: number
   excludedPostEnrich: number
+  aiChecked: number
+  aiRejected: number
+  aiFailedOpen: number
+}
+
+// Mirrors verifyBatch's own inline eligibility check (email_status ===
+// 'verified', not already parked upstream, has a real email) — kept as a
+// standalone helper rather than refactored into verifyBatch itself, so this
+// change doesn't touch that function's already-tested internals. A row that
+// could never reach `active` regardless of company relevance isn't worth an
+// AI call either.
+function isVerifiableRow(row: LeadInsert, skipVerification: Set<string>): boolean {
+  if (row.email_status !== 'verified') return false
+  if (row.source_id && skipVerification.has(row.source_id)) return false
+  return typeof row.email === 'string' && row.email.length > 0
 }
 
 // Best-effort, same reasoning as the pipeline.discover.group_lead_failed
@@ -373,10 +404,54 @@ async function logDiscoveryFilterEvent(
   }
 }
 
+// Separate from logDiscoveryFilterEvent above because this payload carries
+// the model's own reason string, not just the (leadSourceId, companyKey)
+// pair the other two filter events share.
+async function logAiRejectedEvent(
+  campaign: CampaignForDiscovery,
+  leadSourceId: string,
+  companyKey: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await logEvent({
+      clientId: campaign.clientId,
+      actor: 'system',
+      type: 'pipeline.discover.ai_rejected',
+      source: 'pipeline',
+      payload: { campaignId: campaign.id, leadSourceId, companyKey, reason },
+    })
+  } catch {
+    // Audit logging is best-effort.
+  }
+}
+
+// Company-level, not lead-level (no leadSourceId) — the AI check itself is
+// evaluated per company_key, so a failure is a company-level event even
+// though it fail-opens every eligible row at that company.
+async function logAiCheckFailedEvent(
+  campaign: CampaignForDiscovery,
+  companyKey: string,
+  error: string,
+): Promise<void> {
+  try {
+    await logEvent({
+      clientId: campaign.clientId,
+      actor: 'system',
+      type: 'pipeline.discover.ai_check_failed',
+      source: 'pipeline',
+      payload: { campaignId: campaign.id, companyKey, error },
+    })
+  } catch {
+    // Audit logging is best-effort.
+  }
+}
+
 async function enrichCandidates(
   candidates: FreshCandidate[],
   campaign: CampaignForDiscovery,
   supabase: SupabaseClient<Database>,
+  aiVerdictCache: Map<string, RelevanceVerdict>,
 ): Promise<EnrichResult> {
   const { icp } = campaign
   const rows: LeadInsert[] = []
@@ -387,6 +462,16 @@ async function enrichCandidates(
   let emailableFailedOpen = 0
   let suppressedSkipped = 0
   let excludedPostEnrich = 0
+  let aiChecked = 0
+  let aiRejected = 0
+  let aiFailedOpen = 0
+
+  const relevanceCampaign: CampaignRelevanceContext = {
+    name: campaign.name,
+    valueProp: campaign.valueProp,
+    keywords: icp.keywords,
+    excludeKeywords: icp.excludeKeywords,
+  }
 
   for (let i = 0; i < candidates.length; i += ENRICH_BATCH_SIZE) {
     const batch = candidates.slice(i, i + ENRICH_BATCH_SIZE)
@@ -408,14 +493,20 @@ async function enrichCandidates(
 
     const batchRows: LeadInsert[] = []
     // Apollo person ids parked without ever reaching Emailable — either the
-    // post-enrich exclude-keyword check below matched, or the suppression
-    // check further down matched. Apollo's raw email_status stays on the row
-    // untouched (it may still read 'verified' — that is Apollo's true
-    // verdict, not a lie), but `status` is forced to 'parked' so nothing
-    // downstream mistakes these for send-eligible. `status`, not
-    // `email_status`, is what every caller below and in
-    // runDiscoveryForCampaign now checks for exactly this reason.
+    // post-enrich exclude-keyword check below matched, the suppression check
+    // further down matched, or the AI relevance check rejected the company.
+    // Apollo's raw email_status stays on the row untouched (it may still
+    // read 'verified' — that is Apollo's true verdict, not a lie), but
+    // `status` is forced to 'parked' so nothing downstream mistakes these
+    // for send-eligible. `status`, not `email_status`, is what every caller
+    // below and in runDiscoveryForCampaign now checks for exactly this
+    // reason.
     const skipVerification = new Set<string>()
+    // Built alongside batchRows below, keyed the same way skipVerification's
+    // callers key everything else (computeCompanyKey(domain, name)) — lets
+    // the AI relevance stage further down look up a row's firmographics
+    // without re-parsing anything back out of `raw`.
+    const companySnapshotByKey = new Map<string, CompanySnapshot>()
 
     for (const person of enrichedPeople) {
       const emailStatus = mapApolloEmailStatus(person.emailStatus)
@@ -424,6 +515,18 @@ async function enrichCandidates(
       const title = person.title ?? source?.title ?? null
       const companyName = person.organizationName ?? source?.organizationName ?? null
       const companyDomain = person.organizationDomain ?? source?.organizationDomain ?? null
+
+      companySnapshotByKey.set(computeCompanyKey(companyDomain, companyName), {
+        companyName,
+        companyDomain,
+        industry: person.organizationIndustry,
+        employeeCount: person.organizationEmployeeCount,
+        foundedYear: person.organizationFoundedYear,
+        description: person.organizationDescription,
+        city: person.organizationCity,
+        state: person.organizationState,
+        country: person.organizationCountry,
+      })
 
       // Post-enrich exclude check: catches companies the pre-enrich pass-1/
       // pass-2 title+org-name check couldn't see, because industry and
@@ -492,6 +595,68 @@ async function enrichCandidates(
       }
     }
 
+    // AI relevance check: company-level, cached per company_key across the
+    // whole discovery run (aiVerdictCache is created once in
+    // runDiscoveryForCampaign and shared between the pass-1 and pass-2 calls
+    // to this function), so a second contact discovered at an
+    // already-judged company costs no extra Gemini call. Runs before
+    // Emailable — same reasoning as the suppression/exclude-keyword checks
+    // above: a check that's cheap relative to Emailable gates the more
+    // expensive vendor call — and only ever considers rows still eligible
+    // for Emailable, since a row that could never reach `active` anyway
+    // isn't worth an AI call either.
+    const aiEligibleRows = batchRows.filter((row) => isVerifiableRow(row, skipVerification))
+    const uncachedKeys = new Set<string>()
+    for (const row of aiEligibleRows) {
+      const key = computeCompanyKey(row.company_domain ?? null, row.company_name ?? null)
+      if (!aiVerdictCache.has(key)) uncachedKeys.add(key)
+    }
+    const keysToResolve = [...uncachedKeys]
+    for (let k = 0; k < keysToResolve.length; k += AI_RELEVANCE_CONCURRENCY) {
+      const slice = keysToResolve.slice(k, k + AI_RELEVANCE_CONCURRENCY)
+      const resolved = await Promise.all(
+        slice.map(async (key) => {
+          // Safe: every key in uncachedKeys was derived from a row in
+          // aiEligibleRows (a filter of batchRows), and the loop above that
+          // builds batchRows sets this same key in companySnapshotByKey for
+          // every row, unconditionally, before this point.
+          const snapshot = companySnapshotByKey.get(key)!
+          try {
+            const verdict = await checkCompanyRelevance(
+              { clientId: campaign.clientId, actor: 'system' },
+              relevanceCampaign,
+              snapshot,
+            )
+            return { key, verdict, failed: false as const, error: null as string | null }
+          } catch (error) {
+            return {
+              key,
+              verdict: { pass: true, reason: 'ai_check_failed' } as RelevanceVerdict,
+              failed: true as const,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }),
+      )
+      for (const { key, verdict, failed, error } of resolved) {
+        aiVerdictCache.set(key, verdict)
+        if (failed) {
+          aiFailedOpen += 1
+          await logAiCheckFailedEvent(campaign, key, error ?? 'unknown error')
+        }
+      }
+    }
+    for (const row of aiEligibleRows) {
+      const key = computeCompanyKey(row.company_domain ?? null, row.company_name ?? null)
+      const verdict = aiVerdictCache.get(key)
+      if (!verdict) continue
+      aiChecked += 1
+      if (verdict.pass) continue
+      if (row.source_id) skipVerification.add(row.source_id)
+      aiRejected += 1
+      await logAiRejectedEvent(campaign, row.source_id ?? 'unknown', key, verdict.reason)
+    }
+
     // The deliverability guard, not Apollo, has the final say on activation —
     // for every row not already parked above.
     const verified = await verifyBatch(campaign, batchRows, skipVerification)
@@ -514,6 +679,9 @@ async function enrichCandidates(
     emailableFailedOpen,
     suppressedSkipped,
     excludedPostEnrich,
+    aiChecked,
+    aiRejected,
+    aiFailedOpen,
   }
 }
 
@@ -525,6 +693,10 @@ export async function runDiscoveryForCampaign(
     const quota = campaign.dailyTarget > 0 ? campaign.dailyTarget : DEFAULT_DAILY_QUOTA
     const known = await getKnownSourceIds(supabase, campaign.clientId)
     const existingCompanies = await getVerifiedLeadCompanies(supabase, campaign.id)
+    // Shared across both enrichCandidates calls below (pass 1 and pass 2) so
+    // a company judged once by the AI relevance filter is never re-judged
+    // for a second contact discovered at the same company later in this run.
+    const aiVerdictCache = new Map<string, RelevanceVerdict>()
 
     const priorCompanyCounts = new Map<string, number>()
     const domainBackedCompanyKeys = new Set<string>()
@@ -543,7 +715,7 @@ export async function runDiscoveryForCampaign(
 
     // Enrich pass-1 picks before deciding pass-2 targets: only a company
     // whose pass-1 contact actually verified is worth a second-contact search.
-    const firstPassEnriched = await enrichCandidates(firstPass.picks, campaign, supabase)
+    const firstPassEnriched = await enrichCandidates(firstPass.picks, campaign, supabase, aiVerdictCache)
 
     // Persist pass-1 results now rather than batching with pass 2 at the end:
     // if pass 2 (or its Apollo/Emailable calls) throws after retries are
@@ -575,7 +747,7 @@ export async function runDiscoveryForCampaign(
       ? await runSecondPass(campaign, secondPassQuota, known, firstPass.picks, targetDomains, verifiedCompanyCounts)
       : { picks: [] as FreshCandidate[], candidatesSeen: 0 }
 
-    const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign, supabase)
+    const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign, supabase, aiVerdictCache)
     const secondInserted = await insertLeads(supabase, secondPassEnriched.rows)
 
     const fresh = [...firstPass.picks, ...secondPass.picks]
@@ -632,6 +804,9 @@ export async function runDiscoveryForCampaign(
       emailableFailedOpen: firstPassEnriched.emailableFailedOpen + secondPassEnriched.emailableFailedOpen,
       suppressedSkipped: firstPassEnriched.suppressedSkipped + secondPassEnriched.suppressedSkipped,
       excludedPostEnrich: firstPassEnriched.excludedPostEnrich + secondPassEnriched.excludedPostEnrich,
+      aiChecked: firstPassEnriched.aiChecked + secondPassEnriched.aiChecked,
+      aiRejected: firstPassEnriched.aiRejected + secondPassEnriched.aiRejected,
+      aiFailedOpen: firstPassEnriched.aiFailedOpen + secondPassEnriched.aiFailedOpen,
       inserted: inserted.length,
     }
 

@@ -155,6 +155,53 @@ describe('generateJson', () => {
     expect(result).toEqual({ title: 'Acme' })
     expect(logEventMock).toHaveBeenCalledTimes(1)
   })
+
+  it('should use the module default model when modelId is omitted', async () => {
+    generateObjectMock.mockResolvedValue({ object: { title: 'Acme' }, usage: {} })
+    const schema = z.object({ title: z.string() })
+    await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100 })
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: { modelId: 'gemini-3-flash-preview' } }),
+    )
+  })
+
+  it('should use the overridden model when modelId is set', async () => {
+    generateObjectMock.mockResolvedValue({ object: { title: 'Acme' }, usage: {} })
+    const schema = z.object({ title: z.string() })
+    await generateJson(ctx, {
+      instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, modelId: 'gemini-3.1-flash-lite',
+    })
+    expect(generateObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: { modelId: 'gemini-3.1-flash-lite' } }),
+    )
+  })
+
+  it('should log the overridden model id in the usage event, not the module default', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { title: 'Acme' },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    })
+    const schema = z.object({ title: z.string() })
+    await generateJson(ctx, {
+      instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, modelId: 'gemini-3.1-flash-lite',
+    })
+    expect(logEventMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: expect.objectContaining({ model: 'gemini-3.1-flash-lite' }),
+    })
+  })
+
+  it('should log the overridden model id in the failure event, not the module default', async () => {
+    generateObjectMock.mockRejectedValue(new Error('model down'))
+    const schema = z.object({ title: z.string() })
+    await expect(
+      generateJson(ctx, {
+        instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, modelId: 'gemini-3.1-flash-lite',
+      }),
+    ).rejects.toBeInstanceOf(AppError)
+    expect(logErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: expect.objectContaining({ model: 'gemini-3.1-flash-lite' }),
+    })
+  })
 })
 
 describe('generateText', () => {

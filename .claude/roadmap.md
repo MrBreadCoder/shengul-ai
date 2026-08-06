@@ -37,6 +37,7 @@ FINISHED. DONE
 - [x] **Discovery pipeline**: `/api/pipeline/discover-fanout` (daily QStash cron) → one QStash message per active campaign → `/api/pipeline/discover`. Pulls up to `campaigns.daily_target` (default 50) new people per campaign per day, skips already-known Apollo ids before enriching (saves credits), inserts `leads`.
 - [x] **Grouping** system: deterministic `company_key` (domain, else normalized company name) → case; 1+ Apollo-verified person activates a case. Optional LLM tiebreaker for ambiguous no-domain names remains backlog (unchanged from original design).
 - [x] **Multi-threading**: discovery runs in two passes (`src/lib/pipeline/discover.ts`) — pass 1 picks at most 1 person per brand-new company; pass 2 runs a domain-scoped Apollo search targeting every company (today's or an earlier day's) sitting at exactly 1 verified contact, trying to find a second person there. A company with only 1 qualifying candidate still passes — case activation is unchanged. See `docs/superpowers/plans/2026-07-19-apollo-multi-thread-discovery.md`.
+- [x] **AI relevance filter**: a company-level Gemini check (`gemini-3.1-flash-lite`, `src/lib/pipeline/ai-relevance.ts`) rejects Apollo-matched-but-irrelevant companies before an Emailable credit is spent — slotted into `discover.ts`'s existing suppression/post-enrich-exclude cascade, cached per company per discovery run (a second contact at the same company costs no extra Gemini call), fails open on Gemini errors/timeouts. Design: `docs/superpowers/specs/2026-08-06-ai-relevance-filter-design.md`. Plan: `docs/superpowers/plans/2026-08-06-ai-relevance-filter.md`.
 - [x] Campaign setup UI (`/campaigns`): client, name, value prop, booking link, Apollo ICP filters, daily Apollo quota.
 - [x] **/crm** page: pipeline board of cases + per-case people list, read-mostly, RLS-scoped.
 
@@ -2897,3 +2898,43 @@ message JSON files parse.
 
 Not committed — user asked to skip commits for this feature (`IMPLEMENT,
 SKIP COMMITS, inline execution`).
+
+---
+
+## 2026-08-06 — Uniforms Fashion: 8 campaigns created in DB
+
+Created all 8 campaigns from `docs/campaigns/uniforms-fashion-icp.md` for
+client Uniforms Fashion (`d99edf8f-b185-47b2-9615-1f6e43853001`, previously
+0 campaigns) via a one-off script (`insertCampaign` from
+`src/lib/db/campaigns.ts`, ICP validated through the real
+`apolloIcpSchema`) — same DB layer the `/api/campaigns` POST route uses,
+just invoked directly with the service-role key instead of through the UI.
+Campaign #7 (Industrial Sector) stays cancelled, per the doc; 8 rows total
+(numbered 1–6, 8, 9).
+
+Per-run overrides on top of the doc's suggested settings, both from an
+explicit operator request this session:
+- **Global** — `organizationLocations: []` on every campaign (no country
+  filter), not the doc's suggested `['united states']`.
+- **40+ employees** — `employeeRangeMin: 40`, `employeeRangeMax: 1_000_000`.
+  Apollo only applies `organization_num_employees_ranges[]` when both
+  bounds are set (`src/lib/apollo/build-search-params.ts:24`), so the high
+  ceiling stands in for an open floor — same convention already used in
+  `scripts/test-apollo-campaigns-search.ts`.
+
+Everything else matches the doc/New-Campaign-form defaults: `daily_target:
+15`/campaign, `contactEmailStatuses: ['verified']`, `personSeniorities:
+[]`, `reply_mode: 'human_approve'` (client's current setting), `booking_link:
+null` (operator hasn't sourced one yet — asked via AskUserQuestion,
+answered "leave blank for now"; fill in later per campaign via the edit
+UI). All 8 created as `status: 'active'` (the schema default and the only
+state the real creation form ever produces) — **this means the next
+discover-fanout cron run starts spending real Apollo/Emailable credits
+immediately**, which is exactly what the doc flagged as the outward-facing,
+cost-triggering step still pending. Creating them was that explicit
+go-ahead.
+
+Verified post-insert by querying the 8 rows back from `campaigns` directly
+(status/daily_target/icp.organizationLocations/icp.employeeRange all
+correct). The one-off insert script was deleted after running — it was
+hardcoded to this one client's 8-campaign spec, not reusable infra.

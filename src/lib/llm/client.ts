@@ -58,6 +58,7 @@ function readUsage(usage: unknown): { promptTokens: number; completionTokens: nu
 
 async function logUsage(
   context: LlmCallContext,
+  modelId: string,
   usage: unknown,
   durationMs: number,
 ): Promise<void> {
@@ -72,7 +73,7 @@ async function logUsage(
     type: 'llm.completed',
     severity: 'info',
     source: 'gemini',
-    payload: { model: MODEL_ID, promptTokens, completionTokens, durationMs },
+    payload: { model: modelId, promptTokens, completionTokens, durationMs },
   })
 }
 
@@ -96,6 +97,7 @@ async function logEmbedUsage(context: LlmCallContext, tokens: number, count: num
  */
 async function logLlmFailure(
   context: LlmCallContext,
+  modelId: string,
   operation: string,
   cause: unknown,
   durationMs: number,
@@ -107,7 +109,7 @@ async function logLlmFailure(
     type: 'llm.failed',
     source: 'gemini',
     error: cause,
-    payload: { model: MODEL_ID, operation, durationMs },
+    payload: { model: modelId, operation, durationMs },
   })
 }
 
@@ -150,6 +152,12 @@ export interface GenerateJsonArgs<T> {
   timeoutMs?: number
   thinkingLevel?: ThinkingLevel
   files?: readonly LlmFile[]
+  /**
+   * Overrides the module default (MODEL_ID) for this call only — e.g. a
+   * lighter/cheaper model for a high-volume, low-complexity classification
+   * that doesn't need the default model's full capability.
+   */
+  modelId?: string
 }
 
 export async function generateJson<T>(
@@ -157,10 +165,12 @@ export async function generateJson<T>(
   args: GenerateJsonArgs<T>,
 ): Promise<T> {
   const startedAt = Date.now()
+  const resolvedModelId = args.modelId ?? MODEL_ID
+  const resolvedModel = args.modelId ? google(args.modelId) : model
   try {
     const result = await withTimeout((signal) => {
       const shared = {
-        model,
+        model: resolvedModel,
         instructions: args.instructions,
         schema: args.schema,
         maxOutputTokens: args.maxOutputTokens,
@@ -190,10 +200,10 @@ export async function generateJson<T>(
         ],
       })
     }, args.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-    await logUsage(context, result.usage, Date.now() - startedAt)
+    await logUsage(context, resolvedModelId, result.usage, Date.now() - startedAt)
     return result.object
   } catch (cause) {
-    await logLlmFailure(context, 'generateObject', cause, Date.now() - startedAt)
+    await logLlmFailure(context, resolvedModelId, 'generateObject', cause, Date.now() - startedAt)
     if (cause instanceof AppError) throw cause
     throw new AppError('EXTERNAL_ERROR', 'LLM generateObject failed', {
       actor: context.actor,
@@ -228,10 +238,10 @@ export async function generateText(
         }),
       args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     )
-    await logUsage(context, result.usage, Date.now() - startedAt)
+    await logUsage(context, MODEL_ID, result.usage, Date.now() - startedAt)
     return result.text
   } catch (cause) {
-    await logLlmFailure(context, 'generateText', cause, Date.now() - startedAt)
+    await logLlmFailure(context, MODEL_ID, 'generateText', cause, Date.now() - startedAt)
     if (cause instanceof AppError) throw cause
     throw new AppError('EXTERNAL_ERROR', 'LLM generateText failed', {
       actor: context.actor,
@@ -273,10 +283,10 @@ export async function generateWithTools(
         }),
       args.timeoutMs ?? TOOL_LOOP_TIMEOUT_MS,
     )
-    await logUsage(context, result.usage, Date.now() - startedAt)
+    await logUsage(context, MODEL_ID, result.usage, Date.now() - startedAt)
     return result.text
   } catch (cause) {
-    await logLlmFailure(context, 'generateWithTools', cause, Date.now() - startedAt)
+    await logLlmFailure(context, MODEL_ID, 'generateWithTools', cause, Date.now() - startedAt)
     if (cause instanceof AppError) throw cause
     throw new AppError('EXTERNAL_ERROR', 'LLM tool loop failed', {
       actor: context.actor,
@@ -315,7 +325,7 @@ export async function embedTexts(context: LlmCallContext, args: EmbedTextsArgs):
     await logEmbedUsage(context, result.usage.tokens, args.values.length, Date.now() - startedAt)
     return result.embeddings
   } catch (cause) {
-    await logLlmFailure(context, 'embedMany', cause, Date.now() - startedAt)
+    await logLlmFailure(context, MODEL_ID, 'embedMany', cause, Date.now() - startedAt)
     if (cause instanceof AppError) throw cause
     throw new AppError('EXTERNAL_ERROR', 'LLM embedMany failed', {
       actor: context.actor,
