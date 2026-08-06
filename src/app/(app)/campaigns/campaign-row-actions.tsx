@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Pause, Play } from '@phosphor-icons/react'
+import Link from 'next/link'
+import { Pause, Play, PencilSimple } from '@phosphor-icons/react'
 import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import {
@@ -106,10 +107,11 @@ interface CampaignRowActionsProps {
   status: CampaignStatus
 }
 
-// Archived campaigns show only Delete: there is no per-campaign archive
-// action in this product yet (only the client-level archive path exists),
-// so an already-archived campaign is already considered halted — a
-// redundant Stop button there would be confusing.
+// Editing is available at every status (active, paused, archived) — changing
+// settings only changes what the next discovery/pipeline run does, not any
+// history. Archived campaigns show Edit + Delete only: there is no
+// per-campaign archive action in this product yet (only the client-level
+// archive path exists), so an already-archived campaign has no Stop/Resume.
 export function CampaignRowActions({ campaignId, campaignName, status }: CampaignRowActionsProps): React.ReactElement {
   const t = useTranslations('campaigns')
   const router = useRouter()
@@ -130,6 +132,13 @@ export function CampaignRowActions({ campaignId, campaignName, status }: Campaig
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" variant="outline" size="sm" asChild>
+        <Link href={`/campaigns/${campaignId}/edit`}>
+          <PencilSimple size={13} weight="light" />
+          {t('rowActions.editTrigger')}
+        </Link>
+      </Button>
+
       {status === 'active' ? (
         <StopCampaignDialog campaignId={campaignId} campaignName={campaignName} onDone={() => router.refresh()} />
       ) : null}

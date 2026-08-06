@@ -9,6 +9,7 @@ import {
   resumeCampaignsForClient,
   syncReplyModeForClient,
   updateCampaignStatus,
+  updateCampaignSettings,
   deleteCampaign,
   removeMailboxFromCampaigns,
 } from './campaigns'
@@ -196,6 +197,34 @@ describe('updateCampaignStatus', () => {
   it('should throw DB_ERROR on update failure', async () => {
     await expect(
       updateCampaignStatus(mockSupabase({ data: null, error: { message: 'boom' } }), 'camp1', 'paused'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateCampaignSettings', () => {
+  function mockSupabase(result: { data: unknown; error: unknown }) {
+    return {
+      from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve(result) }) }) }) }),
+    } as never
+  }
+
+  const patch = {
+    name: 'Updated',
+    value_prop: 'New prop',
+    booking_link: null,
+    daily_target: 25,
+    icp: {},
+  }
+
+  it('should return the updated campaign row', async () => {
+    const row = { id: 'camp1', name: 'Updated' }
+    const result = await updateCampaignSettings(mockSupabase({ data: row, error: null }), 'camp1', patch)
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR on update failure', async () => {
+    await expect(
+      updateCampaignSettings(mockSupabase({ data: null, error: { message: 'boom' } }), 'camp1', patch),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

@@ -2839,3 +2839,61 @@ Not committed yet for Tasks 5-7 (`src/app/(app)/settings/mailbox-row.tsx`,
 `src/app/(app)/clients/[id]/warmup-mailbox-row.tsx`, `src/messages/en.json`,
 `src/messages/tr.json`, this roadmap entry) — user asked to skip commits;
 Tasks 1-4 are already committed (`a1dbfd4`..`58f343a`).
+
+## Campaign settings edit + client read-only view (2026-08-06)
+
+Operators previously couldn't change a campaign's name, value prop, booking
+link, daily target, or ICP filters after creation — only status
+(stop/resume/delete) was editable. Clients hitting `/campaigns` were
+redirected to `/crm` with no visibility into their own campaigns at all.
+
+Spec: [[2026-08-06-campaign-settings-edit-design]]
+(`docs/superpowers/specs/2026-08-06-campaign-settings-edit-design.md`).
+Plan: `docs/superpowers/plans/2026-08-06-campaign-settings-edit.md`, 8
+tasks, executed inline at the user's request ("implement, skip commits,
+inline execution").
+
+Shipped:
+- Shared `campaignSettingsSchema` (`src/lib/apollo/campaign-settings-schema.ts`)
+  used by both `POST /api/campaigns` (create) and the new
+  `PATCH /api/campaigns/[campaignId]` (edit) — replaces the duplicated
+  10-field Zod object that used to live only in the create route.
+- `updateCampaignSettings` DB helper (`src/lib/db/campaigns.ts`), same
+  shape as the existing `updateCampaignStatus`.
+- Operator-only edit page at `/campaigns/[campaignId]/edit`
+  (`edit-campaign-form.tsx` + `page.tsx`), reachable via a new Edit action
+  on every campaign row regardless of status (active/paused/archived).
+  Redirects non-operators to `/crm`; `notFound()` on an unknown campaign
+  id; the row's `icp` Json column is reparsed through `apolloIcpSchema`
+  to recover typed defaults for the form.
+- `CampaignSettingsFields` + `Field` extracted from `new-campaign-form.tsx`
+  into `campaign-settings-fields.tsx`, and the FormData-parsing helpers
+  (`splitCsv`/`getAllStrings`) into `campaign-form-utils.ts` — both reused
+  by the new `EditCampaignForm`, avoiding a duplicated ~180-line ICP
+  fieldset. `NewCampaignForm` refactored to consume the same pieces with
+  no behavior change.
+- `CampaignRowActions` gained an "Edit" `<Link>` to the new route,
+  alongside the existing Stop/Resume/Delete buttons.
+- `/campaigns` now branches on `appUser.role`: operators keep the full
+  admin-client view (new-campaign form + full action set); clients get a
+  new RLS-scoped read-only view — `createServerClient()` instead of the
+  admin client, so the existing `campaigns_select` policy
+  (`is_operator() or client_id = current_client_id()`,
+  `supabase/migrations/0002_rls_policies.sql`) does the filtering for
+  free. New `CampaignCard` component (extracted from the inline `<li>` in
+  `page.tsx`) renders identically for both branches but only receives
+  `actions` on the operator branch.
+- New i18n keys in both `src/messages/en.json` and `src/messages/tr.json`:
+  `rowActions.editTrigger`, the `editCampaignForm` group, and
+  `clientPageDescription`/`noCampaignsDescriptionClient` for the client
+  branch's page copy.
+
+Verification: `pnpm typecheck` clean, `pnpm lint` clean (0 errors, 7
+pre-existing unrelated warnings), `pnpm test` → **191 files / 1992 tests
+passing** (28 new: 6 in `campaign-settings-schema.test.ts`, 2 in
+`campaigns.test.ts`, 4 in `route.test.ts`'s new `PATCH` block — the rest
+of the increase is pre-existing tests unaffected by this change). Both
+message JSON files parse.
+
+Not committed — user asked to skip commits for this feature (`IMPLEMENT,
+SKIP COMMITS, inline execution`).

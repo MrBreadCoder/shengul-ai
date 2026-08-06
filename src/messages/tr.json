@@ -472,6 +472,17 @@
       "creating": "Oluşturuluyor…",
       "createButton": "Kampanya oluştur"
     },
+    "editCampaignForm": {
+      "pageTitle": "Kampanyayı düzenle",
+      "pageDescription": "Değişiklikler bir sonraki keşif çalışmasına uygulanır — zaten bulunan potansiyel müşteriler etkilenmez.",
+      "saving": "Kaydediliyor…",
+      "saveButton": "Değişiklikleri kaydet",
+      "savedToast": "Kampanya güncellendi",
+      "saveFailedToast": "Değişiklikler kaydedilemedi",
+      "rejected": "Sunucu güncellemeyi reddetti.",
+      "networkError": "Ağ isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin.",
+      "unknownClient": "Bilinmeyen müşteri"
+    },
     "seniority": {
       "owner": "Sahip",
       "founder": "Kurucu",
@@ -492,6 +503,7 @@
       "unavailable": "Kullanılamıyor"
     },
     "rowActions": {
+      "editTrigger": "Düzenle",
       "requestFailed": "İstek başarısız oldu.",
       "stopFailedToast": "Durdurma başarısız",
       "stoppedToast": "{campaignName} durduruldu",
@@ -521,6 +533,7 @@
     },
     "pageTitle": "Kampanyalar",
     "pageDescription": "Bir kampanya, ajanın kimi aradığını ve ne söylediğini tanımlar. Keşif her gün bu filtrelere göre çalışır.",
+    "clientPageDescription": "Operatörünüzün sizin adınıza yürüttüğü kampanyalar. Keşif, yazma ve takipler her gün bu ayarlara göre çalışır.",
     "newCampaignSectionTitle": "Yeni kampanya",
     "noClientsTitle": "Henüz müşteri yok",
     "noClientsDescription": "Bir kampanya bir müşteriye aittir. Gönderim kurmadan önce bir müşteri oluşturun.",
@@ -528,6 +541,7 @@
     "allCampaignsAside": "{count} toplam",
     "noCampaignsTitle": "Henüz kampanya yok",
     "noCampaignsDescription": "Yukarıdan bir tane oluşturun. Keşif zamanlayıcısı bir sonraki çalışmasında onu alır.",
+    "noCampaignsDescriptionClient": "Operatörünüz henüz bir tane oluşturmadı. Bir kampanya çalışmaya başladığında tekrar kontrol edin.",
     "leadsPerDay": "{count, plural, other {günde # kişi}}",
     "mailboxCount": "{count, plural, other {# posta kutusu}}",
     "createdRelative": "{relative} oluşturuldu"

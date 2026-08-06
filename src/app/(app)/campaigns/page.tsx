@@ -1,18 +1,17 @@
 import type { Metadata } from 'next'
-import { redirect } from 'next/navigation'
 import { Lightning } from '@phosphor-icons/react/dist/ssr'
 import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createServerClient } from '@/lib/supabase/server'
 import { listCampaignsForClient, type CampaignRow } from '@/lib/db/campaigns'
-import { listClients } from '@/lib/db/clients'
+import { listClients, type ClientOption } from '@/lib/db/clients'
 import { formatRelative } from '@/lib/format'
-import { CAMPAIGN_STATUS } from '@/lib/ui/status'
-import { StatusPill } from '@/components/status-dot'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { NewCampaignForm } from './new-campaign-form'
 import { CampaignRowActions } from './campaign-row-actions'
+import { CampaignCard } from './campaign-card'
 import { CampaignsWebMcpTools } from './campaigns-webmcp-tools'
 import type { CampaignDirectoryEntry } from '@/types/webmcp-app'
 
@@ -49,32 +48,50 @@ function toWebMcpEntry({
 
 export default async function CampaignsPage(): Promise<React.ReactElement> {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') redirect('/crm')
   const t = await getTranslations('campaigns')
-
-  const admin = createAdminClient()
-  const [campaigns, clients] = await Promise.all([
-    listCampaignsForClient(admin, null),
-    listClients(admin),
-  ])
+  const isOperator = appUser.role === 'operator'
   const now = new Date()
+
+  // Operators see every campaign via the admin client (no RLS filtering
+  // needed — they're allowed to see all of them) plus the new-campaign form
+  // and Edit/Stop/Resume/Delete actions. Clients get a read-only view of only
+  // their own campaigns: the session-scoped client lets Postgres RLS
+  // (`campaigns_select`) do that filtering, the same pattern already used for
+  // reply_mode/mailboxes on /settings.
+  let campaigns: CampaignRow[]
+  let clients: ClientOption[] = []
+  if (isOperator) {
+    const admin = createAdminClient()
+    ;[campaigns, clients] = await Promise.all([
+      listCampaignsForClient(admin, null),
+      listClients(admin),
+    ])
+  } else {
+    const supabase = await createServerClient()
+    campaigns = await listCampaignsForClient(supabase, null)
+  }
 
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <CampaignsWebMcpTools campaigns={campaigns.map(toWebMcpEntry)} />
-      <PageHeader title={t('pageTitle')} description={t('pageDescription')} />
+      <PageHeader
+        title={t('pageTitle')}
+        description={isOperator ? t('pageDescription') : t('clientPageDescription')}
+      />
 
-      <Section title={t('newCampaignSectionTitle')}>
-        {clients.length === 0 ? (
-          <EmptyState
-            icon={Lightning}
-            title={t('noClientsTitle')}
-            description={t('noClientsDescription')}
-          />
-        ) : (
-          <NewCampaignForm clients={clients} />
-        )}
-      </Section>
+      {isOperator ? (
+        <Section title={t('newCampaignSectionTitle')}>
+          {clients.length === 0 ? (
+            <EmptyState
+              icon={Lightning}
+              title={t('noClientsTitle')}
+              description={t('noClientsDescription')}
+            />
+          ) : (
+            <NewCampaignForm clients={clients} />
+          )}
+        </Section>
+      ) : null}
 
       <Section
         title={t('allCampaignsSectionTitle')}
@@ -84,35 +101,24 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
           <EmptyState
             icon={Lightning}
             title={t('noCampaignsTitle')}
-            description={t('noCampaignsDescription')}
+            description={isOperator ? t('noCampaignsDescription') : t('noCampaignsDescriptionClient')}
           />
         ) : (
           <ul className="flex flex-col gap-2">
             {campaigns.map((campaign, index) => (
-              <li
+              <CampaignCard
                 key={campaign.id}
-                className="border-hairline bg-surface card-interactive animate-rise rounded-lg border p-4"
-                style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
-              >
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <p className="min-w-0 flex-1 truncate text-[13px] font-medium">{campaign.name}</p>
-                  <StatusPill meta={CAMPAIGN_STATUS[campaign.status]} />
-                </div>
-
-                <p className="text-muted-foreground mt-2.5 max-w-[70ch] text-sm leading-relaxed">
-                  {campaign.value_prop}
-                </p>
-
-                <div className="text-faint mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-                  <span className="tnum">{t('leadsPerDay', { count: campaign.daily_target })}</span>
-                  <span className="tnum">{t('mailboxCount', { count: campaign.mailbox_ids.length })}</span>
-                  <span className="ml-auto">{t('createdRelative', { relative: formatRelative(campaign.created_at, now) })}</span>
-                </div>
-
-                <div className="border-hairline mt-3 flex items-center gap-2 border-t pt-3">
-                  <CampaignRowActions campaignId={campaign.id} campaignName={campaign.name} status={campaign.status} />
-                </div>
-              </li>
+                campaign={campaign}
+                leadsPerDayLabel={t('leadsPerDay', { count: campaign.daily_target })}
+                mailboxCountLabel={t('mailboxCount', { count: campaign.mailbox_ids.length })}
+                createdRelativeLabel={t('createdRelative', { relative: formatRelative(campaign.created_at, now) })}
+                animationDelayMs={Math.min(index, 10) * 30}
+                actions={
+                  isOperator ? (
+                    <CampaignRowActions campaignId={campaign.id} campaignName={campaign.name} status={campaign.status} />
+                  ) : undefined
+                }
+              />
             ))}
           </ul>
         )}

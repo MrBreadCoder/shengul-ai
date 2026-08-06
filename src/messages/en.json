@@ -472,6 +472,17 @@
       "creating": "Creating…",
       "createButton": "Create campaign"
     },
+    "editCampaignForm": {
+      "pageTitle": "Edit campaign",
+      "pageDescription": "Changes apply to the next discovery run — leads already found are untouched.",
+      "saving": "Saving…",
+      "saveButton": "Save changes",
+      "savedToast": "Campaign updated",
+      "saveFailedToast": "Could not save changes",
+      "rejected": "The server rejected the update.",
+      "networkError": "Network request failed. Check your connection and retry.",
+      "unknownClient": "Unknown client"
+    },
     "seniority": {
       "owner": "Owner",
       "founder": "Founder",
@@ -492,6 +503,7 @@
       "unavailable": "Unavailable"
     },
     "rowActions": {
+      "editTrigger": "Edit",
       "requestFailed": "Request failed.",
       "stopFailedToast": "Stop failed",
       "stoppedToast": "{campaignName} stopped",
@@ -521,6 +533,7 @@
     },
     "pageTitle": "Campaigns",
     "pageDescription": "A campaign defines who the agent looks for and what it says. Discovery runs daily against these filters.",
+    "clientPageDescription": "Campaigns your operator runs on your behalf. Discovery, writing, and follow-ups run against these settings daily.",
     "newCampaignSectionTitle": "New campaign",
     "noClientsTitle": "No clients yet",
     "noClientsDescription": "A campaign belongs to a client. Seed or create a client before setting up outreach.",
@@ -528,6 +541,7 @@
     "allCampaignsAside": "{count} total",
     "noCampaignsTitle": "No campaigns yet",
     "noCampaignsDescription": "Create one above. The discovery cron picks it up on its next run.",
+    "noCampaignsDescriptionClient": "Your operator hasn't set one up yet. Check back once a campaign is running.",
     "leadsPerDay": "{count, plural, one {# lead/day} other {# leads/day}}",
     "mailboxCount": "{count, plural, one {# mailbox} other {# mailboxes}}",
     "createdRelative": "Created {relative}"

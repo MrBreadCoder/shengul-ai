@@ -4,27 +4,15 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertCampaign } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
-import { apolloIcpSchema, apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
+import { apolloIcpSchema } from '@/lib/apollo/types'
+import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
 
-const createCampaignSchema = z.object({
+const createCampaignSchema = campaignSettingsSchema.extend({
   clientId: z.string().uuid(),
-  name: z.string().min(1),
-  valueProp: z.string().min(1),
-  bookingLink: z.string().url().nullable().default(null),
-  dailyTarget: z.number().int().min(1).max(100).default(50),
-  personTitles: z.array(z.string()).default([]),
-  organizationLocations: z.array(z.string()).default([]),
-  employeeRangeMin: z.number().int().nullable().default(null),
-  employeeRangeMax: z.number().int().nullable().default(null),
-  keywords: z.array(z.string()).default([]),
-  excludeOrganizationLocations: z.array(z.string()).default([]),
-  excludeKeywords: z.array(z.string()).default([]),
-  personSeniorities: z.array(z.enum(apolloPersonSeniorities)).default([]),
-  contactEmailStatuses: z.array(z.enum(apolloContactEmailStatuses)).default([]),
 })
 
 export async function POST(request: Request) {

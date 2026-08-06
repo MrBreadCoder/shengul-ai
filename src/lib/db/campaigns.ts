@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Database } from '@/types/database'
+import type { Database, Json } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 
 export type CampaignRow = Database['public']['Tables']['campaigns']['Row']
@@ -146,6 +146,30 @@ export async function updateCampaignStatus(
   const { data, error } = await supabase.from('campaigns').update({ status }).eq('id', id).select('*').single()
   if (error || !data) {
     throw new AppError('DB_ERROR', 'Failed to update campaign status', { id, status, cause: error?.message })
+  }
+  return data
+}
+
+export interface CampaignSettingsPatch {
+  name: string
+  value_prop: string
+  booking_link: string | null
+  daily_target: number
+  icp: Json
+}
+
+// Full-replace update of a campaign's editable settings (name, value prop,
+// booking link, daily target, ICP). client_id and status are not part of
+// this patch — status has its own updateCampaignStatus, client_id is
+// immutable once a campaign exists.
+export async function updateCampaignSettings(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  patch: CampaignSettingsPatch,
+): Promise<CampaignRow> {
+  const { data, error } = await supabase.from('campaigns').update(patch).eq('id', id).select('*').single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update campaign settings', { id, cause: error?.message })
   }
   return data
 }

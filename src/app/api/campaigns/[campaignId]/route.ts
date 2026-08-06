@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCampaignById, deleteCampaign } from '@/lib/db/campaigns'
+import { getCampaignById, deleteCampaign, updateCampaignSettings } from '@/lib/db/campaigns'
+import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
+import { apolloIcpSchema } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -48,6 +50,64 @@ export async function DELETE(request: Request, context: { params: Promise<{ camp
       // still references a real client, so this insert is still valid.
     }
     return NextResponse.json({ ok: true })
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
+    }
+    const code = isAppError(error) ? error.code : 'unknown'
+    return NextResponse.json({ error: code }, { status: 500 })
+  }
+}
+
+// Updates a campaign's editable settings (name, value prop, booking link,
+// daily target, ICP filters). client_id and status are not editable here —
+// status has its own stop/resume/delete actions, client_id is immutable.
+export async function PATCH(request: Request, context: { params: Promise<{ campaignId: string }> }) {
+  const { appUser } = await requireUser()
+  if (appUser.role !== 'operator') {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  const { campaignId } = await context.params
+  const admin = createAdminClient()
+  const campaign = await getCampaignById(admin, campaignId)
+  if (!campaign) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
+
+  try {
+    const body = campaignSettingsSchema.parse(await request.json())
+    const icp = apolloIcpSchema.parse({
+      personTitles: body.personTitles,
+      organizationLocations: body.organizationLocations,
+      employeeRangeMin: body.employeeRangeMin,
+      employeeRangeMax: body.employeeRangeMax,
+      keywords: body.keywords,
+      excludeOrganizationLocations: body.excludeOrganizationLocations,
+      excludeKeywords: body.excludeKeywords,
+      personSeniorities: body.personSeniorities,
+      contactEmailStatuses: body.contactEmailStatuses,
+    })
+
+    const updated = await updateCampaignSettings(admin, campaignId, {
+      name: body.name,
+      value_prop: body.valueProp,
+      booking_link: body.bookingLink,
+      daily_target: body.dailyTarget,
+      icp,
+    })
+
+    try {
+      await logEvent({
+        clientId: campaign.client_id,
+        actor: `human:${appUser.id}`,
+        type: 'campaign.updated',
+        payload: { campaignId, name: updated.name },
+      })
+    } catch {
+      // Audit logging is best-effort — the update already succeeded.
+    }
+    return NextResponse.json({ ok: true, campaign: updated })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
