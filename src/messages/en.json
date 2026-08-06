@@ -97,6 +97,7 @@
       "noDisplayName": "No display name",
       "sentToday": "{sentToday}/{capToday} today",
       "rampingSuffix": "warming up (day {day}, target {target})",
+      "notStartedSuffix": "warmup starts on first send (day-1 cap {startCap})",
       "sending": "Sending…",
       "sendTest": "Send test",
       "testDelivered": "Test delivered",
@@ -225,6 +226,7 @@
     "warmupMailboxRow": {
       "ramping": "Ramping · day {day} · cap {cap}",
       "alreadyWarm": "Already warm",
+      "notStarted": "Not started · day-1 cap {startCap}",
       "saveFailed": "Could not save that change.",
       "networkError": "Network request failed. Check your connection and retry.",
       "sentToday": "{sentToday}/{dailyCap} today",

@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { StatusPill } from '@/components/status-dot'
 import { MAILBOX_HEALTH } from '@/lib/ui/status'
-import { effectiveDailyCap, getMailboxWarmthStatus, type WarmupProfile } from '@/lib/mailbox/warmup'
+import { effectiveDailyCap, getMailboxWarmthStatus, type WarmupProfile, type WarmthStatus } from '@/lib/mailbox/warmup'
 import { mailreachElapsedDays, MAILREACH_CAMPAIGN_GATE_DAYS } from '@/lib/mailbox/mailreach-gate'
 import type { Database } from '@/types/database'
 import { MailboxControls } from './mailbox-controls'
@@ -57,6 +57,29 @@ function mailreachStatusText(
     : t('mailboxRow.mailreachWarm')
 }
 
+function assertNever(x: never): never {
+  throw new Error('Unhandled WarmthStatus kind: ' + String(x))
+}
+
+function warmthStatusSuffix(
+  t: ReturnType<typeof useTranslations<'settings'>>,
+  status: WarmthStatus,
+  targetCap: number,
+): string | null {
+  switch (status.kind) {
+    case 'not_ramping':
+      return null
+    case 'not_started':
+      return t('mailboxRow.notStartedSuffix', { startCap: status.startCap })
+    case 'ramping':
+      return t('mailboxRow.rampingSuffix', { day: status.dayNumber, target: targetCap })
+    case 'ramp_complete':
+      return null
+    default:
+      return assertNever(status)
+  }
+}
+
 type SendState =
   | { status: 'idle' }
   | { status: 'sending' }
@@ -85,6 +108,7 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
   }
   const capToday = effectiveDailyCap(rampInput)
   const warmthStatus = getMailboxWarmthStatus(rampInput)
+  const warmthSuffix = warmthStatusSuffix(t, warmthStatus, props.warmupTargetCap)
   const mailreachText = mailreachStatusText(t, {
     enabled: props.mailreachEnabled,
     startedAt: props.mailreachStartedAt,
@@ -126,9 +150,7 @@ export function MailboxRow(props: MailboxRowProps): React.ReactElement {
         <p className="text-faint truncate text-[11px]">
           {props.displayName ?? t('mailboxRow.noDisplayName')} · {props.provider} ·{' '}
           <span className="tnum">{t('mailboxRow.sentToday', { sentToday: props.sentToday, capToday })}</span>
-          {warmthStatus.kind === 'ramping'
-            ? ` · ${t('mailboxRow.rampingSuffix', { day: warmthStatus.dayNumber, target: props.warmupTargetCap })}`
-            : null}
+          {warmthSuffix ? ` · ${warmthSuffix}` : null}
           {props.healthReason ? ` · ${props.healthReason.replaceAll('_', ' ')}` : null}
           {mailreachText ? ` · ${mailreachText}` : null}
         </p>

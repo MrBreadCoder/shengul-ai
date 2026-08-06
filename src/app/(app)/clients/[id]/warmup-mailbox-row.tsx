@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { getMailboxWarmthStatus, type WarmupProfile } from '@/lib/mailbox/warmup'
+import { getMailboxWarmthStatus, type WarmupProfile, type WarmthStatus } from '@/lib/mailbox/warmup'
 
 const WARMUP_PROFILES: readonly WarmupProfile[] = ['standard', 'slow', 'none']
 
@@ -27,6 +27,25 @@ interface WarmupPatchBody {
   dailyCap?: number
 }
 
+function assertNever(x: never): never {
+  throw new Error('Unhandled WarmthStatus kind: ' + String(x))
+}
+
+function warmthStatusLabel(t: ReturnType<typeof useTranslations<'clients'>>, status: WarmthStatus): string {
+  switch (status.kind) {
+    case 'not_ramping':
+      return t('warmupMailboxRow.alreadyWarm')
+    case 'not_started':
+      return t('warmupMailboxRow.notStarted', { startCap: status.startCap })
+    case 'ramping':
+      return t('warmupMailboxRow.ramping', { day: status.dayNumber, cap: status.currentCap })
+    case 'ramp_complete':
+      return t('warmupMailboxRow.alreadyWarm')
+    default:
+      return assertNever(status)
+  }
+}
+
 export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactElement {
   const t = useTranslations('clients')
   const router = useRouter()
@@ -44,10 +63,7 @@ export function WarmupMailboxRow(props: WarmupMailboxRowProps): React.ReactEleme
     dailyCap: props.dailyCap,
     now: new Date(),
   })
-  const statusLabel =
-    status.kind === 'ramping'
-      ? t('warmupMailboxRow.ramping', { day: status.dayNumber, cap: status.currentCap })
-      : t('warmupMailboxRow.alreadyWarm')
+  const statusLabel = warmthStatusLabel(t, status)
 
   async function patch(body: WarmupPatchBody): Promise<void> {
     if (isBusy) return

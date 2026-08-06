@@ -97,6 +97,7 @@
       "noDisplayName": "Görünen ad yok",
       "sentToday": "bugün {sentToday}/{capToday}",
       "rampingSuffix": "ısınıyor (gün {day}, hedef {target})",
+      "notStartedSuffix": "ilk gönderimde ısınma başlayacak (1. gün sınırı {startCap})",
       "sending": "Gönderiliyor…",
       "sendTest": "Test gönder",
       "testDelivered": "Test iletildi",
@@ -225,6 +226,7 @@
     "warmupMailboxRow": {
       "ramping": "Artırılıyor · gün {day} · sınır {cap}",
       "alreadyWarm": "Zaten ısınmış",
+      "notStarted": "Başlamadı · 1. gün sınırı {startCap}",
       "saveFailed": "Bu değişiklik kaydedilemedi.",
       "networkError": "Ağ isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin.",
       "sentToday": "bugün {sentToday}/{dailyCap}",
