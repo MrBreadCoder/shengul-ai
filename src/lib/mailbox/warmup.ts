@@ -47,12 +47,21 @@ interface RampState {
 
 /**
  * Shared by effectiveDailyCap and getMailboxWarmthStatus so the elapsed-time
- * and ramp-value math lives once. Returns null when the mailbox isn't
- * ramping at all (profile 'none', or warmup never started).
+ * and ramp-value math lives once. Returns null only for profile 'none',
+ * which never ramps (WARMUP_STEP_DAYS.none === 0). A ramping profile with no
+ * `warmupStartedAt` yet — the mailbox is connected but has never actually
+ * sent anything (see migration 0030's lazy stamp in claim_mailbox_send /
+ * claim_mailbox_send_uncapped) — is day one of the ramp with the clock not
+ * running yet: it returns the day-one allowance, not null, so a caller can't
+ * mistake "hasn't sent yet" for "already warm".
  */
 function computeRampState(input: EffectiveCapInput): RampState | null {
   const stepDays = WARMUP_STEP_DAYS[input.profile]
-  if (stepDays === 0 || input.warmupStartedAt === null) return null
+  if (stepDays === 0) return null
+
+  if (input.warmupStartedAt === null) {
+    return { rampValue: input.startCap, elapsedDays: 0 }
+  }
 
   const startedAt = Date.parse(input.warmupStartedAt)
   if (Number.isNaN(startedAt)) {
@@ -72,7 +81,9 @@ function computeRampState(input: EffectiveCapInput): RampState | null {
  * Today's send allowance for one mailbox. Fully derived — once the ramp value
  * reaches targetCap, this starts returning dailyCap (the already-warm cap) on
  * every subsequent call, with nothing persisted. Raising targetCap later
- * simply makes the ramp resume on the next call.
+ * simply makes the ramp resume on the next call. For a ramping profile that
+ * has never sent, this returns startCap — the same number the mailbox's
+ * literal first send will ramp from.
  */
 export function effectiveDailyCap(input: EffectiveCapInput): number {
   const state = computeRampState(input)
@@ -82,27 +93,51 @@ export function effectiveDailyCap(input: EffectiveCapInput): number {
 
 export type WarmthStatus =
   | { kind: 'not_ramping' }
+  | { kind: 'not_started'; startCap: number }
   | { kind: 'ramping'; currentCap: number; dayNumber: number }
   | { kind: 'ramp_complete' }
 
 /**
  * Display-only status for the settings screen and the Clients-page Warmup
- * tab, so both surfaces label a mailbox "Already warm" the same way whether
- * it was set to 'none' directly or got there by finishing its ramp.
+ * tab, so both surfaces label a mailbox the same way. 'not_started' (ramping
+ * profile, never sent — see computeRampState) is a distinct variant from
+ * 'not_ramping' (profile 'none') so the UI never mislabels a mailbox that
+ * simply hasn't sent its first email yet as "already warm".
  */
 export function getMailboxWarmthStatus(input: EffectiveCapInput): WarmthStatus {
-  const state = computeRampState(input)
-  if (state === null) return { kind: 'not_ramping' }
+  const stepDays = WARMUP_STEP_DAYS[input.profile]
+  if (stepDays === 0) return { kind: 'not_ramping' }
+  if (input.warmupStartedAt === null) return { kind: 'not_started', startCap: input.startCap }
+
+  // Non-null is guaranteed here: computeRampState only returns null when
+  // stepDays === 0, already handled above, or (unreachably, since we just
+  // checked it) warmupStartedAt === null.
+  const state = computeRampState(input)!
   if (state.rampValue >= input.targetCap) return { kind: 'ramp_complete' }
   return { kind: 'ramping', currentCap: state.rampValue, dayNumber: state.elapsedDays + 1 }
 }
 
 /**
- * The warmup columns to write when a mailbox is connected or its profile is
- * changed. Shared by both OAuth callbacks and the per-mailbox override route so
- * the "ramping profiles get a start date, 'none' does not" rule lives once.
+ * The warmup columns to write when a mailbox is newly connected (the three
+ * OAuth/SMTP connect routes). The ramp clock does not start here — it starts
+ * lazily on the mailbox's first actual send (migration 0030's
+ * claim_mailbox_send / claim_mailbox_send_uncapped), so a freshly connected
+ * mailbox always begins with a null started_at, whatever its profile.
  */
 export function warmupInsertFields(
+  profile: WarmupProfile,
+): { warmup_profile: WarmupProfile; warmup_started_at: null } {
+  return { warmup_profile: profile, warmup_started_at: null }
+}
+
+/**
+ * The warmup columns to write when an operator explicitly changes a
+ * mailbox's profile (POST /api/mailboxes/[id]/warmup). Unlike
+ * warmupInsertFields, this restarts the ramp immediately — a profile change
+ * is a deliberate "re-warm starting now" action (reconnected, previously
+ * blocked, new domain), not a "wait for the next send" one.
+ */
+export function warmupRestartFields(
   profile: WarmupProfile,
   now: Date,
 ): { warmup_profile: WarmupProfile; warmup_started_at: string | null } {

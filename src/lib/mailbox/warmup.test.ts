@@ -3,6 +3,7 @@ import {
   effectiveDailyCap,
   getMailboxWarmthStatus,
   warmupInsertFields,
+  warmupRestartFields,
   DEFAULT_MAILBOX_DAILY_CAP,
 } from './warmup'
 import { AppError } from '@/lib/errors/app-error'
@@ -30,9 +31,19 @@ describe('effectiveDailyCap', () => {
     expect(cap).toBe(40)
   })
 
-  it('should return the already-warm daily cap when warmup never started', () => {
-    const cap = effectiveDailyCap({ profile: 'standard', warmupStartedAt: null, ...BASE, now: atDay(0) })
+  it('should return the already-warm daily cap when the profile is none and never started', () => {
+    const cap = effectiveDailyCap({ profile: 'none', warmupStartedAt: null, ...BASE, now: atDay(0) })
     expect(cap).toBe(40)
+  })
+
+  it('should return the start cap when a ramping mailbox has never sent yet', () => {
+    const cap = effectiveDailyCap({ profile: 'standard', warmupStartedAt: null, ...BASE, now: atDay(0) })
+    expect(cap).toBe(5)
+  })
+
+  it('should return the start cap for a slow-profile mailbox that has never sent yet', () => {
+    const cap = effectiveDailyCap({ profile: 'slow', warmupStartedAt: null, ...BASE, now: atDay(0) })
+    expect(cap).toBe(5)
   })
 
   it('should step every day when the profile is standard', () => {
@@ -110,9 +121,14 @@ describe('getMailboxWarmthStatus', () => {
     expect(status).toEqual({ kind: 'not_ramping' })
   })
 
-  it('should report not_ramping when warmup never started', () => {
+  it('should report not_started with the start cap when a standard-profile mailbox has never sent', () => {
     const status = getMailboxWarmthStatus({ profile: 'standard', warmupStartedAt: null, ...BASE, now: atDay(0) })
-    expect(status).toEqual({ kind: 'not_ramping' })
+    expect(status).toEqual({ kind: 'not_started', startCap: 5 })
+  })
+
+  it('should report not_started with the start cap when a slow-profile mailbox has never sent', () => {
+    const status = getMailboxWarmthStatus({ profile: 'slow', warmupStartedAt: null, ...BASE, now: atDay(0) })
+    expect(status).toEqual({ kind: 'not_started', startCap: 5 })
   })
 
   it('should report ramping with the current cap and day number', () => {
@@ -144,13 +160,27 @@ describe('getMailboxWarmthStatus', () => {
 })
 
 describe('warmupInsertFields', () => {
+  it('should leave the start time null for a ramping profile at connect time', () => {
+    expect(warmupInsertFields('standard')).toEqual({ warmup_profile: 'standard', warmup_started_at: null })
+  })
+
+  it('should leave the start time null for a slow profile at connect time', () => {
+    expect(warmupInsertFields('slow')).toEqual({ warmup_profile: 'slow', warmup_started_at: null })
+  })
+
+  it('should leave the start time null for an already-warm mailbox', () => {
+    expect(warmupInsertFields('none')).toEqual({ warmup_profile: 'none', warmup_started_at: null })
+  })
+})
+
+describe('warmupRestartFields', () => {
   it('should stamp a start time for a ramping profile', () => {
-    const fields = warmupInsertFields('standard', atDay(0))
+    const fields = warmupRestartFields('standard', atDay(0))
     expect(fields).toEqual({ warmup_profile: 'standard', warmup_started_at: START })
   })
 
   it('should leave the start time null for an already-warm mailbox', () => {
-    const fields = warmupInsertFields('none', atDay(0))
+    const fields = warmupRestartFields('none', atDay(0))
     expect(fields).toEqual({ warmup_profile: 'none', warmup_started_at: null })
   })
 })

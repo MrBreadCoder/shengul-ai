@@ -89,6 +89,21 @@ describe('sendViaMailbox', () => {
     expect(updateMailboxOauthMock).toHaveBeenCalledTimes(1)
   })
 
+  it('should claim at the mailbox start cap, not the daily cap, on its first-ever send', async () => {
+    const neverSent = mailboxWith({
+      warmup_profile: 'standard',
+      warmup_started_at: null,
+      warmup_start_cap: 7,
+      daily_cap: 50,
+    })
+    listMailboxesByIdsMock.mockResolvedValue([neverSent])
+    claimMailboxSendMock.mockResolvedValue({ ...neverSent, sent_today: 1 })
+    const { provider, sendEmail } = okProvider()
+    getMailboxProviderMock.mockReturnValue({ provider, sendEmail })
+    await sendViaMailbox({} as never, { ...baseInput, mailboxIds: ['m1'], purpose: 'reply' })
+    expect(claimMailboxSendMock).toHaveBeenCalledWith(expect.anything(), 'm1', 7)
+  })
+
   it('should throw RATE_LIMITED when no mailbox can be claimed', async () => {
     listMailboxesByIdsMock.mockResolvedValue([mailbox])
     claimMailboxSendMock.mockResolvedValue(null) // at cap
