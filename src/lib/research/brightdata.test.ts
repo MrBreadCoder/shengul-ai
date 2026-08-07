@@ -9,7 +9,9 @@ vi.mock('@/lib/http/fetch-json', () => ({
 vi.mock('@/lib/http/fetch-text', () => ({
   fetchText: (...args: unknown[]) => fetchTextMock(...args),
 }))
-vi.mock('@/lib/env', () => ({ env: { BRIGHTDATA_API_KEY: 'k', BRIGHTDATA_SCRAPE_ZONE: 'web_unlocker' } }))
+vi.mock('@/lib/env', () => ({
+  env: { BRIGHTDATA_API_KEY: 'k', BRIGHTDATA_SCRAPE_ZONE: 'web_unlocker', BRIGHTDATA_SERP_ZONE: 'serp_api' },
+}))
 
 import { brightdataResearch } from './brightdata'
 
@@ -36,6 +38,17 @@ describe('brightdataResearch.search', () => {
     expect(snippets).toEqual([])
   })
 
+  it('should call the shared Bright Data request endpoint with the SERP zone and a brd_json google search url', async () => {
+    fetchJsonMock.mockResolvedValue({ organic: [] })
+    await brightdataResearch.search('Acme company')
+    const [url, options] = fetchJsonMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.brightdata.com/request')
+    const body = JSON.parse(options.body as string) as { zone: string; url: string; format: string }
+    expect(body.zone).toBe('serp_api')
+    expect(body.url).toBe('https://www.google.com/search?q=Acme%20company&brd_json=1')
+    expect(body.format).toBe('raw')
+  })
+
   it('should propagate AppError when the transport fails', async () => {
     fetchJsonMock.mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
     const pending = brightdataResearch.search('x')
@@ -53,6 +66,16 @@ describe('brightdataResearch.scrape', () => {
     fetchTextMock.mockResolvedValue('# Acme\nWe build widgets for logistics teams.')
     const text = await brightdataResearch.scrape('https://acme.com/about')
     expect(text).toBe('# Acme\nWe build widgets for logistics teams.')
+  })
+
+  it('should call the shared Bright Data request endpoint with the scrape zone, not the SERP zone', async () => {
+    fetchTextMock.mockResolvedValue('# Acme')
+    await brightdataResearch.scrape('https://acme.com/about')
+    const [url, options] = fetchTextMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.brightdata.com/request')
+    const body = JSON.parse(options.body as string) as { zone: string; url: string }
+    expect(body.zone).toBe('web_unlocker')
+    expect(body.url).toBe('https://acme.com/about')
   })
 
   it('should truncate page text to the max length when the page is oversized', async () => {

@@ -29,6 +29,12 @@ const envSchema = publicEnvSchema.extend({
   QSTASH_URL: z.string().url().optional(),
   BRIGHTDATA_API_KEY: nonEmpty,
   BRIGHTDATA_SCRAPE_ZONE: nonEmpty,
+  // Separate zone from BRIGHTDATA_SCRAPE_ZONE: Bright Data bills/routes Web
+  // Unlocker and SERP API requests through distinct zones even though both
+  // go through the same https://api.brightdata.com/request endpoint. Reusing
+  // the scrape zone for SERP requests fails outright (see .claude/roadmap.md
+  // 2026-08-07 — every research-agent `search` call returned "search failed").
+  BRIGHTDATA_SERP_ZONE: nonEmpty,
   GEMINI_API_KEY: nonEmpty,
   APOLLO_API_KEY: nonEmpty,
   EMAILABLE_API_KEY: nonEmpty,

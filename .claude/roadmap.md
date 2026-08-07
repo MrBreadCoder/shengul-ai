@@ -3259,3 +3259,43 @@ Everything in this session was diagnosed by reproducing directly against
 live production (Apollo, QStash, Supabase REST) rather than guessing from
 code alone — every root cause above was confirmed with a real request/
 response before being called the cause.
+
+## 2026-08-07 — Fixed: company research agent's `search` tool always failing ("search failed")
+
+A user-provided Gemini API trace for the B2B research agent
+(`src/lib/research/agent.ts`) showed all three parallel `search` tool calls
+returning the flattened `{"error": "search failed"}` (deliberate flattening
+in `src/lib/research/tools.ts` so the model treats a bad search as routable
+data — see comment there — which is why the model correctly retried with
+new queries instead of aborting). Root-caused in
+`src/lib/research/brightdata.ts`: `search()` was POSTing to a stale
+`https://api.brightdata.com/serp/req` endpoint with a bespoke
+`{ query, search_engine, parse }` body and no `zone` field at all, while
+`scrape()` right below it correctly used
+`https://api.brightdata.com/request` with `{ zone: BRIGHTDATA_SCRAPE_ZONE,
+url, format, data_format }`. Confirmed against Bright Data's current SERP
+API docs (`docs.brightdata.com/scraping-automation/serp-api`) that SERP
+requests go through the *same* `/request` endpoint as Web Unlocker, just
+with a different `zone` — and Bright Data bills/routes SERP and Web
+Unlocker through **separate zones**, so reusing `BRIGHTDATA_SCRAPE_ZONE`
+for SERP would still fail even with the right endpoint. This was a latent
+bug present since `brightdata.ts` was first introduced (confirmed via `git
+log -p`), not a regression — it had just never been exercised/reported
+before this trace.
+
+Fixed `search()` to hit `/request` with `zone: BRIGHTDATA_SERP_ZONE`, `url:
+https://www.google.com/search?q=<query>&brd_json=1` (Bright Data's flag for
+structured JSON SERP output matching the existing `serpResponseSchema`
+shape), `format: 'raw'`. Added `BRIGHTDATA_SERP_ZONE` as a new required env
+var (`src/lib/env.ts`, `.env.example`, `vitest.config.ts` stub,
+`src/lib/env.test.ts` fixture) — **the user still needs to create a SERP
+zone in their Bright Data dashboard and set the real value in `.env.local`
+and production before this actually works end-to-end; I did not fabricate
+a value for their live credentials file.** Renamed
+`BRIGHTDATA_SERP_URL`/`BRIGHTDATA_UNLOCKER_URL` to a single
+`BRIGHTDATA_REQUEST_URL` since both functions now hit the identical
+endpoint. Added 2 regression tests to `brightdata.test.ts` asserting the
+exact request body (`zone`/`url`/`format`) sent for both `search()` and
+`scrape()`, specifically to catch a future zone/endpoint mix-up like this
+one. Full suite: 198 files / 2090 tests green, `tsc`/`eslint` clean. Not
+yet committed.

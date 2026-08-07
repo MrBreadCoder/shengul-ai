@@ -16,6 +16,7 @@ const complete: Record<string, string> = {
   QSTASH_NEXT_SIGNING_KEY: 'sig2',
   BRIGHTDATA_API_KEY: 'bd',
   BRIGHTDATA_SCRAPE_ZONE: 'web_unlocker',
+  BRIGHTDATA_SERP_ZONE: 'serp_api',
   GEMINI_API_KEY: 'gem',
   APOLLO_API_KEY: 'apollo-key',
   EMAILABLE_API_KEY: 'emailable-key',

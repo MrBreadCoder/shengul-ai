@@ -26,6 +26,7 @@ export default defineConfig({
       QSTASH_NEXT_SIGNING_KEY: 'test-qstash-next-signing-key',
       BRIGHTDATA_API_KEY: 'test-brightdata-api-key',
       BRIGHTDATA_SCRAPE_ZONE: 'test-web-unlocker-zone',
+      BRIGHTDATA_SERP_ZONE: 'test-serp-zone',
       GEMINI_API_KEY: 'test-gemini-api-key',
       APOLLO_API_KEY: 'test-apollo-api-key',
       EMAILABLE_API_KEY: 'test-emailable-api-key',
