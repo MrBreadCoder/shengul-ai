@@ -136,6 +136,30 @@ describe('getVerifiedLeadCompanies', () => {
     const supabase = mockSupabase({ verifiedCompaniesResult: { data: null, error: { message: 'boom' } } })
     await expect(getVerifiedLeadCompanies(supabase, 'camp1')).rejects.toBeInstanceOf(AppError)
   })
+
+  it('should filter on status, not email_status, so a parked-but-Apollo-verified row is excluded', async () => {
+    const eqCalls: [string, string][] = []
+    const localSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: (column: string, value: string) => {
+            eqCalls.push([column, value])
+            return {
+              eq: (column2: string, value2: string) => {
+                eqCalls.push([column2, value2])
+                return Promise.resolve({ data: [], error: null })
+              },
+            }
+          },
+        }),
+      }),
+    } as never
+
+    await getVerifiedLeadCompanies(localSupabase, 'camp1')
+
+    expect(eqCalls).toContainEqual(['status', 'active'])
+    expect(eqCalls).not.toContainEqual(['email_status', 'verified'])
+  })
 })
 
 function mockLeadMaybe(result: { data: unknown; error: unknown }) {

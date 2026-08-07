@@ -106,4 +106,11 @@ describe('buildPeopleSearchParams', () => {
     const params = buildPeopleSearchParams(icp, 1, 25)
     expect(params['organization_not_locations[]']).toEqual(['ireland', 'india'])
   })
+
+  it('should omit q_keywords even when organization domains are present, for an ICP with no keywords', () => {
+    const icpWithDomainsOnly: ApolloIcpFilters = { ...emptyIcp, keywords: [] }
+    const params = buildPeopleSearchParams(icpWithDomainsOnly, 1, 25, ['acme.com'])
+    expect(params.q_keywords).toBeUndefined()
+    expect(params['q_organization_domains_list[]']).toEqual(['acme.com'])
+  })
 })

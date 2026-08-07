@@ -47,10 +47,12 @@ export interface DiscoverySummary {
   campaignId: string
   candidatesSeen: number
   newCandidates: number
-  firstPassCandidates: number
-  secondPassCandidates: number
-  /** Fresh-company picks made only because pass 2 fell short of its quota (see topUpQuota below). */
-  topUpCandidates: number
+  /** Picks from the depth phase (a second contact at a company already sitting at 1 verified lead), summed across every round this run. */
+  depthCandidates: number
+  /** Picks from the breadth phase (a brand-new company), summed across every round this run. */
+  breadthCandidates: number
+  /** Number of depth+breadth round pairs this run executed before hitting daily_target or a round finding nothing new. */
+  rounds: number
   enriched: number
   /** Leads that ended at `status: 'active'` — i.e. cleared for sending. */
   verified: number
@@ -129,21 +131,21 @@ function icpForTarget(icp: ApolloIcpFilters, target: string | null): ApolloIcpFi
   return target === null ? icp : { ...icp, keywords: [target] }
 }
 
-// Pass 1 (breadth): at most 1 person per brand-new company, regardless of
-// how many people from that company appear in the results — a second
-// contact is deliberately left to runSecondPass, never picked up here.
-// companyPickCounts / domainBackedCompanyKeys are shared, mutated state
-// threaded through both passes on purpose: they are how pass 2 learns which
-// companies pass 1 (and earlier days) left at exactly 1 verified contact.
+// Breadth (new companies): at most 1 person per brand-new company,
+// regardless of how many people from that company appear in the results —
+// a second contact is deliberately left to runDepthSearch, never picked up
+// here. companyPickCounts / domainBackedCompanyKeys are caller-owned,
+// mutated state: they are how the caller learns which companies this call
+// (and earlier rounds/days) left at exactly 1 pick.
 //
 // Iterates (keyword, page) pairs rather than just pages — see
 // searchTargets — cycling to the next keyword once the current one's page
 // comes back empty. `call` is the real page-budget counter (MAX_SEARCH_PAGES
-// total Apollo calls for the whole pass, same invariant as before this
-// keyword-cycling existed); `page` only counts pages within the current
-// keyword.
-async function runFirstPass(
+// total Apollo calls for this phase); `page` only counts pages within the
+// current keyword.
+async function runBreadthSearch(
   campaign: CampaignForDiscovery,
+  round: number,
   quota: number,
   known: Set<string>,
   companyPickCounts: Map<string, number>,
@@ -159,7 +161,7 @@ async function runFirstPass(
     const params = buildPeopleSearchParams(icpForTarget(icp, targets[targetIndex]!), page, SEARCH_PER_PAGE)
     const { candidates } = await withExternalLogging(
       'apollo',
-      vendorContext(campaign, 'apollo.search.failed', { pass: 1, page }),
+      vendorContext(campaign, 'apollo.search.failed', { phase: 'breadth', round, page }),
       () => withRetry(() => searchPeople(params)),
     )
     candidatesSeen += candidates.length
@@ -184,51 +186,63 @@ async function runFirstPass(
   return { picks, candidatesSeen }
 }
 
-// Pass 2 (depth): a company-scoped search (Apollo domain filter) targeting
-// exactly the companies that currently sit at 1 verified contact, trying to
-// find a second, different person at each. A company that doesn't surface a
-// match here simply stays at 1 — case activation already accepts that
-// (group-lead.ts), so it is not treated as a failure.
+interface DepthSearchResult extends SearchPassResult {
+  /** Domains searched this call that came back with zero further Apollo
+   * results — not "found nothing yet" but "nothing left to find" for this
+   * run. The caller drops these from every later round's depth targets
+   * instead of re-querying a domain that already came back empty. A domain
+   * dropped only because the page budget ran out (not because Apollo ran
+   * dry) is NOT included here — a later round may still find something for
+   * it with fresh budget. */
+  exhaustedDomains: Set<string>
+}
+
+// Depth (2nd contact): a company-scoped search (Apollo domain filter)
+// targeting exactly the companies that currently sit at 1 verified
+// contact, trying to find a second, different person at each. A company
+// that doesn't surface a match here simply stays at 1 — case activation
+// already accepts that (group-lead.ts), so it is not treated as a failure.
+//
+// Deliberately omits icp.keywords / q_keywords: the domain restriction
+// already pins the exact company, so an additional free-text company-level
+// keyword match is redundant and produces false negatives whenever that
+// company's Apollo org profile doesn't literally contain the keyword text
+// (confirmed live 2026-08-06 — see
+// docs/superpowers/specs/2026-08-07-discovery-retry-loop-design.md).
+// person_titles / employee range / contact_email_status still apply, so a
+// second contact still has to be a legitimate ICP-matching persona.
 //
 // The domain filter narrows every time a target is found (remainingTargets
 // shrinks), so `page` is reset to 1 whenever that happens — page N of a
 // freshly narrowed filter is not a continuation of page N against the old,
 // wider filter, and would silently skip results. `call` is the real
-// page-budget counter since `page` no longer counts monotonically (it also
-// resets whenever runFirstPass's keyword-cycling — see searchTargets — moves
-// to the next keyword).
-async function runSecondPass(
+// page-budget counter since `page` no longer counts monotonically.
+async function runDepthSearch(
   campaign: CampaignForDiscovery,
+  round: number,
   quota: number,
   known: Set<string>,
-  firstPassPicks: FreshCandidate[],
   targetDomains: string[],
-  companyPickCounts: Map<string, number>,
-): Promise<SearchPassResult> {
+): Promise<DepthSearchResult> {
   const { icp } = campaign
+  const searchIcp: ApolloIcpFilters = { ...icp, keywords: [] }
   const picks: FreshCandidate[] = []
   let candidatesSeen = 0
   const remainingTargets = new Set(targetDomains)
-  const targets = searchTargets(icp)
-  let targetIndex = 0
   let page = 1
-  for (
-    let call = 0;
-    call < MAX_SEARCH_PAGES && picks.length < quota && remainingTargets.size > 0 && targetIndex < targets.length;
-    call++
-  ) {
+  let ranOutOfResults = false
+  for (let call = 0; call < MAX_SEARCH_PAGES && picks.length < quota && remainingTargets.size > 0; call++) {
     const targetsBefore = remainingTargets.size
-    const params = buildPeopleSearchParams(icpForTarget(icp, targets[targetIndex]!), page, SEARCH_PER_PAGE, [...remainingTargets])
+    const params = buildPeopleSearchParams(searchIcp, page, SEARCH_PER_PAGE, [...remainingTargets])
     const { candidates } = await withExternalLogging(
       'apollo',
-      vendorContext(campaign, 'apollo.search.failed', { pass: 2, page }),
+      vendorContext(campaign, 'apollo.search.failed', { phase: 'depth', round, page }),
       () => withRetry(() => searchPeople(params)),
     )
     candidatesSeen += candidates.length
     if (candidates.length === 0) {
-      targetIndex += 1
-      page = 1
-      continue
+      ranOutOfResults = true
+      break
     }
     for (const candidate of candidates) {
       if (picks.length >= quota) break
@@ -246,16 +260,15 @@ async function runSecondPass(
       // still be a valid second contact.
       if (matchesExcludedKeywords(candidate, icp.excludeKeywords)) continue
       if (known.has(candidate.apolloId)) continue
-      if (firstPassPicks.some((f) => f.apolloId === candidate.apolloId)) continue
       if (picks.some((f) => f.apolloId === candidate.apolloId)) continue
       if (!remainingTargets.has(companyKey)) continue
-      companyPickCounts.set(companyKey, (companyPickCounts.get(companyKey) ?? 0) + 1)
       remainingTargets.delete(companyKey)
       picks.push(toFreshCandidate(candidate))
     }
     page = remainingTargets.size === targetsBefore ? page + 1 : 1
   }
-  return { picks, candidatesSeen }
+  const exhaustedDomains = ranOutOfResults ? new Set(remainingTargets) : new Set<string>()
+  return { picks, candidatesSeen, exhaustedDomains }
 }
 
 interface VerifiableRow {
@@ -695,91 +708,125 @@ export async function runDiscoveryForCampaign(
     const quota = campaign.dailyTarget > 0 ? campaign.dailyTarget : DEFAULT_DAILY_QUOTA
     const known = await getKnownSourceIds(supabase, campaign.clientId)
     const existingCompanies = await getVerifiedLeadCompanies(supabase, campaign.id)
-    // Shared across both enrichCandidates calls below (pass 1 and pass 2) so
-    // a company judged once by the AI relevance filter is never re-judged
-    // for a second contact discovered at the same company later in this run.
+    // Shared across every phase of every round so a company judged once by
+    // the AI relevance filter is never re-judged for a second contact
+    // discovered at the same company later in this run.
     const aiVerdictCache = new Map<string, RelevanceVerdict>()
 
-    const priorCompanyCounts = new Map<string, number>()
+    // Persist and mutate across every round of this run — see
+    // docs/superpowers/specs/2026-08-07-discovery-retry-loop-design.md
+    // ("Architecture"). verifiedCompanyCounts is only ever updated from a
+    // phase's REAL post-verification outcome (never an optimistic guess made
+    // at pick time), so every round's depth-targeting decision stays
+    // accurate even across many rounds.
+    const verifiedCompanyCounts = new Map<string, number>()
     const domainBackedCompanyKeys = new Set<string>()
     for (const company of existingCompanies) {
       const key = computeCompanyKey(company.companyDomain, company.companyName)
-      priorCompanyCounts.set(key, (priorCompanyCounts.get(key) ?? 0) + 1)
+      verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
       if (company.companyDomain) domainBackedCompanyKeys.add(key)
     }
+    // A domain that came back with zero further Apollo results in an
+    // earlier round of THIS run — never retried, since Apollo's answer for
+    // an unchanged, unnarrowed domain-restricted query will not change
+    // within the same run.
+    const exhaustedDomains = new Set<string>()
 
-    // runFirstPass uses its own copy to dedup within pass 1 (skip a company
-    // that already has a pick this run); the prior-verified counts stay
-    // untouched below so pass-2 targeting isn't polluted by unverified picks.
-    const firstPassQuota = Math.ceil(quota / 2)
-    const firstPassPickCounts = new Map(priorCompanyCounts)
-    const firstPass = await runFirstPass(campaign, firstPassQuota, known, firstPassPickCounts, domainBackedCompanyKeys)
+    const inserted: LeadRow[] = []
+    let candidatesSeen = 0
+    let depthCandidates = 0
+    let breadthCandidates = 0
+    let enrichedCount = 0
+    let verifiedSoFar = 0
+    let emailableChecked = 0
+    let emailableDeliverable = 0
+    let emailableRejected = 0
+    let emailableFailedOpen = 0
+    let suppressedSkipped = 0
+    let excludedPostEnrich = 0
+    let aiChecked = 0
+    let aiRejected = 0
+    let aiFailedOpen = 0
+    let rounds = 0
 
-    // Enrich pass-1 picks before deciding pass-2 targets: only a company
-    // whose pass-1 contact actually verified is worth a second-contact search.
-    const firstPassEnriched = await enrichCandidates(firstPass.picks, campaign, supabase, aiVerdictCache)
+    // Folds one phase's enrichCandidates() output into the run's running
+    // totals, persists its rows (durable immediately — a later phase or
+    // round throwing must never discard already-durable work), and updates
+    // verifiedCompanyCounts/domainBackedCompanyKeys from the real
+    // post-verification outcome.
+    const applyEnrichResult = async (picks: FreshCandidate[], result: EnrichResult): Promise<void> => {
+      enrichedCount += result.rows.length
+      emailableChecked += result.emailableChecked
+      emailableDeliverable += result.emailableDeliverable
+      emailableRejected += result.emailableRejected
+      emailableFailedOpen += result.emailableFailedOpen
+      suppressedSkipped += result.suppressedSkipped
+      excludedPostEnrich += result.excludedPostEnrich
+      aiChecked += result.aiChecked
+      aiRejected += result.aiRejected
+      aiFailedOpen += result.aiFailedOpen
+      verifiedSoFar += result.verifiedCount
 
-    // Persist pass-1 results now rather than batching with pass 2 at the end:
-    // if pass 2 (or its Apollo/Emailable calls) throws after retries are
-    // exhausted, these leads are already durable instead of being discarded
-    // with the whole run. getKnownSourceIds on the next attempt will see them
-    // and skip re-picking, so nothing is duplicated either.
-    const firstInserted = await insertLeads(supabase, firstPassEnriched.rows)
+      const insertedRows = await insertLeads(supabase, result.rows)
+      inserted.push(...insertedRows)
 
-    // Key off each pick's own search-time organization fields (matching how
-    // runFirstPass computed companyPickCounts), not the enrichment's
-    // returned org fields — bulkMatchPeople may resolve a slightly
-    // different canonical org name/domain than the original search result.
-    const verifiedApolloIds = new Set(
-      firstPassEnriched.rows.filter((row) => row.status === 'active').map((row) => row.source_id),
-    )
-    const verifiedCompanyCounts = new Map(priorCompanyCounts)
-    for (const pick of firstPass.picks) {
-      if (!verifiedApolloIds.has(pick.apolloId)) continue
-      const key = computeCompanyKey(pick.organizationDomain, pick.organizationName)
-      verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
-      if (pick.organizationDomain) domainBackedCompanyKeys.add(key)
+      const verifiedApolloIds = new Set(
+        result.rows.filter((row) => row.status === 'active').map((row) => row.source_id),
+      )
+      for (const pick of picks) {
+        if (!verifiedApolloIds.has(pick.apolloId)) continue
+        const key = computeCompanyKey(pick.organizationDomain, pick.organizationName)
+        verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
+        if (pick.organizationDomain) domainBackedCompanyKeys.add(key)
+      }
     }
 
-    const targetDomains = [...verifiedCompanyCounts.entries()]
-      .filter(([key, count]) => count === 1 && domainBackedCompanyKeys.has(key))
-      .map(([key]) => key)
-    const secondPassQuota = quota - firstPass.picks.length
-    const secondPass = targetDomains.length > 0 && secondPassQuota > 0
-      ? await runSecondPass(campaign, secondPassQuota, known, firstPass.picks, targetDomains, verifiedCompanyCounts)
-      : { picks: [] as FreshCandidate[], candidatesSeen: 0 }
+    while (verifiedSoFar < quota) {
+      rounds += 1
+      let roundPicks = 0
 
-    const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign, supabase, aiVerdictCache)
-    const secondInserted = await insertLeads(supabase, secondPassEnriched.rows)
+      const targetDomains = [...verifiedCompanyCounts.entries()]
+        .filter(([key, count]) => count === 1 && domainBackedCompanyKeys.has(key) && !exhaustedDomains.has(key))
+        .map(([key]) => key)
 
-    // Top-up (breadth again): pass 2 targets only the specific companies pass
-    // 1 verified, hunting for a second contact there — a company simply not
-    // having one is expected (see runSecondPass's own comment) and must not
-    // silently cap the day below daily_target. Whatever quota pass 2 didn't
-    // fill falls back to a fresh-company search, reusing runFirstPass as-is.
-    // verifiedCompanyCounts/domainBackedCompanyKeys already carry every
-    // company picked by pass 1 and pass 2 (both passes mutate them), so
-    // runFirstPass's own "companyPickCounts.has(companyKey)" guard skips
-    // those companies here the same way pass 1 skips prior-day companies.
-    // known is extended with this run's own picks so the exact same person
-    // can't be picked twice within one run — pass 2 already relies on the
-    // same guard (firstPassPicks.some(...)) for that within its own scope.
-    const topUpQuota = secondPassQuota - secondPass.picks.length
-    const pickedThisRun = [...firstPass.picks, ...secondPass.picks].map((pick) => pick.apolloId)
-    const topUpKnown = pickedThisRun.length > 0 ? new Set([...known, ...pickedThisRun]) : known
-    const topUp = topUpQuota > 0
-      ? await runFirstPass(campaign, topUpQuota, topUpKnown, verifiedCompanyCounts, domainBackedCompanyKeys)
-      : { picks: [] as FreshCandidate[], candidatesSeen: 0 }
+      if (targetDomains.length > 0) {
+        const depthQuota = quota - verifiedSoFar
+        const depth = await runDepthSearch(campaign, rounds, depthQuota, known, targetDomains)
+        candidatesSeen += depth.candidatesSeen
+        depthCandidates += depth.picks.length
+        roundPicks += depth.picks.length
+        for (const domain of depth.exhaustedDomains) exhaustedDomains.add(domain)
+        for (const pick of depth.picks) known.add(pick.apolloId)
+        const depthEnriched = await enrichCandidates(depth.picks, campaign, supabase, aiVerdictCache)
+        await applyEnrichResult(depth.picks, depthEnriched)
+      }
 
-    const topUpEnriched = await enrichCandidates(topUp.picks, campaign, supabase, aiVerdictCache)
-    const topUpInserted = await insertLeads(supabase, topUpEnriched.rows)
+      const breadthQuota = quota - verifiedSoFar
+      if (breadthQuota > 0) {
+        // Throwaway snapshot: runBreadthSearch mutates it optimistically
+        // (immediate +1 on pick, before verification is known) purely to
+        // avoid picking two people from the same brand-new company within
+        // this one call — never merged back into verifiedCompanyCounts,
+        // which is only ever updated from a real outcome above.
+        const breadthPickCounts = new Map(verifiedCompanyCounts)
+        const breadth = await runBreadthSearch(
+          campaign,
+          rounds,
+          breadthQuota,
+          known,
+          breadthPickCounts,
+          domainBackedCompanyKeys,
+        )
+        candidatesSeen += breadth.candidatesSeen
+        breadthCandidates += breadth.picks.length
+        roundPicks += breadth.picks.length
+        for (const pick of breadth.picks) known.add(pick.apolloId)
+        const breadthEnriched = await enrichCandidates(breadth.picks, campaign, supabase, aiVerdictCache)
+        await applyEnrichResult(breadth.picks, breadthEnriched)
+      }
 
-    const fresh = [...firstPass.picks, ...secondPass.picks, ...topUp.picks]
-    const candidatesSeen = firstPass.candidatesSeen + secondPass.candidatesSeen + topUp.candidatesSeen
-    const enrichedRows = [...firstPassEnriched.rows, ...secondPassEnriched.rows, ...topUpEnriched.rows]
-    const verifiedCount = firstPassEnriched.verifiedCount + secondPassEnriched.verifiedCount + topUpEnriched.verifiedCount
-
-    const inserted: LeadRow[] = [...firstInserted, ...secondInserted, ...topUpInserted]
+      if (roundPicks === 0) break
+    }
 
     for (const lead of inserted) {
       if (lead.status !== 'active') continue
@@ -817,24 +864,21 @@ export async function runDiscoveryForCampaign(
     const summary: DiscoverySummary = {
       campaignId: campaign.id,
       candidatesSeen,
-      newCandidates: fresh.length,
-      firstPassCandidates: firstPass.picks.length,
-      secondPassCandidates: secondPass.picks.length,
-      topUpCandidates: topUp.picks.length,
-      enriched: enrichedRows.length,
-      verified: verifiedCount,
-      emailableChecked: firstPassEnriched.emailableChecked + secondPassEnriched.emailableChecked + topUpEnriched.emailableChecked,
-      emailableDeliverable:
-        firstPassEnriched.emailableDeliverable + secondPassEnriched.emailableDeliverable + topUpEnriched.emailableDeliverable,
-      emailableRejected: firstPassEnriched.emailableRejected + secondPassEnriched.emailableRejected + topUpEnriched.emailableRejected,
-      emailableFailedOpen:
-        firstPassEnriched.emailableFailedOpen + secondPassEnriched.emailableFailedOpen + topUpEnriched.emailableFailedOpen,
-      suppressedSkipped: firstPassEnriched.suppressedSkipped + secondPassEnriched.suppressedSkipped + topUpEnriched.suppressedSkipped,
-      excludedPostEnrich:
-        firstPassEnriched.excludedPostEnrich + secondPassEnriched.excludedPostEnrich + topUpEnriched.excludedPostEnrich,
-      aiChecked: firstPassEnriched.aiChecked + secondPassEnriched.aiChecked + topUpEnriched.aiChecked,
-      aiRejected: firstPassEnriched.aiRejected + secondPassEnriched.aiRejected + topUpEnriched.aiRejected,
-      aiFailedOpen: firstPassEnriched.aiFailedOpen + secondPassEnriched.aiFailedOpen + topUpEnriched.aiFailedOpen,
+      newCandidates: depthCandidates + breadthCandidates,
+      depthCandidates,
+      breadthCandidates,
+      rounds,
+      enriched: enrichedCount,
+      verified: verifiedSoFar,
+      emailableChecked,
+      emailableDeliverable,
+      emailableRejected,
+      emailableFailedOpen,
+      suppressedSkipped,
+      excludedPostEnrich,
+      aiChecked,
+      aiRejected,
+      aiFailedOpen,
       inserted: inserted.length,
     }
 

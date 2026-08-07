@@ -79,11 +79,11 @@ describe('runDiscoveryForCampaign', () => {
   beforeEach(() => {
     mockSearchPeople.mockReset()
     // Safe default for any call beyond what a test explicitly queues via
-    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
-    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
-    // by pass 2) always fires at least one more searchPeople call whenever
-    // quota remains. Without this, an unconfigured extra call resolves to
-    // undefined and crashes runFirstPass's destructure.
+    // mockResolvedValueOnce — most tests only care about round 1's breadth
+    // phase, and the round loop (runDiscoveryForCampaign) always fires at
+    // least one more searchPeople call whenever the target isn't met and a
+    // round made progress. Without this, an unconfigured extra call
+    // resolves to undefined and crashes runBreadthSearch's destructure.
     mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
@@ -100,17 +100,15 @@ describe('runDiscoveryForCampaign', () => {
     mockGetSuppressions.mockResolvedValue(new Set())
   })
 
-  it('should fill the daily quota across both search phases: new companies, then a second contact for each', async () => {
-    // dailyTarget 4 -> firstPassQuota = ceil(4/2) = 2
+  it('should search breadth (no domain restriction) in round 1 when there are no existing 1-lead companies to target', async () => {
     mockSearchPeople
-      .mockResolvedValueOnce({ // pass 1, page 1
+      .mockResolvedValueOnce({ // round 1 breadth, page 1
         totalEntries: 2,
         candidates: [candidate('p1', 'p1.com'), candidate('p2', 'p2.com')],
       })
-      .mockResolvedValueOnce({ // pass 2, page 1
-        totalEntries: 2,
-        candidates: [candidate('p3', 'p1.com'), candidate('p4', 'p2.com')],
-      })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: both targets exhausted
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing left
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -121,48 +119,111 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
-    expect(summary.firstPassCandidates).toBe(2)
-    expect(summary.secondPassCandidates).toBe(2)
-    expect(summary.newCandidates).toBe(4)
-    const secondCallParams = mockSearchPeople.mock.calls[1]![0] as Record<string, string | string[]>
-    expect(secondCallParams['q_organization_domains_list[]']).toEqual(['p1.com', 'p2.com'])
+    const firstCallParams = mockSearchPeople.mock.calls[0]![0] as Record<string, string | string[]>
+    expect(firstCallParams['q_organization_domains_list[]']).toBeUndefined()
+    expect(summary.breadthCandidates).toBe(2)
+    expect(summary.depthCandidates).toBe(0)
+    expect(summary.rounds).toBe(2)
+    expect(summary.verified).toBe(2)
   })
 
-  it("should pass each lead's raw Apollo data through to groupVerifiedLead", async () => {
-    mockSearchPeople.mockResolvedValueOnce({
-      totalEntries: 1,
-      candidates: [candidate('p1', 'p1.com')],
-    })
+  it('should use the depth phase to close the remaining shortfall in round 2, skipping breadth once the target is met', async () => {
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // round 1 breadth, page 1: found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p3', 'a.com')] }) // round 2 depth: second contact, fills remaining quota
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
-    const rawPayload = { organizationIndustry: 'Software', organizationEmployeeCount: 50 }
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
-      rows.map((r, i) => ({
-        id: `lead-${i}`, client_id: 'client1', campaign_id: 'camp1', source_id: r.source_id,
-        email_status: 'verified', status: 'active', raw: rawPayload,
-      })),
+      insertedRows(rows),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
-    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 1, icp })
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
 
-    // firstPassQuota = ceil(1/2) = 1, so exactly one pick is enriched and
-    // grouped, and secondPassQuota (1 - 1 = 0) means no second search call
-    expect(mockGroupVerifiedLead).toHaveBeenCalledWith({}, expect.objectContaining({ raw: rawPayload }))
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
+    const depthCallParams = mockSearchPeople.mock.calls[2]![0] as Record<string, string | string[]>
+    expect(depthCallParams['q_organization_domains_list[]']).toEqual(['a.com'])
+    expect(depthCallParams.q_keywords).toBeUndefined()
+    expect(summary.depthCandidates).toBe(1)
+    expect(summary.breadthCandidates).toBe(1)
+    expect(summary.rounds).toBe(2)
+    expect(summary.verified).toBe(2)
   })
 
-  it('should pick at most 1 person per brand-new company during pass 1, even if two appear on the same page', async () => {
-    // dailyTarget 10 -> firstPassQuota = 5, well above 1, so the skip below
-    // can only be explained by the per-company cap, not the overall quota.
+  it('should fall back to breadth in a later round when depth finds no second contact, still reaching daily_target', async () => {
+    // Regression test for the reported production bug: daily_target 15
+    // returned only 9 companies, each with 1 lead, because the depth phase
+    // never found a second contact and nothing retried the shortfall.
     mockSearchPeople
-      .mockResolvedValueOnce({ // pass 1, page 1: 2 people at the same brand-new company
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // round 1 breadth: found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: a.com has no second contact
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // round 2 breadth: fresh company
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(summary.depthCandidates).toBe(0)
+    expect(summary.breadthCandidates).toBe(2)
+    expect(summary.verified).toBe(2)
+    expect(summary.inserted).toBe(2)
+  })
+
+  it('should not re-query an exhausted target domain in a later round', async () => {
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // round 1 breadth: found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth (targets [a.com]): exhausted
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // round 2 breadth: found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 3 depth (targets [b.com] only): exhausted
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 3 breadth: nothing left, stop
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 3, icp })
+
+    expect(mockSearchPeople).toHaveBeenCalledTimes(7)
+    const round3DepthParams = mockSearchPeople.mock.calls[5]![0] as Record<string, string | string[]>
+    expect(round3DepthParams['q_organization_domains_list[]']).toEqual(['b.com'])
+    expect(summary.verified).toBe(2) // short of daily_target 3 — Apollo genuinely ran dry
+    expect(summary.rounds).toBe(3)
+  })
+
+  it('should stop without reaching daily_target when a round finds nothing at all', async () => {
+    mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+    mockInsertLeads.mockResolvedValue([])
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp })
+
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1)
+    expect(summary.verified).toBe(0)
+    expect(summary.rounds).toBe(1)
+    expect(summary.inserted).toBe(0)
+  })
+
+  it('should pick at most 1 person per brand-new company during a breadth phase, even if two appear on the same page', async () => {
+    mockSearchPeople
+      .mockResolvedValueOnce({ // round 1 breadth, page 1: 2 people at the same brand-new company
         totalEntries: 2,
         candidates: [candidate('p1', 'acme.com'), candidate('p2', 'acme.com')],
       })
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: empty, stop pass 1
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, page 1: no second person found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: no second contact
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -173,19 +234,16 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    // pass 1 (2 calls) + pass 2 (1 call, no second contact) + top-up falls
-    // back to a fresh-company search for the leftover quota (1 more call)
-    expect(mockSearchPeople).toHaveBeenCalledTimes(4)
-    expect(summary.firstPassCandidates).toBe(1)
-    expect(summary.secondPassCandidates).toBe(0)
-    expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p1' })])
+    expect(summary.breadthCandidates).toBe(1)
+    expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p1' })])
   })
 
-  it('should target a company from an earlier day that has exactly 1 verified lead in pass 2', async () => {
+  it('should target a company from an earlier day that already has exactly 1 verified lead, starting with depth in round 1', async () => {
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1: nothing new
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // pass 2
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 1 depth: found
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing new
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -196,47 +254,40 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    // pass 1 (1 call) + pass 2 (1 call, fills its whole quota with p5) +
-    // top-up for whatever quota pass 2 still left unfilled (1 more call)
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
-    const secondCallParams = mockSearchPeople.mock.calls[1]![0] as Record<string, string | string[]>
-    expect(secondCallParams['q_organization_domains_list[]']).toEqual(['acme.com'])
-    expect(summary.firstPassCandidates).toBe(0)
-    expect(summary.secondPassCandidates).toBe(1)
-    expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p5' })])
+    const firstCallParams = mockSearchPeople.mock.calls[0]![0] as Record<string, string | string[]>
+    expect(firstCallParams['q_organization_domains_list[]']).toEqual(['acme.com'])
+    expect(firstCallParams.q_keywords).toBeUndefined()
+    expect(summary.depthCandidates).toBe(1)
+    expect(summary.breadthCandidates).toBe(0)
+    expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p5' })])
   })
 
-  it('should not run pass 2 for a company with exactly 1 verified lead but no known domain', async () => {
+  it('should not target a company with exactly 1 verified lead but no known domain', async () => {
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: null, companyName: 'No Domain Co' }])
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
     mockInsertLeads.mockResolvedValue([])
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    // pass 1 (1 call, no targetDomains so pass 2 never calls Apollo at all)
-    // + top-up falls back to a fresh-company search for the full quota
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
-    expect(summary.secondPassCandidates).toBe(0)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1)
+    expect(summary.depthCandidates).toBe(0)
   })
 
-  it('should ignore pass-2 candidates whose company does not match any requested target domain', async () => {
+  it('should ignore depth-phase candidates whose company does not match any requested target domain', async () => {
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1: nothing new
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p9', 'other.com')] }) // pass 2, page 1: off-target
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p9', 'other.com')] }) // round 1 depth, page 1: off-target
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 depth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
     mockInsertLeads.mockResolvedValue([])
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    // pass 1 (1 call) + pass 2 (2 calls: off-target candidate, then empty) +
-    // top-up falls back to a fresh-company search for the full quota
-    expect(mockSearchPeople).toHaveBeenCalledTimes(4)
-    expect(summary.secondPassCandidates).toBe(0)
+    expect(summary.depthCandidates).toBe(0)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
   })
 
-  it('should skip candidates whose apolloId is already known for the campaign', async () => {
+  it('should skip candidates whose apolloId is already known for the client', async () => {
     mockGetKnownSourceIds.mockResolvedValue(new Set(['p1']))
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1')] })
@@ -245,20 +296,17 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp })
 
-    // pass 1 (2 calls: known candidate skipped, then empty page 2) + top-up
-    // falls back to a fresh-company search for the full quota (1 more call)
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
     expect(summary.newCandidates).toBe(0)
   })
 
-  it('should default the quota to 50 when dailyTarget is 0, splitting the budget across both phases', async () => {
-    // firstPassQuota = ceil(50/2) = 25 -- this only passes if the default is
-    // really 50 (not, say, 30, which would give firstPassQuota = 15).
+  it('should default the quota to 50 when dailyTarget is 0, filling it entirely via breadth across two pages', async () => {
     const page1 = Array.from({ length: 25 }, (_, i) => candidate(`c${i}`))
+    const page2 = Array.from({ length: 25 }, (_, i) => candidate(`d${i}`))
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 25, candidates: page1 }) // pass 1, page 1: exactly fills firstPassQuota
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, page 1: no second contacts found
+      .mockResolvedValueOnce({ totalEntries: 25, candidates: page1 })
+      .mockResolvedValueOnce({ totalEntries: 25, candidates: page2 })
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -272,12 +320,10 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 0, icp })
 
-    // pass 1 (1 call, fills its whole quota) + pass 2 (1 call, no second
-    // contacts found) + top-up falls back to a fresh-company search for
-    // whatever quota pass 2 left unfilled (1 more call)
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
-    expect(summary.firstPassCandidates).toBe(25)
-    expect(summary.newCandidates).toBe(25)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    expect(summary.breadthCandidates).toBe(50)
+    expect(summary.newCandidates).toBe(50)
+    expect(summary.rounds).toBe(1)
   })
 
   it('should log a pipeline.discover.completed event with the summary', async () => {
@@ -331,7 +377,9 @@ describe('runDiscoveryForCampaign', () => {
         totalEntries: 2,
         candidates: [candidate('p1', 'p1.com'), candidate('p2', 'p2.com')],
       })
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: no second contacts
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -350,11 +398,11 @@ describe('runDiscoveryForCampaign', () => {
     expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'pipeline.discover.completed' }))
   })
 
-  it('should persist pass-1 leads before pass 2 runs, so a pass-2 failure does not lose them', async () => {
+  it('should persist round-1 leads before a later round throws, so they are not lost', async () => {
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'p1.com')] }) // pass 1, page 1
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: empty, stop
-      .mockRejectedValueOnce(new Error('apollo down')) // pass 2: search throws
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'p1.com')] }) // round 1 breadth, page 1
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockRejectedValueOnce(new Error('apollo down')) // round 2 depth: search throws
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -367,15 +415,15 @@ describe('runDiscoveryForCampaign', () => {
       runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp }),
     ).rejects.toThrow('apollo down')
 
-    // insertLeads was still called with the pass-1 row even though the whole
-    // run ultimately throws — a retried run picks this up via
+    // insertLeads was still called with the round-1 row even though the
+    // whole run ultimately throws — a retried run picks this up via
     // getKnownSourceIds instead of re-discovering and re-enriching it.
     expect(mockInsertLeads).toHaveBeenCalledWith(expect.anything(), [
       expect.objectContaining({ source_id: 'p1' }),
     ])
   })
 
-  it('should skip a pass-1 candidate whose organization name matches an excluded keyword', async () => {
+  it('should skip a breadth candidate whose organization name matches an excluded keyword', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
     mockSearchPeople
       .mockResolvedValueOnce({
@@ -385,8 +433,9 @@ describe('runDiscoveryForCampaign', () => {
           candidate('p2', 'p2.com'),
         ],
       })
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: empty, stop
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: no second contacts
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -400,19 +449,18 @@ describe('runDiscoveryForCampaign', () => {
       { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
-    expect(summary.firstPassCandidates).toBe(1)
-    expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p2' })])
+    expect(summary.breadthCandidates).toBe(1)
+    expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p2' })])
   })
 
-  it('should skip a pass-1 candidate whose title matches an excluded keyword', async () => {
+  it('should skip a breadth candidate whose title matches an excluded keyword', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['recruiting'] }
     mockSearchPeople
       .mockResolvedValueOnce({
         totalEntries: 1,
         candidates: [{ ...candidate('p1', 'p1.com'), title: 'Recruiting Manager' }],
       })
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: empty, stop
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
     mockInsertLeads.mockResolvedValue([])
 
     const summary = await runDiscoveryForCampaign(
@@ -420,20 +468,19 @@ describe('runDiscoveryForCampaign', () => {
       { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
-    expect(summary.firstPassCandidates).toBe(0)
+    expect(summary.breadthCandidates).toBe(0)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
   })
 
-  it('should skip a pass-2 candidate whose organization name matches an excluded keyword', async () => {
+  it('should skip a depth-phase candidate whose organization name matches an excluded keyword', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1: nothing new
       .mockResolvedValueOnce({
         totalEntries: 1,
         candidates: [{ ...candidate('p5', 'acme.com'), organizationName: 'Acme Staffing' }],
-      }) // pass 2, page 1: excluded
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, page 2: empty, stop
+      }) // round 1 depth: excluded by org name, target dropped immediately
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
     mockInsertLeads.mockResolvedValue([])
 
     const summary = await runDiscoveryForCampaign(
@@ -441,26 +488,28 @@ describe('runDiscoveryForCampaign', () => {
       { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
-    expect(summary.secondPassCandidates).toBe(0)
+    expect(summary.depthCandidates).toBe(0)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
   })
 
-  it('should permanently drop a pass-2 target company whose organization name alone matches an excluded keyword, without waiting for page exhaustion', async () => {
+  it('should permanently drop a depth target company whose organization name alone matches an excluded keyword, without waiting for page exhaustion of the other target', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
     mockGetVerifiedLeadCompanies.mockResolvedValue([
       { companyDomain: 'acme.com', companyName: 'Acme' },
       { companyDomain: 'other.com', companyName: 'Other' },
     ])
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1: nothing new
       .mockResolvedValueOnce({
         totalEntries: 1,
         candidates: [{ ...candidate('p1', 'acme.com'), organizationName: 'Acme Staffing' }],
-      }) // pass 2, page 1: acme.com's only candidate is excluded by org name -> dropped immediately
+      }) // round 1 depth, page 1: acme.com's only candidate excluded by org name -> dropped immediately
       .mockResolvedValueOnce({
         totalEntries: 1,
         candidates: [candidate('p2', 'other.com')],
-      }) // pass 2, page 2: only other.com is still targeted
+      }) // round 1 depth, page 2: only other.com is still targeted (page reset — see the narrowed domain filter below)
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth (targets [acme.com]): exhausted
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -474,98 +523,10 @@ describe('runDiscoveryForCampaign', () => {
       { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: excludingIcp },
     )
 
-    const secondPageParams = mockSearchPeople.mock.calls[2]![0] as Record<string, string | string[]>
+    const secondPageParams = mockSearchPeople.mock.calls[1]![0] as Record<string, string | string[]>
     expect(secondPageParams['q_organization_domains_list[]']).toEqual(['other.com'])
-    expect(summary.secondPassCandidates).toBe(1)
-    expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p2' })])
-  })
-
-  it('should fall back to a fresh-company search when pass 2 finds no second contact, to still fill daily_target', async () => {
-    // dailyTarget 2 -> firstPassQuota = 1. Pass 1 finds a.com's only match;
-    // pass 2 (scoped to a.com alone) finds no second person there — the
-    // exact scenario reported in production. Without the top-up fallback,
-    // this campaign would stop at 1 lead instead of the requested 2.
-    mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // pass 1
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: a.com has no second contact
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // top-up: fresh company
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
-    )
-    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
-      insertedRows(rows),
-    )
-    mockGroupVerifiedLead.mockResolvedValue('case1')
-
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
-
-    expect(summary.firstPassCandidates).toBe(1)
-    expect(summary.secondPassCandidates).toBe(0)
-    expect(summary.topUpCandidates).toBe(1)
-    expect(summary.inserted).toBe(2)
-    // The top-up call must be a breadth search like pass 1 — not scoped to a
-    // specific domain like pass 2 — or it could never find a new company.
-    const topUpParams = mockSearchPeople.mock.calls[2]![0] as Record<string, string | string[]>
-    expect(topUpParams['q_organization_domains_list[]']).toBeUndefined()
-  })
-
-  it('should not run the top-up pass when pass 2 already fills the remaining quota', async () => {
-    // dailyTarget 2 -> firstPassQuota = 1, secondPassQuota = 1. Pass 2 finds
-    // exactly the one second contact it needs, so there is no shortfall for
-    // top-up to fill — it must not fire a third, wasted Apollo call.
-    mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // pass 1
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'a.com')] }) // pass 2: fills quota
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
-    )
-    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
-      insertedRows(rows),
-    )
-    mockGroupVerifiedLead.mockResolvedValue('case1')
-
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
-
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
-    expect(summary.topUpCandidates).toBe(0)
-    expect(summary.inserted).toBe(2)
-  })
-
-  it('should not re-pick a company already claimed by pass 1 or pass 2 during the top-up pass', async () => {
-    // dailyTarget 4 -> firstPassQuota = 2. Pass 1 fills its quota at a.com
-    // and b.com; pass 2 (scoped to both) finds no second contacts. Top-up's
-    // page comes back with a candidate at a.com (already claimed) alongside
-    // one at a genuinely new company — only the new one may be picked.
-    mockSearchPeople
-      .mockResolvedValueOnce({ // pass 1: fills quota of 2 across two companies
-        totalEntries: 2,
-        candidates: [candidate('p1', 'a.com'), candidate('p2', 'b.com')],
-      })
-      // An empty candidates array ends pass 2 immediately (it advances
-      // straight to the next keyword target, and there is only one) — one
-      // call, not a page-by-page exhaustion like an off-target candidate would.
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: nothing
-      .mockResolvedValueOnce({ // top-up: a.com re-appears (must be skipped), c.com is new
-        totalEntries: 2,
-        candidates: [candidate('p3', 'a.com'), candidate('p4', 'c.com')],
-      })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
-    )
-    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
-      insertedRows(rows),
-    )
-    mockGroupVerifiedLead.mockResolvedValue('case1')
-
-    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
-
-    expect(summary.topUpCandidates).toBe(1)
-    expect(mockBulkMatchPeople).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: 'p4' })]),
-    )
-    expect(mockBulkMatchPeople).not.toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: 'p3' })]),
-    )
+    expect(summary.depthCandidates).toBe(1)
+    expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p2' })])
   })
 })
 
@@ -779,7 +740,7 @@ describe('apollo failure attribution', () => {
       clientId: 'client1',
       type: 'apollo.search.failed',
       source: 'apollo',
-      payload: { campaignId: 'camp1', pass: 1, page: 1 },
+      payload: { campaignId: 'camp1', phase: 'breadth', round: 1, page: 1 },
     })
   })
 
@@ -948,17 +909,13 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
   // joining multiple organization keywords into one q_keywords string
   // returns 0 results (or HTTP 422 "Value too long" once long enough),
   // confirmed live against Apollo 2026-08-06. An ICP with more than one
-  // keyword must search once per keyword instead of joining them.
+  // keyword must search once per keyword instead of joining them. This only
+  // applies to the breadth phase — the depth phase drops q_keywords
+  // entirely (see the dedicated test below).
   const multiKeywordIcp: ApolloIcpFilters = { ...icp, keywords: ['private school', 'academy'] }
 
   beforeEach(() => {
     mockSearchPeople.mockReset()
-    // Safe default for any call beyond what a test explicitly queues via
-    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
-    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
-    // by pass 2) always fires at least one more searchPeople call whenever
-    // quota remains. Without this, an unconfigured extra call resolves to
-    // undefined and crashes runFirstPass's destructure.
     mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
@@ -978,14 +935,10 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
     )
   })
 
-  it('should search Apollo once per organization keyword during pass 1, moving to the next keyword when one returns nothing', async () => {
-    // dailyTarget 2 -> firstPassQuota = ceil(2/2) = 1, so the single
-    // "academy" pick fills pass 1 immediately.
+  it('should search Apollo once per organization keyword during a breadth phase, moving to the next keyword when one returns nothing', async () => {
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "private school": nothing
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // pass 1, "academy": found, fills quota
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "private school": no second contact
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "academy": no second contact either
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // "private school": nothing
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // "academy": found, fills quota
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -993,17 +946,15 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
     const summary = await runDiscoveryForCampaign(
       {} as never,
-      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp: multiKeywordIcp },
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 1, icp: multiKeywordIcp },
     )
 
     expect(mockSearchPeople.mock.calls[0]![0]).toMatchObject({ q_keywords: 'private school' })
     expect(mockSearchPeople.mock.calls[1]![0]).toMatchObject({ q_keywords: 'academy' })
-    expect(summary.firstPassCandidates).toBe(1)
+    expect(summary.breadthCandidates).toBe(1)
   })
 
-  it('should stop calling Apollo once the pass-1 quota is met, without searching remaining keywords', async () => {
-    // dailyTarget 1 -> firstPassQuota = ceil(1/2) = 1, filled by "private
-    // school" alone; secondPassQuota (1 - 1 = 0) means pass 2 never runs.
+  it('should stop calling Apollo once the breadth quota is met, without searching remaining keywords', async () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
@@ -1019,13 +970,14 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
     expect(mockSearchPeople).toHaveBeenCalledTimes(1)
   })
 
-  it('should cycle through organization keywords during pass 2 as well, alongside the domain filter', async () => {
+  it('should NOT cycle through organization keywords during the depth phase — it searches once per page with no q_keywords', async () => {
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "private school": nothing new
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, "academy": nothing new
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2, "private school": nothing
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // pass 2, "academy": found
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 1 depth: found, no keyword cycling
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, "private school": nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, "academy": nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth, "private school": nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth, "academy": nothing, stop
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -1036,9 +988,10 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
       { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp: multiKeywordIcp },
     )
 
-    const pass2SecondCallParams = mockSearchPeople.mock.calls[3]![0] as Record<string, string | string[]>
-    expect(pass2SecondCallParams).toMatchObject({ q_keywords: 'academy', 'q_organization_domains_list[]': ['acme.com'] })
-    expect(summary.secondPassCandidates).toBe(1)
+    const depthCallParams = mockSearchPeople.mock.calls[0]![0] as Record<string, string | string[]>
+    expect(depthCallParams.q_keywords).toBeUndefined()
+    expect(depthCallParams['q_organization_domains_list[]']).toEqual(['acme.com'])
+    expect(summary.depthCandidates).toBe(1)
   })
 })
 
@@ -1135,14 +1088,14 @@ describe('runDiscoveryForCampaign — AI relevance filter', () => {
   })
 
   it('should call checkCompanyRelevance only once for two eligible rows at the same company in one run', async () => {
-    // Mirrors the very first test in this file: pass 1 finds a brand-new
-    // company (p1 @ acme.com), it verifies this run, so pass 2 targets
-    // acme.com for a second contact (p5) — both share a company_key within
-    // one discovery run, the exact scenario the cache exists for.
+    // Round 1 breadth finds a brand-new company (p1 @ acme.com); it
+    // verifies, so round 2's depth phase targets acme.com for a second
+    // contact (p5) — both share a company_key within one discovery run,
+    // the exact scenario the cache exists for.
     mockSearchPeople
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // pass 1, page 1
-      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 1, page 2: stop
-      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // pass 2: second contact
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // round 1 breadth, page 1
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: stop
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 2 depth: second contact
     mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
       details.map((d) => enriched(d.id, 'verified')),
     )
@@ -1155,7 +1108,7 @@ describe('runDiscoveryForCampaign — AI relevance filter', () => {
 
     expect(mockCheckCompanyRelevance).toHaveBeenCalledTimes(1)
     expect(summary.aiChecked).toBe(2)
-    expect(summary.secondPassCandidates).toBe(1)
+    expect(summary.depthCandidates).toBe(1)
   })
 
   it('should not call checkCompanyRelevance for a lead already parked by suppression', async () => {

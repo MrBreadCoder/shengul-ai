@@ -3299,3 +3299,61 @@ exact request body (`zone`/`url`/`format`) sent for both `search()` and
 `scrape()`, specifically to catch a future zone/endpoint mix-up like this
 one. Full suite: 198 files / 2090 tests green, `tsc`/`eslint` clean. Not
 yet committed.
+
+## 2026-08-07 — Discovery depth-first retry loop (all 3 tasks landed)
+
+Design + plan: `docs/superpowers/specs/2026-08-07-discovery-retry-loop-design.md`,
+`docs/superpowers/plans/2026-08-07-discovery-retry-loop.md`. Root cause
+(investigated against production event logs): `daily_target` budgeted
+Apollo search *attempts*, not delivered *active* leads, and the "find a
+second contact" phase (pass 2) had returned 0 candidates in every one of
+the 9 `pipeline.discover.completed` events ever logged, because it ANDed a
+redundant free-text keyword filter onto an already-exact domain
+restriction — so every campaign ended up with N companies, each with
+exactly 1 lead, never 2.
+
+1. **Task 1** — Added a regression test to `build-search-params.test.ts`
+   confirming `buildPeopleSearchParams` already omits `q_keywords` when
+   `icp.keywords` is empty, even with `organizationDomains` present. No
+   implementation change — this is the guardrail the depth phase's query
+   fix (Task 3) relies on.
+2. **Task 2** — Fixed a latent bug in `getVerifiedLeadCompanies`
+   (`src/lib/db/leads.ts`): it filtered `.eq('email_status', 'verified')`
+   (Apollo's raw verdict) instead of `.eq('status', 'active')` (the
+   authoritative "actually cleared and grouped into a case" field per the
+   2026-08-05 precision-design spec). A lead Apollo marked `verified` but
+   later parked (suppressed, post-enrich excluded, AI-rejected) was still
+   counted as "this company has a verified lead." Harmless before this fix
+   since pass 2 never ran a useful query anyway, but would have corrupted
+   the new depth phase's per-round target list. Added a test with a local
+   mock recording `.eq()` calls to prove the correct column/value is used.
+3. **Task 3** — Replaced the fixed first-pass/second-pass/top-up run in
+   `src/lib/pipeline/discover.ts` with a round loop: each round tries
+   **depth** (`runDepthSearch`, renamed from `runSecondPass` — targets
+   every company currently sitting at exactly 1 verified lead, drops the
+   redundant `q_keywords` filter entirely since the domain restriction
+   already pins the exact company) before **breadth** (`runBreadthSearch`,
+   renamed from `runFirstPass` — brand-new companies, unchanged logic),
+   and keeps rounding until `verified >= daily_target` or a round picks
+   zero candidates total. A domain that comes back empty in the depth
+   phase is added to a run-scoped `exhaustedDomains` set and skipped in
+   later rounds; `verifiedCompanyCounts`/`domainBackedCompanyKeys` are only
+   ever updated from a phase's *real* post-verification outcome, never an
+   optimistic pick-time guess, so every round's depth-targeting decision
+   stays accurate across many rounds. Each round's leads are still
+   persisted immediately per phase (a later phase/round throwing never
+   discards already-durable work). `DiscoverySummary` fields
+   `firstPassCandidates`/`secondPassCandidates`/`topUpCandidates` are
+   replaced with `depthCandidates`/`breadthCandidates`/`rounds`; the
+   `vendorContext` Apollo-failure payload changed from `{ pass, page }` to
+   `{ phase: 'depth' | 'breadth', round, page }`. Round 1 naturally behaves
+   like pure breadth (no 1-lead companies exist yet to deepen). Test suite
+   fully rewritten around the round loop, including a regression test for
+   the exact reported bug (`daily_target` 15 → 9 companies × 1 lead) now
+   asserting the shortfall gets retried via breadth when depth comes up
+   empty.
+
+All three changes TDD'd (failing test confirmed before each fix). Full
+repo suite: 198 files / 2092 tests green, `tsc --noEmit` and `eslint`
+clean on every touched file. Commits skipped per instruction — not yet
+committed.

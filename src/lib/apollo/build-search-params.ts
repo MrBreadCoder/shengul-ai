@@ -38,7 +38,7 @@ export function buildPeopleSearchParams(
   if (icp.contactEmailStatuses.length > 0) {
     params['contact_email_status[]'] = icp.contactEmailStatuses
   }
-  // Second-pass targeting (src/lib/pipeline/discover.ts runSecondPass):
+  // Depth-phase targeting (src/lib/pipeline/discover.ts runDepthSearch):
   // restricts the search to specific companies so discovery can go back for
   // a second contact. Confirmed against Apollo's People Search API docs
   // (docs.apollo.io/reference/people-api-search).

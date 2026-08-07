@@ -26,9 +26,12 @@ export interface LeadCompanyRef {
 }
 
 // Used by discovery (src/lib/pipeline/discover.ts) to see which companies
-// already have a verified lead for a campaign — across all days, not just
-// today's run — so the second-pass search knows which companies to go back
-// to for a second contact.
+// already have a verified, ACTIVE lead for a campaign — across all days,
+// not just today's run — so the depth phase knows which companies to go
+// back to for a second contact. Filters on `status`, not `email_status`:
+// a row Apollo marked `verified` but that was later parked (suppressed,
+// post-enrich excluded, or AI-rejected) must not count as "this company
+// has a verified lead" — it was never grouped into a case.
 export async function getVerifiedLeadCompanies(
   supabase: SupabaseClient<Database>,
   campaignId: string,
@@ -37,7 +40,7 @@ export async function getVerifiedLeadCompanies(
     .from('leads')
     .select('company_domain, company_name')
     .eq('campaign_id', campaignId)
-    .eq('email_status', 'verified')
+    .eq('status', 'active')
   if (error) {
     throw new AppError('DB_ERROR', 'Failed to load verified lead companies', { campaignId, cause: error.message })
   }
