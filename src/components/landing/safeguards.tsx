@@ -12,21 +12,18 @@ interface Reassurance {
 
 const PROMISES: readonly Reassurance[] = [
   {
-    title: 'It starts slow.',
-    detail:
-      'A mailbox sends a handful the first day and builds from there. Nothing about it looks like a machine that just woke up.',
+    title: 'We start small.',
+    detail: 'A few emails on day one, building up gradually. Nothing about it looks automated.',
     Glyph: ChartLineUp,
   },
   {
-    title: 'It backs off by itself.',
-    detail:
-      'If the wrong things start coming back, that mailbox steps out of rotation and you hear about it before anyone else notices.',
+    title: 'We back off automatically.',
+    detail: 'If something looks off, we pull that mailbox out of rotation right away, and tell you.',
     Glyph: ShieldCheck,
   },
   {
     title: 'One switch stops it.',
-    detail:
-      'Pull a single person out of the queue, quiet one mailbox, or stop everything at once. It takes effect immediately.',
+    detail: 'Stop one email, one mailbox, or everything at once — instantly.',
     Glyph: Power,
   },
 ]
@@ -38,13 +35,13 @@ export function Safeguards(): React.ReactElement {
         <div className="rounded-[22px] border border-[var(--l-hairline)] bg-[var(--l-bg)] px-6 py-14 sm:px-12 sm:py-16">
           <Reveal>
             <h2 className="max-w-[24ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-              Protect and increase your email reputation.
+              Protect and grow your email reputation.
             </h2>
             <p className="mt-5 max-w-[58ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-              Your emails do not deserve to sit in a spam folder. The quickest way to put them
-              there is to blast a domain, so this does the opposite: small numbers, human hours,
-              your own mailbox. Every month it runs, the reputation you spent years earning is
-              worth more, not less. The mailbox itself is handled just as carefully:{' '}
+              Your emails shouldn&rsquo;t end up in spam. Sending too many at once is what causes
+              that, so we do the opposite — small numbers, human hours, your own mailbox. The
+              reputation you&rsquo;ve built stays protected, and gets stronger over time.
+              Here&rsquo;s{' '}
               <InlineLink href="#privacy">how your data is stored and deleted</InlineLink>.
             </p>
           </Reveal>

@@ -20,25 +20,24 @@ const COMMITMENTS: readonly Commitment[] = [
   {
     title: 'Everything is encrypted.',
     detail:
-      'In transit and at rest. Every connection runs over TLS, the database is encrypted on disk, and your mailbox credentials get a second layer on top, sealed with AES-256-GCM before they are ever written down.',
+      "Every connection uses TLS, and your mailbox login gets extra encryption before it's ever saved.",
     Glyph: LockKey,
   },
   {
-    title: 'The connection is yours to cut.',
+    title: 'You can disconnect anytime.',
     detail:
-      'Your mailbox is linked through Google or Microsoft on their own consent screen. Revoke it from your account whenever you like and the sending stops that moment, without asking us first.',
+      "Your mailbox connects through Google or Microsoft's own sign-in screen. Disconnect it and sending stops immediately.",
     Glyph: Plugs,
   },
   {
-    title: 'Your account cannot see anyone else.',
+    title: 'Your data stays yours.',
     detail:
-      'Separation is enforced by the database itself, on every table that holds your work, so a query can only ever come back with rows that belong to you.',
+      "Kept separate at the database level — no query can ever return someone else's information.",
     Glyph: Vault,
   },
   {
     title: 'Nothing is kept forever.',
-    detail:
-      'Routine activity is deleted after thirty days and problem records after ninety, on a schedule that runs whether anyone remembers it or not.',
+    detail: 'Regular activity is deleted after 30 days, flagged records after 90, automatically.',
     Glyph: ClockCounterClockwise,
   },
 ]
@@ -52,8 +51,8 @@ export function Privacy(): React.ReactElement {
             How your data is handled.
           </h2>
           <p className="mt-5 text-[15px] leading-relaxed text-[var(--l-muted)]">
-            Outbound means handing a system your mailbox and the list of people you want to reach.
-            Here is what happens to both — and separately, what happens to{' '}
+            Running outbound means sharing your mailbox and your lead list with us. Here&rsquo;s
+            exactly what happens to both — and separately, how we protect{' '}
             <InlineLink href="#safeguards">the reputation of the domain you send from</InlineLink>.
           </p>
         </Reveal>

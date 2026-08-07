@@ -24,25 +24,25 @@ const OUTCOMES: readonly Outcome[] = [
   {
     value: '1,284',
     label: 'Leads found',
-    detail: 'People who match the buyer you described, researched one at a time.',
+    detail: 'People who match the buyer you described.',
     Glyph: MagnifyingGlass,
   },
   {
     value: '3,146',
     label: 'Emails sent',
-    detail: 'From your own mailbox, in small daily batches, at hours a person sends.',
+    detail: 'Sent from your own mailbox, in small batches, at normal hours.',
     Glyph: PaperPlaneTilt,
   },
   {
     value: '184',
     label: 'Replies',
-    detail: 'Answered in your voice. The chasing stops the second one arrives.',
+    detail: 'Answered in your voice. Follow-ups stop the moment someone replies.',
     Glyph: ChatCircle,
   },
   {
     value: '68',
     label: 'Meetings booked',
-    detail: 'Straight into your calendar, with the background on the company attached.',
+    detail: 'Booked straight into your calendar, with notes on the company attached.',
     Glyph: CalendarCheck,
   },
 ]
@@ -61,12 +61,11 @@ export function Outcomes(): React.ReactElement {
       <div className="mx-auto max-w-[1180px]">
         <Reveal>
           <h2 className="max-w-[20ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            Four numbers we report. One you close.
+            Four numbers we track. One you close.
           </h2>
           <p className="mt-5 max-w-[58ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-            Everything on this page exists to move the fourth one. The figures below are one
-            illustrative month, shown so you can see how the four relate. They are not a result we
-            are promising you.
+            Everything here is meant to grow that fourth number. These are example figures for one
+            month, just to show how the numbers connect — not a promise of your results.
           </p>
         </Reveal>
 
@@ -90,10 +89,10 @@ export function Outcomes(): React.ReactElement {
             <div className="rounded-[22px] border border-[var(--l-hairline)] bg-[var(--l-surface)] px-6 py-8 sm:px-10 sm:py-10">
               <p className="text-lg font-medium tracking-tight">The fifth number is yours.</p>
               <p className="mt-3 max-w-[64ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                {REVENUE_EXAMPLE.meetings} meetings, at a {REVENUE_EXAMPLE.averageDeal} average deal
-                with {REVENUE_EXAMPLE.closeRate} of them closing, is {REVENUE_EXAMPLE.newBusiness}{' '}
-                of new business from a single month of sending. Swap in your own deal size and close
-                rate to see what a month is worth to you.
+                {REVENUE_EXAMPLE.meetings} meetings, a {REVENUE_EXAMPLE.averageDeal} average deal,
+                and a {REVENUE_EXAMPLE.closeRate} close rate adds up to{' '}
+                {REVENUE_EXAMPLE.newBusiness} in new business from one month. Use your own numbers
+                to see what a month could be worth to you.
               </p>
               <div className="mt-8">
                 <BookMeetingButton size="lg" />

@@ -14,25 +14,25 @@ const MOVEMENTS: readonly Movement[] = [
   {
     title: 'Talk with us.',
     detail:
-      'One call. You tell us what you sell and who should be hearing about it, and we build the campaign and the audience around that answer. That is the whole setup on your side.',
+      "One call. Tell us what you sell and who you want to reach. That's the whole setup.",
     Glyph: ChatsCircle,
   },
   {
-    title: 'The system finds the qualified leads.',
+    title: 'We find your leads.',
     detail:
-      'Every morning it goes out and comes back with people who match the buyer you described, checked against what you actually sell, with the homework already done on each company.',
+      "Every day, we find people who match the buyer you described, and check they're a real fit for what you sell.",
     Glyph: Crosshair,
   },
   {
-    title: 'It writes an email for that one person.',
+    title: 'We write a real email.',
     detail:
-      'Not a template with a name dropped into it. The opening line comes from something true about that company this month, in your voice, from your own address.',
+      'Not a template with a name dropped in. Each email mentions something real about that company, written in your voice, sent from your own inbox.',
     Glyph: PenNib,
   },
   {
-    title: 'You join the meetings.',
+    title: 'You take the meetings.',
     detail:
-      'It keeps going while you sleep, follows up on its own, and stops the second somebody replies. Your calendar link goes out, the time gets booked, and you wake up to meetings instead of a list.',
+      'We follow up until someone replies, then stop right away. The meeting lands on your calendar, waiting for you in the morning.',
     Glyph: CalendarCheck,
   },
 ]
@@ -45,11 +45,11 @@ export function HowItWorks(): React.ReactElement {
           <div className="lg:sticky lg:top-32">
             <Reveal>
               <h2 className="text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-                Four steps. Two of them are yours.
+                Four steps. You only do two of them.
               </h2>
               <p className="mt-5 max-w-[38ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Nothing to learn, nothing to log into every morning. Your part is the first step
-                and the last one. Everything between them is handled, and reported back as{' '}
+                Nothing to learn, nothing to check every morning. You start it and show up to the
+                meetings — we handle everything in between, and report back as{' '}
                 <InlineLink href="#outcomes">four numbers</InlineLink>.
               </p>
             </Reveal>

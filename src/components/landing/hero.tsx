@@ -29,14 +29,14 @@ export function Hero(): React.ReactElement {
 
           <Reveal delay={0.06}>
             <h1 className="mt-7 text-[2.75rem] leading-[1.02] font-medium tracking-tighter text-balance sm:text-6xl lg:text-[4.25rem]">
-              More meetings booked, none of the outbound work.
+              We book your meetings. You skip the outbound work.
             </h1>
           </Reveal>
 
           <Reveal delay={0.12}>
             <p className="mt-6 max-w-[46ch] text-[15px] leading-relaxed text-[var(--l-muted)] sm:text-base">
-              You describe the buyer. We find them, write to them, and hand you the ones who book
-              time with you.
+              Tell us who you want to reach. We find them, email them, and pass you the ones who
+              book a call.
             </p>
           </Reveal>
 

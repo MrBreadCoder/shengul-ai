@@ -47,7 +47,7 @@ export function Capabilities(): React.ReactElement {
       <div className="mx-auto max-w-[1180px]">
         <Reveal className="max-w-[36ch]">
           <h2 className="text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            What the week looks like once it is running.
+            What a normal week looks like.
           </h2>
         </Reveal>
 
@@ -56,12 +56,11 @@ export function Capabilities(): React.ReactElement {
             <Tile isFeature className="h-full">
               <Clock weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
               <h3 className="max-w-[16ch] text-xl font-medium tracking-tight sm:text-2xl">
-                Two hours a day back, and meetings in the diary.
+                Get two hours back every day, and meetings on your calendar.
               </h3>
               <p className="mt-4 max-w-[44ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                The time that used to disappear into lists, research tabs and rewritten openers is
-                finished before you sit down. What is waiting instead is the people who wrote back
-                overnight and the times they picked.
+                The time you used to spend on lists and rewritten emails now goes to people who
+                already replied and picked a time.
               </p>
               <ul className="mt-9 flex flex-wrap gap-2">
                 {RELIEFS.map((relief) => (
@@ -82,11 +81,11 @@ export function Capabilities(): React.ReactElement {
                 3
               </p>
               <h3 className="mt-6 text-lg font-medium tracking-tight">
-                Three nudges, then it lets go.
+                Up to 3 follow-ups, then we stop.
               </h3>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Nobody is forgotten and nobody is hounded. The moment somebody answers, the rest
-                stop.
+                Nobody is forgotten, and nobody is spammed. The moment someone replies, the
+                follow-ups stop.
               </p>
             </Tile>
           </Reveal>
@@ -94,10 +93,10 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-5" delay={0.1}>
             <Tile className="h-full">
               <Newspaper weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
-              <h3 className="text-lg font-medium tracking-tight">It reads the room first.</h3>
+              <h3 className="text-lg font-medium tracking-tight">Every email is personal.</h3>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Every opening line comes from something true about that company this month, so it
-                lands as a note from a person who did their homework.
+                Each one opens with something real about that company — not a guess, not a
+                generic line.
               </p>
               <p className="mt-6 rounded-[14px] border border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_4%,transparent)] px-4 py-3.5 text-[13px] leading-relaxed text-[var(--l-muted)]">
                 Rather than: I hope this email finds you well.
@@ -119,11 +118,10 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-8" delay={0.2}>
             <Tile className="h-full">
               <Eye weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
-              <h3 className="text-lg font-medium tracking-tight">You are never guessing.</h3>
+              <h3 className="text-lg font-medium tracking-tight">You can read every email.</h3>
               <p className="mt-3 max-w-[56ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Every message it sends is there to read back. And when a question comes in that it
-                cannot answer honestly, it stops and asks you instead of inventing something you
-                would have to walk back later.
+                Every email we send is there for you to check. If a reply asks something we
+                can&rsquo;t answer honestly, we check with you instead of guessing.
               </p>
             </Tile>
           </Reveal>

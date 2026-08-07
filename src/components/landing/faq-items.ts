@@ -14,7 +14,7 @@ export const FAQ_ITEMS: readonly QuestionAnswer[] = [
   {
     question: 'Will it sound like me?',
     answer:
-      'That is the whole point. It writes short, specific emails from your own address, in your voice, about something real at that company. If it cannot say anything worth reading, it does not send.',
+      "Yes. Every email goes out from your own address, in your voice, and mentions something real about that company. If there's nothing worth saying, we don't send anything.",
   },
   {
     question: 'Do I have to approve every email?',
@@ -24,12 +24,12 @@ export const FAQ_ITEMS: readonly QuestionAnswer[] = [
   {
     question: 'What happens when somebody actually replies?',
     answer:
-      'The chasing stops instantly and the reply is answered the way you would answer it. Anything that turns into money or a real decision comes straight to you with your booking link already offered.',
+      'Follow-ups stop right away, and we reply the way you would. Anything serious comes straight to you, with your booking link already included.',
   },
   {
     question: 'Will it make things up?',
     answer:
-      'No. It only writes from what it could actually verify, and when a question comes back that it cannot answer honestly, it waits for you rather than guessing on your behalf.',
+      "No. We only write what we can verify. If a question comes up that we can't answer honestly, we check with you first.",
   },
   {
     question: 'What do you need from me?',

@@ -4,10 +4,10 @@ import { Reveal } from './reveal'
 
 /** What the four numbers cost when you produce them by hand. */
 const COSTS: readonly string[] = [
-  'Two hours of every morning spent building the list.',
-  'Openers rewritten at midnight because the last batch read like a template.',
-  'Follow-ups nobody remembered to send, on the people most likely to answer.',
-  'A quarter of that, and a handful of meetings to show for it.',
+  'Hours every morning spent building lead lists.',
+  'Late nights rewriting emails that still sound like a template.',
+  'Follow-ups that never get sent, even to your best leads.',
+  'Days of work for just a few meetings booked.',
 ]
 
 export function TheGrind(): React.ReactElement {
@@ -16,7 +16,7 @@ export function TheGrind(): React.ReactElement {
       <div className="mx-auto max-w-[1180px]">
         <Reveal>
           <h2 className="max-w-[24ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            Doing it yourself is a second job that pays in maybes.
+            Doing this yourself takes hours and rarely pays off.
           </h2>
         </Reveal>
 
@@ -41,7 +41,7 @@ export function TheGrind(): React.ReactElement {
 
         <Reveal delay={0.24}>
           <p className="mt-14 text-lg leading-snug text-[var(--l-text)] sm:text-xl">
-            That is the part we take.
+            We take all of that off your plate.
           </p>
           <div className="mt-8">
             <BookMeetingButton size="lg" />
