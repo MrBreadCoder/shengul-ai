@@ -2938,3 +2938,45 @@ Verified post-insert by querying the 8 rows back from `campaigns` directly
 (status/daily_target/icp.organizationLocations/icp.employeeRange all
 correct). The one-off insert script was deleted after running — it was
 hardcoded to this one client's 8-campaign spec, not reusable infra.
+
+---
+
+## 2026-08-07 — Client contact signature (phone + address in outbound email)
+
+Uniforms Fashion asked for their phone number in the first outbound email;
+address was folded into the same request during design. Brainstormed →
+spec (`docs/superpowers/specs/2026-08-07-client-contact-signature-design.md`)
+→ plan (`docs/superpowers/plans/2026-08-07-client-contact-signature.md`) →
+implemented inline, all 8 tasks, TDD per task. Pushed to `master` at
+`effab26`.
+
+- `clients` gained 4 nullable columns: `phone`, `address`, `signature_name`,
+  `signature_title` (`supabase/migrations/0031_client_contact_signature.sql`).
+  Per-client, not per-campaign — one number/address for the whole company,
+  applies to all of a client's campaigns automatically (Uniforms Fashion has
+  8).
+- New pure `appendSignatureBlock` (`src/lib/pipeline/signature.ts`) builds
+  the block deterministically and is called from `write.ts` (first-touch)
+  and `followup.ts` (every nudge) right after the LLM returns the body,
+  before it's claimed/sent — never left to the model's discretion, unlike
+  `bookingLink`'s "optional CTA" treatment. Gated entirely on `phone` being
+  set: address/name/title alone never trigger a signature (explicit
+  requirement, confirmed even after address was added).
+- New `phoneSchema` (`src/lib/validation/phone.ts`, lenient international
+  format) plus an inline `nullableTextSchema` helper in the clients PATCH
+  route for address/signatureName/signatureTitle — same
+  trim/refine/empty-clears-to-null convention as the existing `domainSchema`.
+- `updateClientSignature` (`src/lib/db/clients.ts`) is one combined update
+  for all 4 fields; `PATCH /api/clients/[clientId]` accepts them and logs
+  `client.signature_changed`.
+- New `EditSignatureDialog` on the client detail page (modeled on
+  `EditDomainDialog`), i18n keys added to both `en.json`/`tr.json`.
+- Known limitation, documented not solved: `redesign.ts` (the `/inbox`
+  AI-rewrite-draft action) treats the current body — including any appended
+  signature — as free text the model may reword. Out of scope; targets
+  automated sends/initial drafts, not manual AI rewrites.
+- Operator follow-up (not code): open Uniforms Fashion's client page → Edit
+  signature → fill in phone (+ optionally name/title/address) once; applies
+  to all 8 existing campaigns immediately.
+
+Full suite green (2033/2033), typecheck/lint clean before pushing.
