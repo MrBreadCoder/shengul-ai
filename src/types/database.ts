@@ -26,6 +26,8 @@ export interface Database {
           address: string | null
           signature_name: string | null
           signature_title: string | null
+          timezone: string
+          default_discover_time: string
           created_at: string
           updated_at: string
         }
@@ -45,6 +47,8 @@ export interface Database {
           address?: string | null
           signature_name?: string | null
           signature_title?: string | null
+          timezone?: string
+          default_discover_time?: string
           created_at?: string
           updated_at?: string
         }
@@ -90,6 +94,9 @@ export interface Database {
           price_handoff_mode: Database['public']['Enums']['price_handoff_mode']
           mailbox_ids: string[]
           daily_target: number
+          discover_time: string | null
+          discover_timezone: string | null
+          next_discover_at: string
           created_at: string
           updated_at: string
         }
@@ -105,6 +112,9 @@ export interface Database {
           price_handoff_mode?: Database['public']['Enums']['price_handoff_mode']
           mailbox_ids?: string[]
           daily_target?: number
+          discover_time?: string | null
+          discover_timezone?: string | null
+          next_discover_at?: string
           created_at?: string
           updated_at?: string
         }

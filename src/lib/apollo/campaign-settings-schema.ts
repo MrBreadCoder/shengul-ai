@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { apolloPersonSeniorities, apolloContactEmailStatuses } from './types'
+import { timeOfDaySchema, timezoneSchema } from '@/lib/validation/schedule'
 
 // Shared between POST /api/campaigns (create) and PATCH /api/campaigns/[campaignId]
 // (edit) — every field a campaign's settings form submits, except clientId
@@ -18,6 +19,9 @@ export const campaignSettingsSchema = z.object({
   excludeKeywords: z.array(z.string()).default([]),
   personSeniorities: z.array(z.enum(apolloPersonSeniorities)).default([]),
   contactEmailStatuses: z.array(z.enum(apolloContactEmailStatuses)).default([]),
+  // null = inherit the owning client's timezone/default_discover_time.
+  discoverTime: timeOfDaySchema.nullable().default(null),
+  discoverTimezone: timezoneSchema.nullable().default(null),
 })
 
 export type CampaignSettingsInput = z.infer<typeof campaignSettingsSchema>

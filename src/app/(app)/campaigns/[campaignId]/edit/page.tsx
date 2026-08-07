@@ -44,6 +44,8 @@ export default async function EditCampaignPage({
         bookingLink={campaign.booking_link}
         dailyTarget={campaign.daily_target}
         icp={icp}
+        discoverTime={campaign.discover_time}
+        discoverTimezone={campaign.discover_timezone}
       />
     </div>
   )

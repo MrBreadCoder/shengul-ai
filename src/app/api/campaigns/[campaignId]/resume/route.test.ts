@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const requireUserMock = vi.fn()
 const getCampaignByIdMock = vi.fn()
 const updateCampaignStatusMock = vi.fn()
+const recomputeCampaignNextDiscoverAtMock = vi.fn()
 const logEventMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
@@ -10,6 +11,7 @@ vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/db/campaigns', () => ({
   getCampaignById: (...a: unknown[]) => getCampaignByIdMock(...a),
   updateCampaignStatus: (...a: unknown[]) => updateCampaignStatusMock(...a),
+  recomputeCampaignNextDiscoverAt: (...a: unknown[]) => recomputeCampaignNextDiscoverAtMock(...a),
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 
@@ -23,6 +25,7 @@ beforeEach(() => {
   requireUserMock.mockReset().mockResolvedValue({ appUser: { id: 'op1', role: 'operator' } })
   getCampaignByIdMock.mockReset()
   updateCampaignStatusMock.mockReset()
+  recomputeCampaignNextDiscoverAtMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
 })
 
@@ -47,14 +50,33 @@ describe('POST /api/campaigns/[campaignId]/resume', () => {
     expect(updateCampaignStatusMock).not.toHaveBeenCalled()
   })
 
-  it('should resume a paused campaign and log the event', async () => {
+  it('should resume a paused campaign, recompute its schedule, and log the event', async () => {
     getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch', status: 'paused' })
     updateCampaignStatusMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch', status: 'active' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({
+      id: 'camp1',
+      client_id: 'c1',
+      name: 'Acme launch',
+      status: 'active',
+      next_discover_at: '2026-06-16T06:00:00.000Z',
+    })
+
     const res = await POST(new Request('http://x', { method: 'POST' }), ctx('camp1'))
     const json = await res.json()
+
     expect(res.status).toBe(200)
-    expect(json).toEqual({ ok: true, campaign: { id: 'camp1', client_id: 'c1', name: 'Acme launch', status: 'active' } })
+    expect(json).toEqual({
+      ok: true,
+      campaign: {
+        id: 'camp1',
+        client_id: 'c1',
+        name: 'Acme launch',
+        status: 'active',
+        next_discover_at: '2026-06-16T06:00:00.000Z',
+      },
+    })
     expect(updateCampaignStatusMock).toHaveBeenCalledWith(expect.anything(), 'camp1', 'active')
+    expect(recomputeCampaignNextDiscoverAtMock).toHaveBeenCalledWith(expect.anything(), 'camp1')
     expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'campaign.resumed' }))
   })
 })

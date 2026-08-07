@@ -61,6 +61,8 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       excludeKeywords: splitCsv(formData.get('excludeKeywords')),
       personSeniorities: getAllStrings(formData, 'personSeniorities'),
       contactEmailStatuses: getAllStrings(formData, 'contactEmailStatuses'),
+      discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
+      discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
     }
 
     try {
@@ -147,6 +149,8 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           excludeKeywords: '',
           personSeniorities: [],
           contactEmailStatuses: ['verified'],
+          discoverTime: '',
+          discoverTimezone: '',
         }}
       />
 

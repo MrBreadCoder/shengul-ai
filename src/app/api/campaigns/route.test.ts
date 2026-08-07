@@ -27,7 +27,12 @@ beforeEach(() => {
   requireUserMock.mockReset()
   insertCampaignMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
-  getClientByIdMock.mockReset().mockResolvedValue({ id: validBody.clientId, reply_mode: 'human_approve' })
+  getClientByIdMock.mockReset().mockResolvedValue({
+    id: validBody.clientId,
+    reply_mode: 'human_approve',
+    timezone: 'UTC',
+    default_discover_time: '06:00',
+  })
 })
 
 describe('POST /api/campaigns', () => {
@@ -76,7 +81,12 @@ describe('POST /api/campaigns', () => {
 
   it('should use the client current reply_mode as the new campaign default', async () => {
     requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
-    getClientByIdMock.mockResolvedValue({ id: validBody.clientId, reply_mode: 'auto_send' })
+    getClientByIdMock.mockResolvedValue({
+      id: validBody.clientId,
+      reply_mode: 'auto_send',
+      timezone: 'UTC',
+      default_discover_time: '06:00',
+    })
     insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
 
     await POST(req(validBody))
@@ -139,5 +149,41 @@ describe('POST /api/campaigns', () => {
 
     expect(res.status).toBe(400)
     expect(insertCampaignMock).not.toHaveBeenCalled()
+  })
+
+  it('should compute next_discover_at from the client default when no override is given', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue({
+      id: validBody.clientId,
+      reply_mode: 'human_approve',
+      timezone: 'UTC',
+      default_discover_time: '06:00',
+    })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req(validBody))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ discover_time: null, discover_timezone: null, next_discover_at: expect.any(String) }),
+    )
+  })
+
+  it("should store the campaign's own discoverTime/discoverTimezone override", async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue({
+      id: validBody.clientId,
+      reply_mode: 'human_approve',
+      timezone: 'UTC',
+      default_discover_time: '06:00',
+    })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req({ ...validBody, discoverTime: '09:00', discoverTimezone: 'Europe/Istanbul' }))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ discover_time: '09:00', discover_timezone: 'Europe/Istanbul' }),
+    )
   })
 })

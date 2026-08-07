@@ -12,6 +12,7 @@ CURRENT YEAR İS 2026
 
 UPDATE THE `.claude/roadmap.md` EVERY TIME YOU MAKE PROGRESS
 dont branch use main
+WE DONT NEED LANGUAGE TRANSLATION IN OPERATOR ONLY PAGES, TRANSLATE ONLY IN CLIENT FACING PLACES
 
 ## REMINDER (recency anchor)
 - Write COMPLETE code. No placeholders. No truncation. No half-implementations.

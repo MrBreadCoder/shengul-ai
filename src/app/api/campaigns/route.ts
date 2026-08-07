@@ -6,6 +6,7 @@ import { insertCampaign } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
+import { computeNextRunAt } from '@/lib/scheduling/next-run'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -42,6 +43,9 @@ export async function POST(request: Request) {
     if (!client) {
       return NextResponse.json({ error: 'client_not_found' }, { status: 404 })
     }
+    const effectiveTime = body.discoverTime ?? client.default_discover_time
+    const effectiveTimezone = body.discoverTimezone ?? client.timezone
+    const nextDiscoverAt = computeNextRunAt(new Date(), effectiveTime, effectiveTimezone)
     const campaign = await insertCampaign(admin, {
       client_id: body.clientId,
       name: body.name,
@@ -50,6 +54,9 @@ export async function POST(request: Request) {
       daily_target: body.dailyTarget,
       reply_mode: client.reply_mode,
       icp,
+      discover_time: body.discoverTime,
+      discover_timezone: body.discoverTimezone,
+      next_discover_at: nextDiscoverAt.toISOString(),
     })
     try {
       await logEvent({

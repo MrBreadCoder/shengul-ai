@@ -17,6 +17,7 @@ import {
   updateClientReplyMode,
   updateClientFollowupDelays,
   updateClientDefaultLocale,
+  updateClientSchedule,
   resolveMailboxClientId,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
@@ -384,6 +385,32 @@ describe('updateClientFollowupDelays', () => {
     })
     await expect(
       updateClientFollowupDelays({ from: () => ({ update }) } as never, 'c1', [3, 7, 14]),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientSchedule', () => {
+  function mockSupabase(result: { data: unknown; error: unknown }) {
+    return {
+      from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve(result) }) }) }) }),
+    } as never
+  }
+
+  it('should return the updated client row', async () => {
+    const row = { id: 'c1', timezone: 'America/New_York', default_discover_time: '08:30' }
+    const result = await updateClientSchedule(mockSupabase({ data: row, error: null }), 'c1', {
+      timezone: 'America/New_York',
+      default_discover_time: '08:30',
+    })
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR on update failure', async () => {
+    await expect(
+      updateClientSchedule(mockSupabase({ data: null, error: { message: 'boom' } }), 'c1', {
+        timezone: 'UTC',
+        default_discover_time: '06:00',
+      }),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

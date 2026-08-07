@@ -28,6 +28,10 @@ const CONTACT_EMAIL_STATUS_KEY: Record<(typeof apolloContactEmailStatuses)[numbe
   unavailable: 'contactEmailStatus.unavailable',
 }
 
+const TIMEZONE_OPTIONS: readonly string[] = Intl.supportedValuesOf('timeZone')
+const NATIVE_SELECT_CLASSNAME =
+  'border-input bg-transparent dark:bg-input/30 h-9 w-full min-w-0 rounded-md border px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
+
 interface FieldProps {
   id: string
   label: string
@@ -60,6 +64,8 @@ export interface CampaignSettingsDefaults {
   excludeKeywords: string
   personSeniorities: readonly string[]
   contactEmailStatuses: readonly string[]
+  discoverTime: string
+  discoverTimezone: string
 }
 
 interface CampaignSettingsFieldsProps {
@@ -115,6 +121,40 @@ export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFields
             className="tnum"
             toolparamdescription={t('newCampaignForm.dailyTargetToolParamDescription')}
           />
+        </Field>
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field
+          id="discoverTime"
+          label={t('newCampaignForm.discoverTimeLabel')}
+          hint={t('newCampaignForm.discoverTimeHint')}
+        >
+          <input
+            id="discoverTime"
+            name="discoverTime"
+            type="time"
+            defaultValue={defaultValues.discoverTime}
+            className={NATIVE_SELECT_CLASSNAME}
+            toolparamdescription={t('newCampaignForm.discoverTimeToolParamDescription')}
+          />
+        </Field>
+
+        <Field id="discoverTimezone" label={t('newCampaignForm.discoverTimezoneLabel')}>
+          <select
+            id="discoverTimezone"
+            name="discoverTimezone"
+            defaultValue={defaultValues.discoverTimezone}
+            className={NATIVE_SELECT_CLASSNAME}
+            toolparamdescription={t('newCampaignForm.discoverTimezoneToolParamDescription')}
+          >
+            <option value="">{t('newCampaignForm.discoverTimezoneInheritOption')}</option>
+            {TIMEZONE_OPTIONS.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </select>
         </Field>
       </div>
 

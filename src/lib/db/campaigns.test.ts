@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   insertCampaign,
   getCampaignById,
-  listActiveCampaigns,
   listCampaignsForClient,
   getCampaignForCase,
   pauseActiveCampaignsForClient,
@@ -12,6 +11,10 @@ import {
   updateCampaignSettings,
   deleteCampaign,
   removeMailboxFromCampaigns,
+  listCampaignsDueForDiscovery,
+  updateCampaignNextDiscoverAt,
+  recomputeCampaignNextDiscoverAt,
+  recomputeClientCampaignSchedules,
 } from './campaigns'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -57,24 +60,6 @@ describe('getCampaignById', () => {
     await expect(
       getCampaignById(mockSupabase({ data: null, error: { message: 'boom' } }), 'camp1'),
     ).rejects.toBeInstanceOf(AppError)
-  })
-})
-
-describe('listActiveCampaigns', () => {
-  function mockSupabase(result: { data: unknown; error: unknown }) {
-    return {
-      from: () => ({ select: () => ({ eq: () => Promise.resolve(result) }) }),
-    } as never
-  }
-
-  it('should return the list of active campaigns', async () => {
-    const rows = [{ id: 'camp1', status: 'active' }]
-    const result = await listActiveCampaigns(mockSupabase({ data: rows, error: null }))
-    expect(result).toEqual(rows)
-  })
-
-  it('should throw DB_ERROR on query failure', async () => {
-    await expect(listActiveCampaigns(mockSupabase({ data: null, error: { message: 'boom' } }))).rejects.toBeInstanceOf(AppError)
   })
 })
 
@@ -214,6 +199,8 @@ describe('updateCampaignSettings', () => {
     booking_link: null,
     daily_target: 25,
     icp: {},
+    discover_time: null,
+    discover_timezone: null,
   }
 
   it('should return the updated campaign row', async () => {
@@ -226,6 +213,156 @@ describe('updateCampaignSettings', () => {
     await expect(
       updateCampaignSettings(mockSupabase({ data: null, error: { message: 'boom' } }), 'camp1', patch),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listCampaignsDueForDiscovery', () => {
+  function mockSupabase(result: { data: unknown; error: unknown }) {
+    return {
+      from: () => ({ select: () => ({ eq: () => ({ lte: () => Promise.resolve(result) }) }) }),
+    } as never
+  }
+
+  it('should return campaigns whose next_discover_at is due', async () => {
+    const rows = [{ id: 'camp1', status: 'active', next_discover_at: '2026-06-15T06:00:00Z' }]
+    const result = await listCampaignsDueForDiscovery(mockSupabase({ data: rows, error: null }), '2026-06-15T06:00:00Z')
+    expect(result).toEqual(rows)
+  })
+
+  it('should throw DB_ERROR on query failure', async () => {
+    await expect(
+      listCampaignsDueForDiscovery(mockSupabase({ data: null, error: { message: 'boom' } }), '2026-06-15T06:00:00Z'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateCampaignNextDiscoverAt', () => {
+  function mockSupabase(result: { data: unknown; error: unknown }) {
+    return {
+      from: () => ({ update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve(result) }) }) }) }),
+    } as never
+  }
+
+  it('should return the updated campaign row', async () => {
+    const row = { id: 'camp1', next_discover_at: '2026-06-16T06:00:00.000Z' }
+    const result = await updateCampaignNextDiscoverAt(
+      mockSupabase({ data: row, error: null }),
+      'camp1',
+      new Date('2026-06-16T06:00:00.000Z'),
+    )
+    expect(result).toEqual(row)
+  })
+
+  it('should throw DB_ERROR on update failure', async () => {
+    await expect(
+      updateCampaignNextDiscoverAt(mockSupabase({ data: null, error: { message: 'boom' } }), 'camp1', new Date()),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('recomputeCampaignNextDiscoverAt', () => {
+  function mockSupabase(campaign: unknown, client: unknown, updateResult: { data: unknown; error: unknown }) {
+    return {
+      from: (table: string) => {
+        if (table === 'campaigns') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: () => Promise.resolve({ data: campaign, error: null }) }),
+            }),
+            update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve(updateResult) }) }) }),
+          }
+        }
+        return {
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: client, error: null }) }) }),
+        }
+      },
+    } as never
+  }
+
+  it("should use the campaign's own override when set", async () => {
+    const campaign = { id: 'camp1', client_id: 'c1', discover_time: '08:00', discover_timezone: 'Europe/Istanbul' }
+    const client = { id: 'c1', timezone: 'UTC', default_discover_time: '06:00' }
+    const updatedRow = { id: 'camp1', next_discover_at: '2026-06-15T05:00:00.000Z' }
+    const supabase = mockSupabase(campaign, client, { data: updatedRow, error: null })
+
+    const result = await recomputeCampaignNextDiscoverAt(supabase, 'camp1', new Date('2026-06-15T00:00:00Z'))
+
+    expect(result).toEqual(updatedRow)
+  })
+
+  it("should fall back to the client's default when the campaign has no override", async () => {
+    const campaign = { id: 'camp1', client_id: 'c1', discover_time: null, discover_timezone: null }
+    const client = { id: 'c1', timezone: 'UTC', default_discover_time: '06:00' }
+    const updatedRow = { id: 'camp1', next_discover_at: '2026-06-15T06:00:00.000Z' }
+    const supabase = mockSupabase(campaign, client, { data: updatedRow, error: null })
+
+    const result = await recomputeCampaignNextDiscoverAt(supabase, 'camp1', new Date('2026-06-15T00:00:00Z'))
+
+    expect(result).toEqual(updatedRow)
+  })
+
+  it('should throw NOT_FOUND when the campaign does not exist', async () => {
+    const supabase = mockSupabase(null, null, { data: null, error: null })
+    await expect(recomputeCampaignNextDiscoverAt(supabase, 'missing')).rejects.toBeInstanceOf(AppError)
+  })
+
+  it('should throw DB_ERROR when the campaign references a missing client', async () => {
+    const campaign = { id: 'camp1', client_id: 'c1', discover_time: null, discover_timezone: null }
+    const supabase = mockSupabase(campaign, null, { data: null, error: null })
+    await expect(recomputeCampaignNextDiscoverAt(supabase, 'camp1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('recomputeClientCampaignSchedules', () => {
+  it('should recompute only active campaigns with no schedule override', async () => {
+    const campaigns = [
+      { id: 'camp1', client_id: 'c1', status: 'active', discover_time: null, discover_timezone: null },
+      { id: 'camp2', client_id: 'c1', status: 'active', discover_time: '09:00', discover_timezone: 'UTC' },
+      { id: 'camp3', client_id: 'c1', status: 'paused', discover_time: null, discover_timezone: null },
+    ]
+    const client = { id: 'c1', timezone: 'UTC', default_discover_time: '06:00' }
+    const recomputed: string[] = []
+    const supabase = {
+      from: (table: string) => {
+        if (table === 'campaigns') {
+          return {
+            select: () => ({
+              order: () => ({ eq: () => Promise.resolve({ data: campaigns, error: null }) }),
+              eq: () => ({ maybeSingle: () => Promise.resolve({ data: campaigns[0], error: null }) }),
+            }),
+            update: () => ({
+              eq: () => ({
+                select: () => ({
+                  single: () => {
+                    recomputed.push('called')
+                    return Promise.resolve({ data: { id: 'camp1' }, error: null })
+                  },
+                }),
+              }),
+            }),
+          }
+        }
+        return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: client, error: null }) }) }) }
+      },
+    } as never
+
+    await recomputeClientCampaignSchedules(supabase, 'c1')
+
+    expect(recomputed).toHaveLength(1)
+  })
+
+  it('should not throw when an individual recompute fails', async () => {
+    const campaigns = [{ id: 'camp1', client_id: 'c1', status: 'active', discover_time: null, discover_timezone: null }]
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          order: () => ({ eq: () => Promise.resolve({ data: campaigns, error: null }) }),
+          eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }),
+        }),
+      }),
+    } as never
+
+    await expect(recomputeClientCampaignSchedules(supabase, 'c1')).resolves.toBeUndefined()
   })
 })
 

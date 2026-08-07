@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
+import { getClientById } from '@/lib/db/clients'
+import { computeNextRunAt } from '@/lib/scheduling/next-run'
 
 export type CampaignRow = Database['public']['Tables']['campaigns']['Row']
 export type CampaignInsert = Database['public']['Tables']['campaigns']['Insert']
@@ -23,14 +25,6 @@ export async function getCampaignById(
   const { data, error } = await supabase.from('campaigns').select('*').eq('id', id).maybeSingle()
   if (error) throw new AppError('DB_ERROR', 'Failed to load campaign', { id, cause: error.message })
   return data
-}
-
-export async function listActiveCampaigns(
-  supabase: SupabaseClient<Database>,
-): Promise<CampaignRow[]> {
-  const { data, error } = await supabase.from('campaigns').select('*').eq('status', 'active')
-  if (error) throw new AppError('DB_ERROR', 'Failed to list active campaigns', { cause: error.message })
-  return data ?? []
 }
 
 export async function listCampaignsForClient(
@@ -156,6 +150,8 @@ export interface CampaignSettingsPatch {
   booking_link: string | null
   daily_target: number
   icp: Json
+  discover_time: string | null
+  discover_timezone: string | null
 }
 
 // Full-replace update of a campaign's editable settings (name, value prop,
@@ -180,4 +176,91 @@ export async function updateCampaignSettings(
 export async function deleteCampaign(supabase: SupabaseClient<Database>, id: string): Promise<void> {
   const { error } = await supabase.from('campaigns').delete().eq('id', id)
   if (error) throw new AppError('DB_ERROR', 'Failed to delete campaign', { id, cause: error.message })
+}
+
+// Fired every 5 minutes by the discover-fanout scheduler tick — replaces the
+// old "every active campaign, once a day" behavior with "only the campaigns
+// whose precomputed next_discover_at instant has arrived."
+export async function listCampaignsDueForDiscovery(
+  supabase: SupabaseClient<Database>,
+  nowIso: string,
+): Promise<CampaignRow[]> {
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select('*')
+    .eq('status', 'active')
+    .lte('next_discover_at', nowIso)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list campaigns due for discovery', { cause: error.message })
+  }
+  return data ?? []
+}
+
+export async function updateCampaignNextDiscoverAt(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  nextDiscoverAt: Date,
+): Promise<CampaignRow> {
+  const { data, error } = await supabase
+    .from('campaigns')
+    .update({ next_discover_at: nextDiscoverAt.toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update campaign next_discover_at', { id, cause: error?.message })
+  }
+  return data
+}
+
+// Resolves this campaign's effective schedule (its own override, or the
+// owning client's default) and writes the next occurrence. Called after a
+// successful discovery publish, after a schedule-affecting edit, and after
+// a resume — always with a fresh `now` so a long-paused campaign or a
+// campaign edited mid-day doesn't inherit a stale computation.
+export async function recomputeCampaignNextDiscoverAt(
+  supabase: SupabaseClient<Database>,
+  campaignId: string,
+  now: Date = new Date(),
+): Promise<CampaignRow> {
+  const campaign = await getCampaignById(supabase, campaignId)
+  if (!campaign) {
+    throw new AppError('NOT_FOUND', 'Cannot recompute schedule for a campaign that does not exist', { campaignId })
+  }
+  const client = await getClientById(supabase, campaign.client_id)
+  if (!client) {
+    throw new AppError('DB_ERROR', 'Campaign references a client that no longer exists', {
+      campaignId,
+      clientId: campaign.client_id,
+    })
+  }
+  const time = campaign.discover_time ?? client.default_discover_time
+  const timezone = campaign.discover_timezone ?? client.timezone
+  return updateCampaignNextDiscoverAt(supabase, campaignId, computeNextRunAt(now, time, timezone))
+}
+
+// Recomputes next_discover_at for every one of this client's active
+// campaigns that has no schedule override of its own — called after the
+// client's timezone or default discovery time changes. A campaign with its
+// own discover_time/discover_timezone override is deliberately left alone;
+// only campaigns actually inheriting the client default need to move.
+// Best-effort per campaign, matching removeMailboxFromCampaigns — one
+// campaign's recompute failing must not block the others or fail the whole
+// settings save.
+export async function recomputeClientCampaignSchedules(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+): Promise<void> {
+  const campaigns = await listCampaignsForClient(supabase, clientId)
+  const inheriting = campaigns.filter(
+    (campaign) =>
+      campaign.status === 'active' && campaign.discover_time === null && campaign.discover_timezone === null,
+  )
+  for (const campaign of inheriting) {
+    try {
+      await recomputeCampaignNextDiscoverAt(supabase, campaign.id)
+    } catch {
+      // Best-effort — the next scheduler tick or manual edit retries it.
+    }
+  }
 }

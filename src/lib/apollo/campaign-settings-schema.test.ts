@@ -39,4 +39,26 @@ describe('campaignSettingsSchema', () => {
     const result = campaignSettingsSchema.safeParse({ ...valid, personSeniorities: ['ceo'] })
     expect(result.success).toBe(false)
   })
+
+  it('should default discoverTime and discoverTimezone to null when omitted', () => {
+    const result = campaignSettingsSchema.parse(valid)
+    expect(result.discoverTime).toBeNull()
+    expect(result.discoverTimezone).toBeNull()
+  })
+
+  it('should accept a valid discoverTime and discoverTimezone', () => {
+    const result = campaignSettingsSchema.parse({ ...valid, discoverTime: '08:30', discoverTimezone: 'Europe/Istanbul' })
+    expect(result.discoverTime).toBe('08:30')
+    expect(result.discoverTimezone).toBe('Europe/Istanbul')
+  })
+
+  it('should reject a malformed discoverTime', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, discoverTime: '8:30' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an invalid discoverTimezone', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, discoverTimezone: 'Not/AZone' })
+    expect(result.success).toBe(false)
+  })
 })

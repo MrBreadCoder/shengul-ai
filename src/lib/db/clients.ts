@@ -282,6 +282,27 @@ export async function updateClientFollowupDelays(
   return data
 }
 
+export interface ClientSchedulePatch {
+  timezone: string
+  default_discover_time: string
+}
+
+// The client-level default discovery schedule. Campaigns that don't set
+// their own discover_time/discover_timezone override inherit this — see
+// recomputeClientCampaignSchedules in lib/db/campaigns.ts, called by the
+// caller of this function right after it succeeds.
+export async function updateClientSchedule(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  patch: ClientSchedulePatch,
+): Promise<ClientRow> {
+  const { data, error } = await supabase.from('clients').update(patch).eq('id', id).select('*').single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client schedule', { id, cause: error?.message })
+  }
+  return data
+}
+
 export async function updateClientStatus(
   supabase: SupabaseClient<Database>,
   id: string,

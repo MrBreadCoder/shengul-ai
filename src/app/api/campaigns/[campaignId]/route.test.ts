@@ -4,6 +4,7 @@ const requireUserMock = vi.fn()
 const getCampaignByIdMock = vi.fn()
 const deleteCampaignMock = vi.fn()
 const updateCampaignSettingsMock = vi.fn()
+const recomputeCampaignNextDiscoverAtMock = vi.fn()
 const logEventMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
@@ -12,6 +13,7 @@ vi.mock('@/lib/db/campaigns', () => ({
   getCampaignById: (...a: unknown[]) => getCampaignByIdMock(...a),
   deleteCampaign: (...a: unknown[]) => deleteCampaignMock(...a),
   updateCampaignSettings: (...a: unknown[]) => updateCampaignSettingsMock(...a),
+  recomputeCampaignNextDiscoverAt: (...a: unknown[]) => recomputeCampaignNextDiscoverAtMock(...a),
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 
@@ -41,6 +43,8 @@ function validPatchBody(overrides: Record<string, unknown> = {}) {
     excludeKeywords: [],
     personSeniorities: [],
     contactEmailStatuses: [],
+    discoverTime: null,
+    discoverTimezone: null,
     ...overrides,
   }
 }
@@ -50,6 +54,7 @@ beforeEach(() => {
   getCampaignByIdMock.mockReset()
   deleteCampaignMock.mockReset()
   updateCampaignSettingsMock.mockReset()
+  recomputeCampaignNextDiscoverAtMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
 })
 
@@ -109,15 +114,45 @@ describe('PATCH /api/campaigns/[campaignId]', () => {
     getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch' })
     const updated = { id: 'camp1', client_id: 'c1', name: 'Updated name' }
     updateCampaignSettingsMock.mockResolvedValue(updated)
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({ ...updated, next_discover_at: '2026-06-16T06:00:00.000Z' })
     const res = await PATCH(patchReq(validPatchBody()), ctx('camp1'))
     const json = await res.json()
     expect(res.status).toBe(200)
-    expect(json).toEqual({ ok: true, campaign: updated })
+    expect(json).toEqual({ ok: true, campaign: { ...updated, next_discover_at: '2026-06-16T06:00:00.000Z' } })
     expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
       expect.anything(),
       'camp1',
       expect.objectContaining({ name: 'Updated name', daily_target: 25 }),
     )
+    expect(recomputeCampaignNextDiscoverAtMock).toHaveBeenCalledWith(expect.anything(), 'camp1')
     expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'campaign.updated' }))
+  })
+
+  it('should recompute next_discover_at after a successful update', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Old name' })
+    updateCampaignSettingsMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({
+      id: 'camp1',
+      name: 'Updated name',
+      next_discover_at: '2026-06-16T09:00:00.000Z',
+    })
+
+    const res = await PATCH(
+      patchReq(validPatchBody({ discoverTime: '09:00', discoverTimezone: 'Europe/Istanbul' })),
+      ctx('camp1'),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'camp1',
+      expect.objectContaining({ discover_time: '09:00', discover_timezone: 'Europe/Istanbul' }),
+    )
+    expect(recomputeCampaignNextDiscoverAtMock).toHaveBeenCalledWith(expect.anything(), 'camp1')
+    expect(json).toEqual({
+      ok: true,
+      campaign: { id: 'camp1', name: 'Updated name', next_discover_at: '2026-06-16T09:00:00.000Z' },
+    })
   })
 })

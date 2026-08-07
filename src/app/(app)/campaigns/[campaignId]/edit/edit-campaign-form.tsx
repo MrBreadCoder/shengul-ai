@@ -21,6 +21,8 @@ interface EditCampaignFormProps {
   bookingLink: string | null
   dailyTarget: number
   icp: ApolloIcpFilters
+  discoverTime: string | null
+  discoverTimezone: string | null
 }
 
 export function EditCampaignForm({
@@ -31,6 +33,8 @@ export function EditCampaignForm({
   bookingLink,
   dailyTarget,
   icp,
+  discoverTime,
+  discoverTimezone,
 }: EditCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
   const router = useRouter()
@@ -56,6 +60,8 @@ export function EditCampaignForm({
       excludeKeywords: splitCsv(formData.get('excludeKeywords')),
       personSeniorities: getAllStrings(formData, 'personSeniorities'),
       contactEmailStatuses: getAllStrings(formData, 'contactEmailStatuses'),
+      discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
+      discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
     }
 
     try {
@@ -113,6 +119,8 @@ export function EditCampaignForm({
           excludeKeywords: icp.excludeKeywords.join(', '),
           personSeniorities: icp.personSeniorities,
           contactEmailStatuses: icp.contactEmailStatuses,
+          discoverTime: discoverTime ?? '',
+          discoverTimezone: discoverTimezone ?? '',
         }}
       />
 

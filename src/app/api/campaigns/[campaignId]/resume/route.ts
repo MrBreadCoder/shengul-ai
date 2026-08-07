@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCampaignById, updateCampaignStatus } from '@/lib/db/campaigns'
+import { getCampaignById, updateCampaignStatus, recomputeCampaignNextDiscoverAt } from '@/lib/db/campaigns'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 
@@ -24,7 +24,11 @@ export async function POST(_request: Request, context: { params: Promise<{ campa
   }
 
   try {
-    const updated = await updateCampaignStatus(admin, campaignId, 'active')
+    await updateCampaignStatus(admin, campaignId, 'active')
+    // Recomputed from "now" rather than the status update's return value —
+    // a campaign paused for days must not fire on the very next scheduler
+    // tick from a next_discover_at left over from before it was paused.
+    const updated = await recomputeCampaignNextDiscoverAt(admin, campaignId)
     try {
       await logEvent({
         clientId: campaign.client_id,

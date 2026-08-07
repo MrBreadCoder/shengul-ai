@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCampaignById, deleteCampaign, updateCampaignSettings } from '@/lib/db/campaigns'
+import { getCampaignById, deleteCampaign, updateCampaignSettings, recomputeCampaignNextDiscoverAt } from '@/lib/db/campaigns'
 import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
@@ -89,25 +89,32 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       contactEmailStatuses: body.contactEmailStatuses,
     })
 
-    const updated = await updateCampaignSettings(admin, campaignId, {
+    await updateCampaignSettings(admin, campaignId, {
       name: body.name,
       value_prop: body.valueProp,
       booking_link: body.bookingLink,
       daily_target: body.dailyTarget,
       icp,
+      discover_time: body.discoverTime,
+      discover_timezone: body.discoverTimezone,
     })
+    // Recompute unconditionally rather than diffing old vs. new — cheap,
+    // and correctly handles every case: an override changed, an override
+    // was cleared back to null (reverts to inheriting the client's current
+    // default), or neither changed (recomputes to the same instant).
+    const rescheduled = await recomputeCampaignNextDiscoverAt(admin, campaignId)
 
     try {
       await logEvent({
         clientId: campaign.client_id,
         actor: `human:${appUser.id}`,
         type: 'campaign.updated',
-        payload: { campaignId, name: updated.name },
+        payload: { campaignId, name: rescheduled.name },
       })
     } catch {
       // Audit logging is best-effort — the update already succeeded.
     }
-    return NextResponse.json({ ok: true, campaign: updated })
+    return NextResponse.json({ ok: true, campaign: rescheduled })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })

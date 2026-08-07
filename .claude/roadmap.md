@@ -2980,3 +2980,220 @@ implemented inline, all 8 tasks, TDD per task. Pushed to `master` at
   to all 8 existing campaigns immediately.
 
 Full suite green (2033/2033), typecheck/lint clean before pushing.
+
+---
+
+## 2026-08-07 — INCIDENT: all QStash-driven pipeline crons silently stopped since 08-04
+
+Operator reported campaigns "active" but zero activity at 06:00 UTC (the
+discover-fanout cron's own scheduled time). Root-caused via systematic
+debugging (evidence, not guessing):
+
+- Queried `events` directly (Supabase REST, service role): the last
+  `pipeline.*` event of ANY kind (`discover_fanout`, `research_fanout`,
+  `write_fanout`, `stuck_sweep`) is `pipeline.stuck_sweep.completed` at
+  **2026-08-04T10:53:00Z**. Nothing since — not even `stuck_sweep`
+  (`*/15 * * * *`) or `inbound/poll-fanout` (`*/5 * * * *`), so this isn't
+  one broken pipeline stage, it's every QStash cadence stopping at once.
+- Reproduced directly: called `client.schedules.list()` with the exact
+  client construction `src/lib/qstash/client.ts` uses (same `QSTASH_TOKEN`)
+  → fails with `user (ed72019a-...) not found in this region
+  (eu-central-1)`. Same error via raw REST to
+  `https://qstash.upstash.io/v2/schedules`.
+- Confirmed via Upstash docs
+  ([multi-region](https://upstash.com/docs/qstash/howto/multi-region)):
+  QStash now runs two fully independent regions (US/EU) with separate
+  tokens/resources. Our account's schedules/token are apparently stranded
+  in a region the default endpoint no longer routes to — almost certainly
+  an Upstash-side regional split that landed right around 08-04, matching
+  the outage start to the minute-level granularity `stuck_sweep` gives us.
+- **Not a code bug** — nothing in this repo caused it, and nothing here
+  can fix it. Operator action needed: open the Upstash Console → QStash
+  tab, find which region the existing schedules/messages actually live in,
+  and either point `QSTASH_TOKEN`/`QSTASH_CURRENT_SIGNING_KEY`/
+  `QSTASH_NEXT_SIGNING_KEY` (local `.env.local` + prod/Vercel env) at that
+  region's token, or recreate the 8 `scripts/schedule-*-cron.ts` schedules
+  fresh in whichever region is now canonical. Once `QSTASH_TOKEN` is fixed,
+  re-run all 8 `scripts/schedule-*-cron.ts` scripts to be safe (schedule
+  creation is idempotent-ish per script but doesn't dedupe existing
+  schedule IDs) and verify with `pipeline.discover_fanout.completed`
+  appearing in `events` after the next 06:00 UTC run.
+- No code changes made this session; diagnostic-only (temp script created
+  and deleted, no other files touched besides this roadmap entry).
+
+**Resolution (same day, continued):** the region theory above was a red
+herring — operator confirmed Vercel prod's `QSTASH_TOKEN` +
+`QSTASH_CURRENT_SIGNING_KEY`/`QSTASH_NEXT_SIGNING_KEY` are exactly what's
+in `.env.local`. Proved the credentials/region/signature path is fully
+healthy right now by publishing one live probe message directly to
+`https://www.shengulai.com/api/cron/hello` with the pinned `us-east-1`
+client — QStash delivered it, the route verified the signature, and
+`cron.hello` landed in `events` 2.4s later. So the account was never
+broken; **the 9 recurring schedules themselves were simply gone** (not
+paused, not erroring — absent from `schedules.list()` entirely, cause
+unknown — possibly deleted during whatever `.env.local` edit happened
+around 08-03 20:55 local, but unconfirmed and not worth further
+archaeology once the fix was in hand).
+
+Fix: recreated all 9 schedules directly against `https://www.shengulai.com`
+(NOT via `env.APP_URL`, which is `http://localhost:3000` in `.env.local` —
+running `scripts/schedule-*-cron.ts` as-is locally would have silently
+registered schedules pointing at localhost). Confirmed via operator
+sign-off first, since `discover-fanout`/`write-fanout` resuming means real
+Apollo/Emailable spend and real outbound sends resume immediately on
+schedule. All 9 verified live via `schedules.list()` afterward — unpaused,
+correct cron, sane `nextScheduleTime` for each:
+- `discover-fanout` `0 6 * * *` → next 2026-08-08T06:00Z (today's window
+  had already passed)
+- `research-fanout` `0 7 * * *` → next 2026-08-07T07:00Z
+- `write-fanout` `0 8 * * *` → next 2026-08-07T08:00Z
+- `inbound-poll-fanout` `*/5 * * * *`, `stuck-sweep` `*/15 * * * *`,
+  `mailbox-health`/`mailreach-sync` `0 */6 * * *`, `mailbox-reset`
+  `0 0 * * *`, `log-retention` `20 3 * * *` — all next-fire times sane.
+
+Also shipped a real (kept) code hardening from the investigation:
+`src/lib/qstash/client.ts` now pins `baseUrl` to
+`https://qstash-us-east-1.upstash.io` explicitly (new optional `QSTASH_URL`
+env var in `src/lib/env.ts`, defaults to us-east-1) instead of the
+ambiguous default `https://qstash.upstash.io` endpoint — this app runs on
+AWS us-east-1 per operator confirmation, and QStash's regions are fully
+independent with no shared state, so relying on the ambiguous default is a
+real footgun even though it turned out not to be this incident's cause.
+28/28 qstash+env tests still green.
+
+Operator follow-up: watch for `pipeline.stuck_sweep.completed` /
+`pipeline.discover_fanout.completed` events to keep landing in `events`
+going forward as a canary that this doesn't silently regress again.
+
+## 2026-08-07 — Per-client/per-campaign discovery scheduling (Tasks 1-7 of 12)
+
+Implemented Tasks 1-7 of
+`docs/superpowers/plans/2026-08-07-campaign-scheduling.md` inline (no
+subagents, no commits — left for the user to review/commit). Tasks 8-12
+(edit-route recompute wiring, resume-route recompute, discover-fanout
+scheduler tick rewrite, settings UI, campaign form UI, i18n) are **not**
+done yet.
+
+Shipped:
+- `supabase/migrations/0032_campaign_scheduling.sql` — `clients.timezone` /
+  `clients.default_discover_time`, `campaigns.discover_time` /
+  `discover_timezone` / `next_discover_at`, backfill, partial index.
+  Mirrored by hand into `src/types/database.ts` (no live Postgres to
+  `gen types` from).
+- `src/lib/validation/schedule.ts` — `timeOfDaySchema`, `timezoneSchema`,
+  `isValidTimezone`.
+- `src/lib/scheduling/next-run.ts` — `computeNextRunAt`, DST-aware, pure,
+  Intl-based. **Fixed a real bug in the plan doc's own reference
+  implementation**: the two-pass UTC-offset correction re-targeted the
+  previous pass's candidate instead of holding the original desired wall
+  clock fixed, which diverged (not converged) for any non-zero, non-DST
+  offset (proved it with the Asia/Tokyo UTC+9 test — plan's code was off by
+  a full day). Fixed by keeping `desiredMs` constant across both passes.
+  Also fixed the plan's Tokyo test fixture, which coincided exactly with
+  the DST-boundary "equal-instant rolls to tomorrow" case tested right next
+  to it — self-contradictory as written; shifted `from` by 1h so it
+  actually isolates the offset-conversion behavior it claims to test.
+- `src/lib/db/clients.ts` — `updateClientSchedule`.
+- `src/lib/db/campaigns.ts` — `listCampaignsDueForDiscovery`,
+  `updateCampaignNextDiscoverAt`, `recomputeCampaignNextDiscoverAt`,
+  `recomputeClientCampaignSchedules`. **Deviation from the plan**: kept
+  `listActiveCampaigns` instead of deleting it — its only caller
+  (`discover-fanout`) is rewritten in Task 10, which is out of scope here;
+  deleting it now would have broken that still-live route.
+- `src/lib/apollo/campaign-settings-schema.ts` — `discoverTime` /
+  `discoverTimezone`, both nullable, default `null` (inherit).
+- `src/app/api/campaigns/route.ts` (create) — computes and stores
+  `next_discover_at` from the effective (override-or-client-default)
+  time/timezone at creation time.
+
+Minimal compile-safe touch outside the 1-7 scope: `CampaignSettingsPatch`
+gaining two required fields broke `src/app/api/campaigns/[campaignId]/route.ts`
+(the edit route, Task 8) at the type level. Rather than leave the build
+red, passed `body.discoverTime`/`body.discoverTimezone` through into that
+route's existing `updateCampaignSettings` call — the columns now save
+correctly on edit, but `next_discover_at` is **not** recomputed there yet
+(no call to `recomputeCampaignNextDiscoverAt`). That wiring, plus the
+resume-route recompute and the scheduler-tick rewrite, are the first things
+Task 8-10 need to do next.
+
+Verified: `pnpm exec tsc --noEmit` clean, `pnpm exec eslint` clean on all
+touched files, full suite `pnpm exec vitest run` — 196 files / 2069 tests
+green.
+
+Not done (Tasks 8-12): edit-route recompute-on-save, resume-route
+recompute, `discover-fanout` scheduler tick + cron cadence changes for all
+three pipeline stages, `/settings` schedule section UI, campaign
+create/edit form fields, i18n keys. See the plan doc for the exact
+remaining steps.
+
+## 2026-08-07 — Per-client/per-campaign discovery scheduling (Tasks 8-14, feature complete)
+
+Finished the rest of `docs/superpowers/plans/2026-08-07-campaign-scheduling.md`
+(spec: `docs/superpowers/specs/2026-08-07-campaign-scheduling-design.md`),
+inline, no subagents, no commits — same as the Tasks 1-7 pass above. The
+feature is now fully implemented end to end; nothing left uncommitted from
+the plan.
+
+Shipped:
+- **Task 8** — `PATCH /api/campaigns/[campaignId]` now recomputes
+  `next_discover_at` unconditionally after every save
+  (`recomputeCampaignNextDiscoverAt`), replacing the Tasks-1-7 stopgap that
+  only stored the override columns without rescheduling. Handles an
+  override changing, an override clearing back to `null` (reverts to the
+  client's current default), and a no-op save (recomputes to the same
+  instant) uniformly.
+- **Task 9** — `POST /api/campaigns/[campaignId]/resume` recomputes from
+  "now" after resuming, so a campaign paused for days doesn't fire on the
+  very next scheduler tick from a stale pre-pause schedule.
+- **Task 10** — `discover-fanout` rewritten from "fire every active
+  campaign" to "fire every campaign whose `next_discover_at` is due"
+  (`listCampaignsDueForDiscovery`), publish-then-advance per campaign
+  (`recomputeCampaignNextDiscoverAt`), with three independently isolated
+  failure modes in the response: `firedCampaignIds`, `failedCampaignIds`
+  (publish failed — stays due, retried next tick), `staleScheduleCampaignIds`
+  (published fine, recompute failed — NOT retried as a duplicate discover,
+  caught by the next edit/settings-save instead). New test file (route had
+  none before), 5 tests. Also deleted `listActiveCampaigns` from
+  `lib/db/campaigns.ts` now that its only caller is gone — this was
+  deferred from the Tasks-1-7 pass specifically because deleting it then
+  would have broken this route before it was rewritten.
+- **Task 11** — `scripts/schedule-discover-cron.ts` /
+  `schedule-research-cron.ts` / `schedule-write-cron.ts` default cron
+  changed `'0 6/7/8 * * *'` → `'*/5 * * * *'` for all three pipeline
+  stages, comments updated to explain the new due-campaign /
+  system-wide-poll semantics.
+- **Task 12** — `/settings` client-facing schedule section:
+  `schedule-actions.ts` (`updateSchedule` Server Action — auth-gates to
+  `role === 'client'`, validates with `timezoneSchema`/`timeOfDaySchema`,
+  calls `updateClientSchedule` then `recomputeClientCampaignSchedules`,
+  logs `client.schedule_changed`, revalidates `/settings`) +
+  `schedule-section.tsx` (timezone `<select>` from
+  `Intl.supportedValuesOf('timeZone')`, `<input type="time">`, dirty-state
+  save button matching `FollowupCadenceSection`'s exact pattern), wired
+  into `page.tsx` right after the follow-up cadence section.
+- **Task 13** — per-campaign run-time/timezone override fieldset in
+  `campaign-settings-fields.tsx` (shared by create + edit forms), wired
+  into both `new-campaign-form.tsx` and `edit-campaign-form.tsx`'s submit
+  bodies (empty string → `null`, i.e. "inherit" — not "pin today's
+  resolved value"), edit page loader passes `campaign.discover_time`/
+  `discover_timezone` through as the new required props.
+- i18n: `settings.schedule*` keys and `campaigns.newCampaignForm.discover*`
+  keys added to both `en.json` and `tr.json` — no untranslated English left
+  in `tr.json`.
+
+Verified (Task 14): `pnpm exec tsc --noEmit` clean, `pnpm exec eslint .`
+clean (only 7 pre-existing unrelated warnings in unrelated test files, 0
+errors), full suite `pnpm exec vitest run` — **198 files / 2077 tests
+green**.
+
+Plan doc checkboxes for every non-commit step across all 14 tasks are now
+checked. Nothing was committed by this pass either — still sitting in the
+working tree for review/commit.
+
+Operator follow-up before this is live in production: Rollout step 3 from
+the spec — delete + recreate the `discover-fanout`/`research-fanout`/
+`write-fanout` QStash schedules at their new `*/5 * * * *` cadence via the
+updated `scripts/schedule-*-cron.ts` (these scripts only register once per
+environment; the old `0 6/7/8 * * *` schedules registered previously do
+not update themselves). Until that's done, the new code is live but the
+old daily cadence keeps firing.
