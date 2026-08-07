@@ -3197,3 +3197,65 @@ updated `scripts/schedule-*-cron.ts` (these scripts only register once per
 environment; the old `0 6/7/8 * * *` schedules registered previously do
 not update themselves). Until that's done, the new code is live but the
 old daily cadence keeps firing.
+
+## 2026-08-07 — Campaign scheduling rollout + three production bugs found chasing "no activity"
+
+User reported a campaign's scheduled discovery time passed with no
+activity. Root-caused and fixed four issues in sequence, each surfaced by
+fixing the one before it:
+
+1. **QStash rollout step 3 (above) was never done.** Deleted the stale
+   `discover-fanout` (`0 6 * * *`)/`research-fanout` (`0 7 * * *`)/
+   `write-fanout` (`0 8 * * *`) schedules and re-registered all three at
+   `*/5 * * * *` via `scripts/schedule-*-cron.ts`. Verified live: Okullar's
+   10:45 Europe/Istanbul discovery fired within its first 5-minute tick.
+2. **Apollo employee-count filter crash (`HTTP 422`).** Okullar's
+   `icp.employeeRangeMax` was `10,000,000,000` — Apollo's backend is a
+   signed 32-bit integer field, reproduced live: `"Value [...] is out of
+   range for an integer"`. Fixed in `src/lib/apollo/build-search-params.ts`
+   (open-ended `"min,"` / `",max"` ranges — a missing bound was silently
+   dropping the whole filter instead of the "no upper bound" the UI copy
+   already promised, confirmed live: `40,` → 12,254 matches, `,1000` →
+   14,110 matches) and `src/lib/apollo/types.ts` /
+   `campaign-settings-schema.ts` (`.max(2_147_483_647)` guard, `Apollo
+   MAX_EMPLOYEE_COUNT` exported const). Data-fixed all 8 active campaigns'
+   `employeeRangeMax` from round-number placeholders (1M/100M/1B/10B) to
+   `null`. Commit `cf56f6a`. Tests: +5, 198/2082 green pre-existing suite.
+3. **`leads.email_verification` column missing in production** (migration
+   `0011_lead_email_verification.sql` was committed but never applied —
+   same failure mode already documented once before in
+   `0026_crm_tables_data_api_grants.sql`'s own comment, now confirmed to
+   have recurred). Audited all 32 migrations' `ADD COLUMN`/`CREATE TABLE`/
+   `ALTER TYPE ... ADD VALUE` statements against live production via
+   PostgREST; found two real gaps: `leads.email_verification` (0011, the
+   one breaking every discovery run) and `cases.collision_notified_at`
+   (0016, unrelated feature, never triggered before now). Wrote
+   `supabase/migrations/0033_reapply_missing_0011_0016.sql` (idempotent,
+   `add column if not exists` / `add value if not exists`) — this agent has
+   no DB credentials in this environment (no `DATABASE_URL`/psql/Supabase
+   CLI, REST-only), so the user applied it manually via the Supabase SQL
+   Editor. Verified: Okullar's next tick completed successfully — 1 lead
+   found, 1 verified.
+4. **Quota shortfall: `daily_target: 2` produced only 1 lead.** Root cause
+   was by design, not a defect: `runDiscoveryForCampaign` splits quota into
+   pass 1 (fresh companies, half the quota) and pass 2 (a company-scoped
+   search restricted to exactly the companies pass 1 verified, hunting a
+   *second* contact there) — when pass 2's target company has no second
+   matching person, the run stopped short instead of falling back to more
+   fresh companies. User confirmed via AskUserQuestion this should fall
+   back. Added a third "top-up" pass in `src/lib/pipeline/discover.ts`
+   (`runDiscoveryForCampaign`): reuses `runFirstPass` verbatim for whatever
+   quota pass 2 left unfilled, deduped against both prior passes'
+   companies (`verifiedCompanyCounts`/`domainBackedCompanyKeys`, already
+   threaded through both passes) and apolloIds. New `DiscoverySummary.
+   topUpCandidates` field. 3 new regression tests (fallback fires, fallback
+   skipped when pass 2 already fills quota, top-up dedups against
+   already-claimed companies) + 6 existing tests updated for the extra
+   `searchPeople` call now expected when quota remains unfilled. Full
+   suite: 198 files / 2085 tests green, `tsc`/`eslint` clean. Not yet
+   committed.
+
+Everything in this session was diagnosed by reproducing directly against
+live production (Apollo, QStash, Supabase REST) rather than guessing from
+code alone — every root cause above was confirmed with a real request/
+response before being called the cause.

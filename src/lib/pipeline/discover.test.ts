@@ -78,6 +78,13 @@ beforeEach(() => {
 describe('runDiscoveryForCampaign', () => {
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
     mockInsertLeads.mockReset()
@@ -166,7 +173,9 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
+    // pass 1 (2 calls) + pass 2 (1 call, no second contact) + top-up falls
+    // back to a fresh-company search for the leftover quota (1 more call)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(4)
     expect(summary.firstPassCandidates).toBe(1)
     expect(summary.secondPassCandidates).toBe(0)
     expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p1' })])
@@ -187,7 +196,9 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    // pass 1 (1 call) + pass 2 (1 call, fills its whole quota with p5) +
+    // top-up for whatever quota pass 2 still left unfilled (1 more call)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
     const secondCallParams = mockSearchPeople.mock.calls[1]![0] as Record<string, string | string[]>
     expect(secondCallParams['q_organization_domains_list[]']).toEqual(['acme.com'])
     expect(summary.firstPassCandidates).toBe(0)
@@ -202,7 +213,9 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(1)
+    // pass 1 (1 call, no targetDomains so pass 2 never calls Apollo at all)
+    // + top-up falls back to a fresh-company search for the full quota
+    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
     expect(summary.secondPassCandidates).toBe(0)
   })
 
@@ -216,7 +229,9 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
+    // pass 1 (1 call) + pass 2 (2 calls: off-target candidate, then empty) +
+    // top-up falls back to a fresh-company search for the full quota
+    expect(mockSearchPeople).toHaveBeenCalledTimes(4)
     expect(summary.secondPassCandidates).toBe(0)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
   })
@@ -230,7 +245,9 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    // pass 1 (2 calls: known candidate skipped, then empty page 2) + top-up
+    // falls back to a fresh-company search for the full quota (1 more call)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
     expect(mockBulkMatchPeople).not.toHaveBeenCalled()
     expect(summary.newCandidates).toBe(0)
   })
@@ -255,7 +272,10 @@ describe('runDiscoveryForCampaign', () => {
 
     const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 0, icp })
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    // pass 1 (1 call, fills its whole quota) + pass 2 (1 call, no second
+    // contacts found) + top-up falls back to a fresh-company search for
+    // whatever quota pass 2 left unfilled (1 more call)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
     expect(summary.firstPassCandidates).toBe(25)
     expect(summary.newCandidates).toBe(25)
   })
@@ -459,11 +479,106 @@ describe('runDiscoveryForCampaign', () => {
     expect(summary.secondPassCandidates).toBe(1)
     expect(mockBulkMatchPeople).toHaveBeenCalledWith([expect.objectContaining({ id: 'p2' })])
   })
+
+  it('should fall back to a fresh-company search when pass 2 finds no second contact, to still fill daily_target', async () => {
+    // dailyTarget 2 -> firstPassQuota = 1. Pass 1 finds a.com's only match;
+    // pass 2 (scoped to a.com alone) finds no second person there — the
+    // exact scenario reported in production. Without the top-up fallback,
+    // this campaign would stop at 1 lead instead of the requested 2.
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // pass 1
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: a.com has no second contact
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // top-up: fresh company
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(summary.firstPassCandidates).toBe(1)
+    expect(summary.secondPassCandidates).toBe(0)
+    expect(summary.topUpCandidates).toBe(1)
+    expect(summary.inserted).toBe(2)
+    // The top-up call must be a breadth search like pass 1 — not scoped to a
+    // specific domain like pass 2 — or it could never find a new company.
+    const topUpParams = mockSearchPeople.mock.calls[2]![0] as Record<string, string | string[]>
+    expect(topUpParams['q_organization_domains_list[]']).toBeUndefined()
+  })
+
+  it('should not run the top-up pass when pass 2 already fills the remaining quota', async () => {
+    // dailyTarget 2 -> firstPassQuota = 1, secondPassQuota = 1. Pass 2 finds
+    // exactly the one second contact it needs, so there is no shortfall for
+    // top-up to fill — it must not fire a third, wasted Apollo call.
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // pass 1
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'a.com')] }) // pass 2: fills quota
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    expect(summary.topUpCandidates).toBe(0)
+    expect(summary.inserted).toBe(2)
+  })
+
+  it('should not re-pick a company already claimed by pass 1 or pass 2 during the top-up pass', async () => {
+    // dailyTarget 4 -> firstPassQuota = 2. Pass 1 fills its quota at a.com
+    // and b.com; pass 2 (scoped to both) finds no second contacts. Top-up's
+    // page comes back with a candidate at a.com (already claimed) alongside
+    // one at a genuinely new company — only the new one may be picked.
+    mockSearchPeople
+      .mockResolvedValueOnce({ // pass 1: fills quota of 2 across two companies
+        totalEntries: 2,
+        candidates: [candidate('p1', 'a.com'), candidate('p2', 'b.com')],
+      })
+      // An empty candidates array ends pass 2 immediately (it advances
+      // straight to the next keyword target, and there is only one) — one
+      // call, not a page-by-page exhaustion like an off-target candidate would.
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // pass 2: nothing
+      .mockResolvedValueOnce({ // top-up: a.com re-appears (must be skipped), c.com is new
+        totalEntries: 2,
+        candidates: [candidate('p3', 'a.com'), candidate('p4', 'c.com')],
+      })
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 4, icp })
+
+    expect(summary.topUpCandidates).toBe(1)
+    expect(mockBulkMatchPeople).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'p4' })]),
+    )
+    expect(mockBulkMatchPeople).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'p3' })]),
+    )
+  })
 })
 
 describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
     mockInsertLeads.mockReset()
@@ -634,6 +749,13 @@ describe('apollo failure attribution', () => {
   // tests must not depend on residual mock state from the tests above.
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockLogEvent.mockReset()
     mockLogError.mockReset()
@@ -682,6 +804,13 @@ describe('apollo failure attribution', () => {
 describe('runDiscoveryForCampaign — suppression and post-enrich exclude filters', () => {
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
     mockInsertLeads.mockReset()
@@ -824,6 +953,13 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
     mockInsertLeads.mockReset()
@@ -909,6 +1045,13 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 describe('runDiscoveryForCampaign — AI relevance filter', () => {
   beforeEach(() => {
     mockSearchPeople.mockReset()
+    // Safe default for any call beyond what a test explicitly queues via
+    // mockResolvedValueOnce — most tests only care about pass 1/pass 2, and
+    // the top-up pass (runDiscoveryForCampaign, fills quota shortfall left
+    // by pass 2) always fires at least one more searchPeople call whenever
+    // quota remains. Without this, an unconfigured extra call resolves to
+    // undefined and crashes runFirstPass's destructure.
+    mockSearchPeople.mockResolvedValue({ totalEntries: 0, candidates: [] })
     mockBulkMatchPeople.mockReset()
     mockGetKnownSourceIds.mockReset()
     mockInsertLeads.mockReset()

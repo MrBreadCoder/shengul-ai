@@ -49,6 +49,8 @@ export interface DiscoverySummary {
   newCandidates: number
   firstPassCandidates: number
   secondPassCandidates: number
+  /** Fresh-company picks made only because pass 2 fell short of its quota (see topUpQuota below). */
+  topUpCandidates: number
   enriched: number
   /** Leads that ended at `status: 'active'` — i.e. cleared for sending. */
   verified: number
@@ -750,12 +752,34 @@ export async function runDiscoveryForCampaign(
     const secondPassEnriched = await enrichCandidates(secondPass.picks, campaign, supabase, aiVerdictCache)
     const secondInserted = await insertLeads(supabase, secondPassEnriched.rows)
 
-    const fresh = [...firstPass.picks, ...secondPass.picks]
-    const candidatesSeen = firstPass.candidatesSeen + secondPass.candidatesSeen
-    const enrichedRows = [...firstPassEnriched.rows, ...secondPassEnriched.rows]
-    const verifiedCount = firstPassEnriched.verifiedCount + secondPassEnriched.verifiedCount
+    // Top-up (breadth again): pass 2 targets only the specific companies pass
+    // 1 verified, hunting for a second contact there — a company simply not
+    // having one is expected (see runSecondPass's own comment) and must not
+    // silently cap the day below daily_target. Whatever quota pass 2 didn't
+    // fill falls back to a fresh-company search, reusing runFirstPass as-is.
+    // verifiedCompanyCounts/domainBackedCompanyKeys already carry every
+    // company picked by pass 1 and pass 2 (both passes mutate them), so
+    // runFirstPass's own "companyPickCounts.has(companyKey)" guard skips
+    // those companies here the same way pass 1 skips prior-day companies.
+    // known is extended with this run's own picks so the exact same person
+    // can't be picked twice within one run — pass 2 already relies on the
+    // same guard (firstPassPicks.some(...)) for that within its own scope.
+    const topUpQuota = secondPassQuota - secondPass.picks.length
+    const pickedThisRun = [...firstPass.picks, ...secondPass.picks].map((pick) => pick.apolloId)
+    const topUpKnown = pickedThisRun.length > 0 ? new Set([...known, ...pickedThisRun]) : known
+    const topUp = topUpQuota > 0
+      ? await runFirstPass(campaign, topUpQuota, topUpKnown, verifiedCompanyCounts, domainBackedCompanyKeys)
+      : { picks: [] as FreshCandidate[], candidatesSeen: 0 }
 
-    const inserted: LeadRow[] = [...firstInserted, ...secondInserted]
+    const topUpEnriched = await enrichCandidates(topUp.picks, campaign, supabase, aiVerdictCache)
+    const topUpInserted = await insertLeads(supabase, topUpEnriched.rows)
+
+    const fresh = [...firstPass.picks, ...secondPass.picks, ...topUp.picks]
+    const candidatesSeen = firstPass.candidatesSeen + secondPass.candidatesSeen + topUp.candidatesSeen
+    const enrichedRows = [...firstPassEnriched.rows, ...secondPassEnriched.rows, ...topUpEnriched.rows]
+    const verifiedCount = firstPassEnriched.verifiedCount + secondPassEnriched.verifiedCount + topUpEnriched.verifiedCount
+
+    const inserted: LeadRow[] = [...firstInserted, ...secondInserted, ...topUpInserted]
 
     for (const lead of inserted) {
       if (lead.status !== 'active') continue
@@ -796,17 +820,21 @@ export async function runDiscoveryForCampaign(
       newCandidates: fresh.length,
       firstPassCandidates: firstPass.picks.length,
       secondPassCandidates: secondPass.picks.length,
+      topUpCandidates: topUp.picks.length,
       enriched: enrichedRows.length,
       verified: verifiedCount,
-      emailableChecked: firstPassEnriched.emailableChecked + secondPassEnriched.emailableChecked,
-      emailableDeliverable: firstPassEnriched.emailableDeliverable + secondPassEnriched.emailableDeliverable,
-      emailableRejected: firstPassEnriched.emailableRejected + secondPassEnriched.emailableRejected,
-      emailableFailedOpen: firstPassEnriched.emailableFailedOpen + secondPassEnriched.emailableFailedOpen,
-      suppressedSkipped: firstPassEnriched.suppressedSkipped + secondPassEnriched.suppressedSkipped,
-      excludedPostEnrich: firstPassEnriched.excludedPostEnrich + secondPassEnriched.excludedPostEnrich,
-      aiChecked: firstPassEnriched.aiChecked + secondPassEnriched.aiChecked,
-      aiRejected: firstPassEnriched.aiRejected + secondPassEnriched.aiRejected,
-      aiFailedOpen: firstPassEnriched.aiFailedOpen + secondPassEnriched.aiFailedOpen,
+      emailableChecked: firstPassEnriched.emailableChecked + secondPassEnriched.emailableChecked + topUpEnriched.emailableChecked,
+      emailableDeliverable:
+        firstPassEnriched.emailableDeliverable + secondPassEnriched.emailableDeliverable + topUpEnriched.emailableDeliverable,
+      emailableRejected: firstPassEnriched.emailableRejected + secondPassEnriched.emailableRejected + topUpEnriched.emailableRejected,
+      emailableFailedOpen:
+        firstPassEnriched.emailableFailedOpen + secondPassEnriched.emailableFailedOpen + topUpEnriched.emailableFailedOpen,
+      suppressedSkipped: firstPassEnriched.suppressedSkipped + secondPassEnriched.suppressedSkipped + topUpEnriched.suppressedSkipped,
+      excludedPostEnrich:
+        firstPassEnriched.excludedPostEnrich + secondPassEnriched.excludedPostEnrich + topUpEnriched.excludedPostEnrich,
+      aiChecked: firstPassEnriched.aiChecked + secondPassEnriched.aiChecked + topUpEnriched.aiChecked,
+      aiRejected: firstPassEnriched.aiRejected + secondPassEnriched.aiRejected + topUpEnriched.aiRejected,
+      aiFailedOpen: firstPassEnriched.aiFailedOpen + secondPassEnriched.aiFailedOpen + topUpEnriched.aiFailedOpen,
       inserted: inserted.length,
     }
 
