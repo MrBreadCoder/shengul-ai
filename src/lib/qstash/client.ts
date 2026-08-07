@@ -2,7 +2,12 @@ import { Client } from '@upstash/qstash'
 import { env } from '@/lib/env'
 import { AppError } from '@/lib/errors/app-error'
 
-const client = new Client({ token: env.QSTASH_TOKEN })
+// This app runs on AWS us-east-1; QStash's regions are fully independent
+// (separate resources per region), so the ambiguous default endpoint must
+// never be relied on — pin it explicitly. See QSTASH_URL in src/lib/env.ts.
+const QSTASH_US_EAST_1_URL = 'https://qstash-us-east-1.upstash.io'
+
+const client = new Client({ token: env.QSTASH_TOKEN, baseUrl: env.QSTASH_URL ?? QSTASH_US_EAST_1_URL })
 
 function destination(path: string): string {
   return new URL(path, env.APP_URL).toString()

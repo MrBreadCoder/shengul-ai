@@ -19,6 +19,14 @@ const envSchema = publicEnvSchema.extend({
   QSTASH_TOKEN: nonEmpty,
   QSTASH_CURRENT_SIGNING_KEY: nonEmpty,
   QSTASH_NEXT_SIGNING_KEY: nonEmpty,
+  // QStash now runs two fully independent regions (US/EU) with no shared
+  // state; the unprefixed https://qstash.upstash.io endpoint resolves
+  // ambiguously and does not reliably reach a us-east-1 account (see
+  // .claude/roadmap.md 2026-08-07 incident — this cost 3 days of silent
+  // cron outage). Optional so tests/local scaffolding without a real
+  // QStash account keep working; src/lib/qstash/client.ts falls back to
+  // the us-east-1 endpoint (this app's AWS region) when unset.
+  QSTASH_URL: z.string().url().optional(),
   BRIGHTDATA_API_KEY: nonEmpty,
   BRIGHTDATA_SCRAPE_ZONE: nonEmpty,
   GEMINI_API_KEY: nonEmpty,
