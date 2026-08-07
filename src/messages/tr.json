@@ -277,6 +277,24 @@
       "updatedToast": "Web sitesi güncellendi",
       "networkError": "Ağ isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin."
     },
+    "editSignatureDialog": {
+      "trigger": "İmzayı düzenle",
+      "title": "İletişim imzası",
+      "toolDescription": "Telefon numarası girildiğinde giden e-postalara eklenen imza satırındaki ad, unvan, telefon ve adres bilgilerini kaydeder. Bir alan boş gönderilirse temizlenir.",
+      "nameLabel": "Ad",
+      "nameToolParamDescription": "E-posta imzasında gösterilen imzalayan kişinin adı, örneğin John Smith. İsteğe bağlıdır; temizlemek için boş bırakın.",
+      "titleLabel": "Unvan",
+      "titleToolParamDescription": "Adın altında gösterilen unvan, örneğin Satış Direktörü. İsteğe bağlıdır; temizlemek için boş bırakın.",
+      "phoneLabel": "Telefon",
+      "phoneToolParamDescription": "Ayarlandığında giden e-postalara eklenen telefon numarası — bir imzanın görünmesi için gereklidir. İsteğe bağlıdır; temizlemek için boş bırakın.",
+      "phoneHint": "Bu ayarlanana kadar giden e-postalara imza eklenmez.",
+      "addressLabel": "Adres",
+      "addressToolParamDescription": "E-posta imzasında gösterilen posta adresi. İsteğe bağlıdır; temizlemek için boş bırakın.",
+      "updateFailed": "İmza güncellenemedi.",
+      "updateFailedToast": "Güncelleme başarısız",
+      "updatedToast": "İmza güncellendi",
+      "networkError": "Ağ isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin."
+    },
     "newClientForm": {
       "rejected": "Sunucu müşteriyi reddetti.",
       "createFailedToast": "Müşteri oluşturulamadı",

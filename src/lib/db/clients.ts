@@ -180,6 +180,38 @@ export async function updateClientDomain(
   return data
 }
 
+export interface ClientSignatureUpdate {
+  phone: string | null
+  address: string | null
+  signatureName: string | null
+  signatureTitle: string | null
+}
+
+// Single combined update — the operator edits phone/address/signatureName/
+// signatureTitle from one dialog in one submit, so there's one write path
+// rather than four independent single-field updates like updateClientDomain.
+export async function updateClientSignature(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  update: ClientSignatureUpdate,
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({
+      phone: update.phone,
+      address: update.address,
+      signature_name: update.signatureName,
+      signature_title: update.signatureTitle,
+    })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client signature', { id, cause: error?.message })
+  }
+  return data
+}
+
 // `null` reverts the client back to its domain favicon (or initials, if no
 // domain is set either). Callers are responsible for deleting the storage
 // object behind the previous `logo_url`, if any.

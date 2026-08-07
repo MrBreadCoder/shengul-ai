@@ -7,6 +7,7 @@ import {
   updateClientName,
   updateClientWarmupProfile,
   updateClientDomain,
+  updateClientSignature,
   deleteClientCascade,
   listClientRoleAppUsers,
 } from '@/lib/db/clients'
@@ -14,8 +15,20 @@ import { deleteAuthUsers } from '@/lib/supabase/auth-admin'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
 import { domainSchema } from '@/lib/validation/domain'
+import { phoneSchema } from '@/lib/validation/phone'
 
 export const runtime = 'nodejs'
+
+// Trimmed, length-capped, empty-clears-to-null — same three-step transform
+// chain as domainSchema, for the three signature fields that carry no format
+// constraint beyond a sane max length.
+function nullableTextSchema(maxLength: number) {
+  return z
+    .string()
+    .transform((value) => value.trim())
+    .refine((value) => value.length <= maxLength, { message: `must be ${maxLength} characters or fewer` })
+    .transform((value) => (value.length === 0 ? null : value))
+}
 
 // mailreachEnabled is deliberately NOT a field here — that boolean-flag
 // mutation goes through the setClientMailreachEnabled Server Action
@@ -25,9 +38,20 @@ const patchSchema = z
     name: z.string().min(1).optional(),
     warmupProfile: z.enum(['standard', 'slow', 'none']).optional(),
     domain: domainSchema.optional(),
+    phone: phoneSchema.optional(),
+    address: nullableTextSchema(200).optional(),
+    signatureName: nullableTextSchema(120).optional(),
+    signatureTitle: nullableTextSchema(120).optional(),
   })
   .refine(
-    (body) => body.name !== undefined || body.warmupProfile !== undefined || body.domain !== undefined,
+    (body) =>
+      body.name !== undefined ||
+      body.warmupProfile !== undefined ||
+      body.domain !== undefined ||
+      body.phone !== undefined ||
+      body.address !== undefined ||
+      body.signatureName !== undefined ||
+      body.signatureTitle !== undefined,
     { message: 'At least one field must be provided' },
   )
 
@@ -88,6 +112,35 @@ export async function PATCH(request: Request, context: { params: Promise<{ clien
           actor: `human:${appUser.id}`,
           type: 'client.domain_changed',
           payload: { from: client.domain, to: body.domain },
+        })
+      } catch {
+        // Audit logging is best-effort — the update already succeeded.
+      }
+    }
+
+    if (
+      body.phone !== undefined ||
+      body.address !== undefined ||
+      body.signatureName !== undefined ||
+      body.signatureTitle !== undefined
+    ) {
+      updated = await updateClientSignature(admin, clientId, {
+        phone: body.phone !== undefined ? body.phone : client.phone,
+        address: body.address !== undefined ? body.address : client.address,
+        signatureName: body.signatureName !== undefined ? body.signatureName : client.signature_name,
+        signatureTitle: body.signatureTitle !== undefined ? body.signatureTitle : client.signature_title,
+      })
+      try {
+        await logEvent({
+          clientId,
+          actor: `human:${appUser.id}`,
+          type: 'client.signature_changed',
+          payload: {
+            phone: updated.phone,
+            address: updated.address,
+            signatureName: updated.signature_name,
+            signatureTitle: updated.signature_title,
+          },
         })
       } catch {
         // Audit logging is best-effort — the update already succeeded.

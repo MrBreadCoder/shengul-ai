@@ -4,6 +4,7 @@ const requireUserMock = vi.fn()
 const getClientByIdMock = vi.fn()
 const updateClientNameMock = vi.fn()
 const updateClientDomainMock = vi.fn()
+const updateClientSignatureMock = vi.fn()
 const deleteClientCascadeMock = vi.fn()
 const listClientRoleAppUsersMock = vi.fn()
 const deleteAuthUsersMock = vi.fn()
@@ -15,6 +16,7 @@ vi.mock('@/lib/db/clients', () => ({
   getClientById: (...a: unknown[]) => getClientByIdMock(...a),
   updateClientName: (...a: unknown[]) => updateClientNameMock(...a),
   updateClientDomain: (...a: unknown[]) => updateClientDomainMock(...a),
+  updateClientSignature: (...a: unknown[]) => updateClientSignatureMock(...a),
   deleteClientCascade: (...a: unknown[]) => deleteClientCascadeMock(...a),
   listClientRoleAppUsers: (...a: unknown[]) => listClientRoleAppUsersMock(...a),
 }))
@@ -40,6 +42,7 @@ beforeEach(() => {
   getClientByIdMock.mockReset()
   updateClientNameMock.mockReset()
   updateClientDomainMock.mockReset()
+  updateClientSignatureMock.mockReset()
   deleteClientCascadeMock.mockReset()
   listClientRoleAppUsersMock.mockReset()
   deleteAuthUsersMock.mockReset()
@@ -100,6 +103,61 @@ describe('PATCH /api/clients/[clientId]', () => {
     const res = await PATCH(req({ domain: 'not a domain' }), ctx('c1'))
     expect(res.status).toBe(400)
     expect(updateClientDomainMock).not.toHaveBeenCalled()
+  })
+
+  it('should save phone/address/signature name/title together and log the event', async () => {
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: null, address: null, signature_name: null, signature_title: null,
+    })
+    updateClientSignatureMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: '+1 555 123 4567', address: '123 Main St',
+      signature_name: 'John Smith', signature_title: 'Sales Director',
+    })
+    const res = await PATCH(
+      req({ phone: '+1 555 123 4567', address: '123 Main St', signatureName: 'John Smith', signatureTitle: 'Sales Director' }),
+      ctx('c1'),
+    )
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.client.phone).toBe('+1 555 123 4567')
+    expect(updateClientSignatureMock).toHaveBeenCalledWith(expect.anything(), 'c1', {
+      phone: '+1 555 123 4567', address: '123 Main St', signatureName: 'John Smith', signatureTitle: 'Sales Director',
+    })
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'client.signature_changed' }))
+  })
+
+  it('should keep the existing phone when only address is sent', async () => {
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: '+1 555 123 4567', address: null, signature_name: null, signature_title: null,
+    })
+    updateClientSignatureMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: '+1 555 123 4567', address: '123 Main St', signature_name: null, signature_title: null,
+    })
+    await PATCH(req({ address: '123 Main St' }), ctx('c1'))
+    expect(updateClientSignatureMock).toHaveBeenCalledWith(expect.anything(), 'c1', {
+      phone: '+1 555 123 4567', address: '123 Main St', signatureName: null, signatureTitle: null,
+    })
+  })
+
+  it('should clear signature fields when sent empty', async () => {
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: '+1 555 123 4567', address: '123 Main St', signature_name: 'John', signature_title: 'CEO',
+    })
+    updateClientSignatureMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', phone: null, address: null, signature_name: null, signature_title: null,
+    })
+    const res = await PATCH(req({ phone: '', address: '', signatureName: '', signatureTitle: '' }), ctx('c1'))
+    expect(res.status).toBe(200)
+    expect(updateClientSignatureMock).toHaveBeenCalledWith(expect.anything(), 'c1', {
+      phone: null, address: null, signatureName: null, signatureTitle: null,
+    })
+  })
+
+  it('should return 400 for an invalid phone', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', phone: null })
+    const res = await PATCH(req({ phone: 'call me maybe' }), ctx('c1'))
+    expect(res.status).toBe(400)
+    expect(updateClientSignatureMock).not.toHaveBeenCalled()
   })
 })
 

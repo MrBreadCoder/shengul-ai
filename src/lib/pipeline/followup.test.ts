@@ -69,7 +69,7 @@ beforeEach(() => {
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
   getLeadByIdMock.mockResolvedValue(lead)
-  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14] })
+  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null })
   isSuppressedMock.mockResolvedValue(false)
   listThreadEmailsMock.mockResolvedValue([
     { direction: 'outbound', subject: 'Quick idea', body: 'Hi', thread_id: 'thr1', provider_message_id: '<a@mail>' },
@@ -227,6 +227,35 @@ describe('runFollowupStep', () => {
       '/api/pipeline/followup',
       { sequenceId: 'seq1', step: 1 },
       expect.any(Number),
+    )
+  })
+
+  it('should append the phone signature to the nudge body when the client has a phone on file', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: 'acme.com',
+      phone: '+1 555 123 4567', address: null, signature_name: null, signature_title: null,
+    })
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    const expectedBody = 'Just following up, Jane.\n\nBest regards,\n\nAcme\n\n+1 555 123 4567\nacme.com'
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
+    expect(sendViaMailboxMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
+  })
+
+  it('should not append a signature to the nudge when the client has no phone on file', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ body: 'Just following up, Jane.' }),
     )
   })
 })

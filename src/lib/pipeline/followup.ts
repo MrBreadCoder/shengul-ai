@@ -25,6 +25,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateText, type LlmCallContext } from '@/lib/llm/client'
 import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
+import { appendSignatureBlock } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
@@ -258,6 +259,17 @@ export async function runFollowupStep(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })
 
+  // Deterministic — never left to the model's discretion, same as write.ts.
+  const client = await getClientById(supabase, sequence.client_id)
+  const signedBody = appendSignatureBlock(nudgeBody, {
+    companyName: client?.name ?? '',
+    signatureName: client?.signature_name ?? null,
+    signatureTitle: client?.signature_title ?? null,
+    phone: client?.phone ?? null,
+    address: client?.address ?? null,
+    domain: client?.domain ?? null,
+  })
+
   // Claim the (lead, step, outbound) slot before sending — retry-safe.
   const claimed = await claimOutboundEmail(supabase, {
     client_id: sequence.client_id,
@@ -266,7 +278,7 @@ export async function runFollowupStep(
     thread_id: threadId,
     direction: 'outbound',
     subject: replySubject,
-    body: nudgeBody,
+    body: signedBody,
     status: 'queued',
     sequence_step: input.step,
   })
@@ -279,7 +291,7 @@ export async function runFollowupStep(
       mailboxIds: campaign.mailbox_ids,
       to: lead.email,
       subject: replySubject,
-      body: nudgeBody,
+      body: signedBody,
       purpose: 'outreach',
       threadId,
       inReplyToMessageId: inReplyTo,

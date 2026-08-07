@@ -22,6 +22,10 @@ export interface Database {
           default_locale: Database['public']['Enums']['app_locale']
           domain: string | null
           logo_url: string | null
+          phone: string | null
+          address: string | null
+          signature_name: string | null
+          signature_title: string | null
           created_at: string
           updated_at: string
         }
@@ -37,6 +41,10 @@ export interface Database {
           default_locale?: Database['public']['Enums']['app_locale']
           domain?: string | null
           logo_url?: string | null
+          phone?: string | null
+          address?: string | null
+          signature_name?: string | null
+          signature_title?: string | null
           created_at?: string
           updated_at?: string
         }

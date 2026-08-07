@@ -56,7 +56,7 @@ beforeEach(() => {
   // scheduleFirstFollowup's DEFAULT_FOLLOWUP_DELAYS_DAYS fallback covers a
   // null client lookup, so this default keeps every existing test's timing
   // assertions (3-day first follow-up) unchanged.
-  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14] })
+  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null })
 })
 
 describe('runWriteForCase', () => {
@@ -122,5 +122,35 @@ describe('runWriteForCase', () => {
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
     expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e1')
     expect(markEmailSentMock).not.toHaveBeenCalled()
+  })
+
+  it('should append the phone signature to the email body when the client has a phone on file', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: 'acme.com',
+      phone: '+1 555 123 4567', address: null, signature_name: null, signature_title: null,
+    })
+
+    await runWriteForCase({} as never, input)
+
+    const expectedBody = 'Hi Jane...\n\nBest regards,\n\nAcme\n\n+1 555 123 4567\nacme.com'
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
+    expect(sendViaMailboxMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
+  })
+
+  it('should not append a signature when the client has no phone on file', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await runWriteForCase({} as never, input)
+
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: 'Hi Jane...' }))
   })
 })

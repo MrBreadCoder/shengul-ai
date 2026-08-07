@@ -277,6 +277,24 @@
       "updatedToast": "Website updated",
       "networkError": "Network request failed. Check your connection and retry."
     },
+    "editSignatureDialog": {
+      "trigger": "Edit signature",
+      "title": "Contact signature",
+      "toolDescription": "Records the name, title, phone, and address appended as a signature line to outbound email once a phone number is on file. Submitting a field empty clears it.",
+      "nameLabel": "Name",
+      "nameToolParamDescription": "The signer's name shown in the email signature, e.g. John Smith. Optional; leave blank to clear it.",
+      "titleLabel": "Title",
+      "titleToolParamDescription": "The signer's job title shown under their name, e.g. Sales Director. Optional; leave blank to clear it.",
+      "phoneLabel": "Phone",
+      "phoneToolParamDescription": "The phone number appended to outbound email once set — required for a signature to appear at all. Optional; leave blank to clear it.",
+      "phoneHint": "No signature is added to outbound email until this is set.",
+      "addressLabel": "Address",
+      "addressToolParamDescription": "The mailing address shown in the email signature. Optional; leave blank to clear it.",
+      "updateFailed": "Could not update the signature.",
+      "updateFailedToast": "Update failed",
+      "updatedToast": "Signature updated",
+      "networkError": "Network request failed. Check your connection and retry."
+    },
     "newClientForm": {
       "rejected": "The server rejected the client.",
       "createFailedToast": "Could not create client",

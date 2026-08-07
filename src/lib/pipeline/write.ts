@@ -4,6 +4,7 @@ import { AppError } from '@/lib/errors/app-error'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
 import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
+import { getClientById, type ClientRow } from '@/lib/db/clients'
 import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
@@ -11,6 +12,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext } from '@/lib/llm/client'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
+import { appendSignatureBlock } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
@@ -83,6 +85,7 @@ async function processLead(
   lead: LeadRow,
   knowledge: KnowledgeRow[],
   clientKnowledge: string,
+  client: ClientRow | null,
 ): Promise<'sent' | 'drafted' | 'skipped'> {
   if (!lead.email) return 'skipped'
   if (await isSuppressed(supabase, input.clientId, lead.email)) return 'skipped'
@@ -95,6 +98,17 @@ async function processLead(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })
 
+  // Deterministic — never left to the model's discretion. Appended here,
+  // before the claim, so both a sent email and a human_approve draft carry it.
+  const signedBody = appendSignatureBlock(draft.body, {
+    companyName: client?.name ?? '',
+    signatureName: client?.signature_name ?? null,
+    signatureTitle: client?.signature_title ?? null,
+    phone: client?.phone ?? null,
+    address: client?.address ?? null,
+    domain: client?.domain ?? null,
+  })
+
   // Claim the (lead, step 0, outbound) slot BEFORE sending — a retry that finds
   // the slot taken returns null and we never double-send.
   const claimed = await claimOutboundEmail(supabase, {
@@ -103,7 +117,7 @@ async function processLead(
     lead_id: lead.id,
     direction: 'outbound',
     subject: draft.subject,
-    body: draft.body,
+    body: signedBody,
     status: shouldSendFirstTouch(input.replyMode) ? 'queued' : 'draft',
     sequence_step: FIRST_TOUCH_STEP,
   })
@@ -118,7 +132,7 @@ async function processLead(
       mailboxIds: input.mailboxIds,
       to: lead.email,
       subject: draft.subject,
-      body: draft.body,
+      body: signedBody,
       purpose: 'outreach',
     })
   } catch (error) {
@@ -149,6 +163,7 @@ export async function runWriteForCase(
 ): Promise<WriteSummary> {
   const knowledge = await listKnowledgeForCase(supabase, input.caseId)
   const leads = await listActiveLeadsForCase(supabase, input.caseId)
+  const client = await getClientById(supabase, input.clientId)
 
   const dossierText = knowledge.map((k) => k.content).join(' ')
   const clientKnowledge = await retrieveClientKnowledge(supabase, {
@@ -159,7 +174,7 @@ export async function runWriteForCase(
   let sent = 0
   let drafted = 0
   for (const lead of leads) {
-    const outcome = await processLead(supabase, input, lead, knowledge, clientKnowledge)
+    const outcome = await processLead(supabase, input, lead, knowledge, clientKnowledge, client)
     if (outcome === 'sent') sent += 1
     if (outcome === 'drafted') drafted += 1
   }
