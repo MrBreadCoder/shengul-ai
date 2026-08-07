@@ -14,11 +14,18 @@ export const apolloContactEmailStatuses = [
   'verified', 'unverified', 'likely to engage', 'unavailable',
 ] as const
 
+// Apollo's employee-count filter is backed by an Elasticsearch integer
+// field — any value outside a signed 32-bit int is rejected with HTTP 422
+// ("Value [...] is out of range for an integer"), confirmed against the
+// live API. Leave a bound blank for "no cap" instead of entering a huge
+// number; see buildPeopleSearchParams for the open-ended range this enables.
+export const APOLLO_MAX_EMPLOYEE_COUNT = 2_147_483_647
+
 export const apolloIcpSchema = z.object({
   personTitles: z.array(z.string()).default([]),
   organizationLocations: z.array(z.string()).default([]),
-  employeeRangeMin: z.number().int().nonnegative().nullable().default(null),
-  employeeRangeMax: z.number().int().nonnegative().nullable().default(null),
+  employeeRangeMin: z.number().int().nonnegative().max(APOLLO_MAX_EMPLOYEE_COUNT).nullable().default(null),
+  employeeRangeMax: z.number().int().nonnegative().max(APOLLO_MAX_EMPLOYEE_COUNT).nullable().default(null),
   keywords: z.array(z.string()).default([]),
   personSeniorities: z.array(z.enum(apolloPersonSeniorities)).default([]),
   contactEmailStatuses: z.array(z.enum(apolloContactEmailStatuses)).default([]),

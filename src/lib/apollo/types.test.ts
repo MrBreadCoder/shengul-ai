@@ -27,6 +27,16 @@ describe('apolloIcpSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('should reject an employee count above Apollo\'s signed 32-bit integer limit', () => {
+    const result = apolloIcpSchema.safeParse({ employeeRangeMin: 40, employeeRangeMax: 10_000_000_000 })
+    expect(result.success).toBe(false)
+  })
+
+  it("should accept Apollo's exact signed 32-bit integer limit", () => {
+    const result = apolloIcpSchema.safeParse({ employeeRangeMin: 40, employeeRangeMax: 2_147_483_647 })
+    expect(result.success).toBe(true)
+  })
+
   it('should default excludeOrganizationLocations and excludeKeywords to empty arrays', () => {
     const result = apolloIcpSchema.parse({})
     expect(result.excludeOrganizationLocations).toEqual([])

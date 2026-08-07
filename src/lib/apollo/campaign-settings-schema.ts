@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { apolloPersonSeniorities, apolloContactEmailStatuses } from './types'
+import { apolloPersonSeniorities, apolloContactEmailStatuses, APOLLO_MAX_EMPLOYEE_COUNT } from './types'
 import { timeOfDaySchema, timezoneSchema } from '@/lib/validation/schedule'
 
 // Shared between POST /api/campaigns (create) and PATCH /api/campaigns/[campaignId]
@@ -12,8 +12,8 @@ export const campaignSettingsSchema = z.object({
   dailyTarget: z.number().int().min(1).max(100).default(50),
   personTitles: z.array(z.string()).default([]),
   organizationLocations: z.array(z.string()).default([]),
-  employeeRangeMin: z.number().int().nullable().default(null),
-  employeeRangeMax: z.number().int().nullable().default(null),
+  employeeRangeMin: z.number().int().nonnegative().max(APOLLO_MAX_EMPLOYEE_COUNT).nullable().default(null),
+  employeeRangeMax: z.number().int().nonnegative().max(APOLLO_MAX_EMPLOYEE_COUNT).nullable().default(null),
   keywords: z.array(z.string()).default([]),
   excludeOrganizationLocations: z.array(z.string()).default([]),
   excludeKeywords: z.array(z.string()).default([]),

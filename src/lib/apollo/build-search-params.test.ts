@@ -46,10 +46,16 @@ describe('buildPeopleSearchParams', () => {
     expect(params['organization_num_employees_ranges[]']).toEqual(['50,200'])
   })
 
-  it('should omit the employee range when only one bound is set', () => {
+  it('should format an open-ended "min," range when only the min bound is set', () => {
     const icp: ApolloIcpFilters = { ...emptyIcp, employeeRangeMin: 50, employeeRangeMax: null }
     const params = buildPeopleSearchParams(icp, 1, 25)
-    expect(params['organization_num_employees_ranges[]']).toBeUndefined()
+    expect(params['organization_num_employees_ranges[]']).toEqual(['50,'])
+  })
+
+  it('should format an open-ended ",max" range when only the max bound is set', () => {
+    const icp: ApolloIcpFilters = { ...emptyIcp, employeeRangeMin: null, employeeRangeMax: 200 }
+    const params = buildPeopleSearchParams(icp, 1, 25)
+    expect(params['organization_num_employees_ranges[]']).toEqual([',200'])
   })
 
   it('should join keywords into a single space-separated q_keywords string', () => {

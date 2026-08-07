@@ -61,4 +61,16 @@ describe('campaignSettingsSchema', () => {
     const result = campaignSettingsSchema.safeParse({ ...valid, discoverTimezone: 'Not/AZone' })
     expect(result.success).toBe(false)
   })
+
+  it("should reject an employeeRangeMax above Apollo's signed 32-bit integer limit", () => {
+    // Regression test — this exact value (10 billion) reached Apollo unvalidated
+    // and was rejected with HTTP 422 in production before this bound existed.
+    const result = campaignSettingsSchema.safeParse({ ...valid, employeeRangeMin: 40, employeeRangeMax: 10_000_000_000 })
+    expect(result.success).toBe(false)
+  })
+
+  it('should accept employeeRangeMin with no employeeRangeMax (open-ended above)', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, employeeRangeMin: 40, employeeRangeMax: null })
+    expect(result.success).toBe(true)
+  })
 })

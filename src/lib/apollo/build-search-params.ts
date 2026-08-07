@@ -21,8 +21,13 @@ export function buildPeopleSearchParams(
     // "Apollo API research" in docs/superpowers/plans/2026-07-21-apollo-exclude-filters.md.
     params['organization_not_locations[]'] = icp.excludeOrganizationLocations
   }
-  if (icp.employeeRangeMin !== null && icp.employeeRangeMax !== null) {
-    params['organization_num_employees_ranges[]'] = [`${icp.employeeRangeMin},${icp.employeeRangeMax}`]
+  if (icp.employeeRangeMin !== null || icp.employeeRangeMax !== null) {
+    // Apollo accepts an open-ended "min," or ",max" range (confirmed against
+    // the live People Search API) — a missing bound must NOT drop the filter
+    // entirely, or "min 40, no upper bound" silently becomes "any size".
+    const min = icp.employeeRangeMin !== null ? String(icp.employeeRangeMin) : ''
+    const max = icp.employeeRangeMax !== null ? String(icp.employeeRangeMax) : ''
+    params['organization_num_employees_ranges[]'] = [`${min},${max}`]
   }
   if (icp.keywords.length > 0) {
     params.q_keywords = icp.keywords.join(' ')
