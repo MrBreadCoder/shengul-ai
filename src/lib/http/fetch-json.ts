@@ -1,7 +1,21 @@
-import { ZodType } from 'zod'
+import { ZodType, type ZodError } from 'zod'
 import { AppError } from '@/lib/errors/app-error'
 
 const DEFAULT_TIMEOUT_MS = 8000
+
+const ROOT_PATH_LABEL = '(root)'
+
+// Zod's default issue messages ("expected string, received undefined") never
+// echo the actual field value, only type names — safe to put in an AppError
+// `message`, which is the only part of a validation failure that survives
+// being logged to the events table (see logFailure/describeError, which drop
+// `context` entirely). Without this, every schema-shape failure collapses to
+// the same unhelpful string regardless of which field actually broke.
+function summarizeIssues(error: ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : ROOT_PATH_LABEL}: ${issue.message}`)
+    .join('; ')
+}
 
 /**
  * @param logUrl - URL recorded in `AppError.context` instead of `url`. Callers
@@ -36,7 +50,11 @@ export async function fetchJson<T>(
   const json: unknown = await response.json().catch(() => undefined)
   const parsed = schema.safeParse(json)
   if (!parsed.success) {
-    throw new AppError('EXTERNAL_ERROR', 'Unexpected response shape', { url: logUrl, issues: parsed.error.flatten() })
+    throw new AppError(
+      'EXTERNAL_ERROR',
+      `Unexpected response shape (${summarizeIssues(parsed.error)})`,
+      { url: logUrl, issues: parsed.error.flatten() },
+    )
   }
   return parsed.data
 }

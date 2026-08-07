@@ -29,6 +29,37 @@ describe('fetchJson', () => {
     await expect(fetchJson('http://x', { method: 'GET' }, schema)).rejects.toMatchObject({ code: 'EXTERNAL_ERROR' })
   })
 
+  it('should name the missing field in the error message when the body fails schema validation', async () => {
+    // The message is the only part of this error that survives being logged
+    // to the events table (everything else on `context` is dropped there), so
+    // the failing field must be readable from `message` alone.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ wrong: 1 }), { status: 200 }),
+    ))
+    await expect(fetchJson('http://x', { method: 'GET' }, schema)).rejects.toMatchObject({
+      message: expect.stringContaining('id: '),
+    })
+  })
+
+  it('should name every missing field when more than one fails schema validation', async () => {
+    const multiFieldSchema = z.object({ id: z.string(), email: z.string() })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ wrong: 1 }), { status: 200 }),
+    ))
+    const error = await fetchJson('http://x', { method: 'GET' }, multiFieldSchema).catch((e: unknown) => e)
+    expect((error as Error).message).toContain('id: ')
+    expect((error as Error).message).toContain('email: ')
+  })
+
+  it('should report "(root)" when the body is not an object at all', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify('just a string'), { status: 200 }),
+    ))
+    await expect(fetchJson('http://x', { method: 'GET' }, schema)).rejects.toMatchObject({
+      message: expect.stringContaining('(root): '),
+    })
+  })
+
   it('should throw EXTERNAL_TIMEOUT when the request aborts', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, opts: RequestInit) => {
       return new Promise((_resolve, reject) => {
