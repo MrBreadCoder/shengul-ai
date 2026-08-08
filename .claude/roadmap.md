@@ -408,7 +408,7 @@ Plan: `docs/superpowers/plans/2026-07-21-emailable-verification.md`
 - [x] `fetchJson` accepts a redacted `logUrl` so the query-string API key never reaches the events table.
 - [x] `src/lib/emailable/` — client, Zod response schema, and the pure decision table.
 - [x] `enrichCandidates` gates activation; `DiscoverySummary` reports `emailableChecked` / `Deliverable` / `Rejected` / `FailedOpen`.
-- [ ] Review `emailableRejected` after the first week of live runs and decide whether the strict policy needs loosening for accept-all domains.
+- [x] Review `emailableRejected` after the first week of live runs and decide whether the strict policy needs loosening for accept-all domains — **done 2026-08-08**, see the "Accept-all catch-all carve-out" entry below.
 
 Deviations from the plan, found during TDD:
 - `client.test.ts`'s `it.each` for vendor error statuses could not include `249` — the Fetch spec treats any status in [200,299] as `response.ok`, so `249` takes the schema-validation-failure branch (no `status` in the thrown context), not the `!response.ok` branch. Split into its own test asserting only `code: 'EXTERNAL_ERROR'`.
@@ -418,6 +418,23 @@ Deviations from the plan, found during TDD:
 Not done: `pnpm supabase db reset` was never run — Docker was not available in this environment, so `0011_lead_email_verification.sql` is written but unapplied and unverified against a real Postgres. Apply it before the next migration is authored.
 
 Verified: `tsc --noEmit` clean, `eslint` 0 errors (3 pre-existing unrelated warnings), full suite 628/628 (up from 583: +2 `log.test.ts`, +4 `fetch-json.test.ts`, +22 `emailable/client.test.ts`, +18 `emailable/map-verification.test.ts`, +10 `discover.test.ts` net of the mock fix). Every task ran red before green. Commits skipped per instruction.
+
+## Emailable accept-all catch-all carve-out — shipped 2026-08-08
+
+One week of live data showed the deliverability guard's `risky` bucket
+running ~62% of verified leads (54/87 in one operator-reported sample), and
+a direct query of production `leads.email_verification` found it was 100%
+`accept_all: true` + `reason: 'low_deliverability'` — a domain-level "cannot
+confirm" signal, not an address-level "bad" signal. `mapEmailableVerdict`
+now activates that specific combination; `low_quality` risky results and
+every `undeliverable`/`unknown`/unrecognized state still park unchanged.
+
+Plan: `docs/superpowers/plans/2026-08-08-emailable-accept-all-catch-all.md`.
+Spec amendment: `docs/superpowers/specs/2026-07-21-emailable-verification-design.md` (Amendment — 2026-08-08).
+
+- [x] `mapEmailableVerdict` carve-out + unit tests (`src/lib/emailable/map-verification.ts`, `.test.ts`) — 25/25 tests, 5 new.
+- [x] End-to-end regression tests in `src/lib/pipeline/discover.test.ts` proving the carve-out reaches the inserted row — 55/55 tests, 3 new.
+- [ ] Watch bounce rate on `email_status = 'risky' AND status = 'active'` leads over the next 1-2 weeks (queryable directly against `leads.email_verification` — no new counter was added; an optional `emailableAcceptAllActivated` rollup metric is specced in the implementation plan if that turns out to be worth adding later).
 
 ## Apollo company firmographics on cases (2026-07-23)
 
@@ -3357,3 +3374,53 @@ All three changes TDD'd (failing test confirmed before each fix). Full
 repo suite: 198 files / 2092 tests green, `tsc --noEmit` and `eslint`
 clean on every touched file. Commits skipped per instruction — not yet
 committed.
+
+## 2026-08-08 — Diagnosed two live production error clusters from the Logs tab
+
+User pasted a batch of "Write job crashed" / "Gemini generateObject failed" /
+"Web search failed" / "Page fetch failed" error rows from the last 3-4h.
+Root-caused both clusters via `superpowers:systematic-debugging`, no
+reproduction environment available (static analysis + git archaeology only).
+
+**Cluster A — Gemini `NoObjectGeneratedError` ("could not parse the
+response"), surfacing as both `llm.failed` and `pipeline.write.route_failed`
+("Write job crashed"):** `generateJson` (`src/lib/llm/client.ts`) only
+passes `thinkingConfig` when a caller explicitly sets `thinkingLevel`;
+omitting it does **not** disable reasoning, it inherits gemini-3-flash-preview's
+own default (non-zero) thinking budget, which is billed against the same
+`maxOutputTokens` ceiling as the JSON payload. `write.ts` (1,400 tokens),
+`redesign.ts` (1,400), `ai-relevance.ts` (200 — a lite-model classification,
+the tightest budget in the codebase), and `derive-content.ts` (1,600, both
+calls) all omitted `thinkingLevel`, unlike `agent.ts`/`reply.ts` which
+deliberately set `thinkingLevel: 'medium'` **and** provisioned 2,800-3,000/
+1,600 tokens accordingly. Fix: added `thinkingLevel: 'minimal'` to all five
+call sites (none of the five are a judgment-heavy task that benefits from
+reasoning) so thinking tokens stop competing with the structured-output
+budget. Added a regression test per call site asserting the arg is passed.
+
+**Cluster B — BrightData SERP/Web Unlocker failures (`brightdata.search.failed`
+/ `brightdata.scrape.failed`, 100% failure rate across every unrelated query
+and domain in the pasted window):** Not fully root-caused — needs the user
+to check two things I have no access to: (1) whether production's
+`BRIGHTDATA_SERP_ZONE` is a real, distinct SERP zone from `BRIGHTDATA_SCRAPE_ZONE`
+(the 2026-08-07 zone-split fix, commit `0b286a2`, explicitly still needed
+"the user to create a SERP zone in their Bright Data dashboard and set the
+real value... in .env.local **and production**" — never confirmed done for
+prod), and (2) Bright Data account balance/status (a 400 on every call
+regardless of query, plus scrape-side connection failures, both look
+account-level rather than per-request). Found and fixed a real bug blocking
+future diagnosis of this either way: `describeError()` (`src/lib/events/
+error-context.ts`) deliberately drops `AppError.context` before anything is
+logged, so the *actual* Bright Data response body/status (captured in
+`fetchJson`/`fetchText`'s AppError context) never reached the operator Logs
+tab — every 400 just read "HTTP 400" with no reason. Added
+`externalErrorDetails()` in `src/lib/research/tools.ts` to pull `status`/
+`body`/`cause` out of the AppError context into the logged payload (only
+those three fields are ever set there — never headers/auth — so safe to
+show operators), and extended the two BrightData sentence builders in
+`src/lib/ui/log.ts` to append it, e.g. `HTTP 400 ({"error":"zone not found"})`
+instead of bare `HTTP 400`. 6 new tests (`tools.test.ts` ×3, `log.test.ts` ×3).
+
+Full repo suite: 198 files / 2102 tests green, `tsc --noEmit` and `eslint`
+clean. Not yet committed — awaiting the user's answer on the BrightData
+zone/account question before treating Cluster B as resolved.

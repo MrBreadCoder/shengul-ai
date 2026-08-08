@@ -72,6 +72,28 @@ These were settled during brainstorming and are not open questions:
 6. **Schema:** one nullable `jsonb` column. Everything else the feature needs
    already exists on `leads`.
 
+### Amendment — 2026-08-08
+
+Decision 3 above ("only `deliverable` activates") is narrowed, not reversed.
+One week of live data showed the `risky` bucket running ~62% of verified
+leads, and a direct query of production rows found it was **100%**
+`accept_all: true` + `reason: 'low_deliverability'` — i.e. Emailable
+reporting "this domain accepts everything, I cannot confirm this specific
+mailbox," not "this address is bad." Emailable's own guidance agrees risky
+does not mean do-not-send, and recommends segmenting rather than dropping
+these. `low_quality` risky results were not seen in the sample and remain
+under the original strict policy.
+
+New policy: `risky` activates when, and only when, `reason ===
+'low_deliverability'` and `accept_all === true`. Every other case in the
+original decision table — `undeliverable`, `unknown`, unrecognized states,
+and `risky`/`low_quality` — parks exactly as originally designed. The
+existing per-mailbox bounce-rate health monitoring (P4 deliverability
+hardening) and DSN-based bounce handling (`handleBounce`) are the safety
+net for this cohort; no new guard was added.
+
+Implementation: `docs/superpowers/plans/2026-08-08-emailable-accept-all-catch-all.md`.
+
 ## Architecture
 
 New module `src/lib/emailable/`, mirroring `src/lib/apollo/`:
