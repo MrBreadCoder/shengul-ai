@@ -61,6 +61,10 @@ function verification(state: string) {
   return { state, reason: 'x', email: 'jo@acme.com', score: state === 'deliverable' ? 100 : 10 }
 }
 
+function verificationWithAcceptAll(state: string, reason: string, acceptAll: boolean) {
+  return { state, reason, accept_all: acceptAll, email: 'jo@acme.com', score: 60 }
+}
+
 // Every test in this file exercises a code path that may reach the AI
 // relevance check (it runs on any row eligible for Emailable, which is most
 // rows in most tests here) — default it to an unconditional pass, once, at
@@ -617,6 +621,39 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
 
     expect(insertedRow()).toMatchObject({ email_status: expectedStatus, status: 'parked' })
     expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+    expect(summary.emailableRejected).toBe(1)
+  })
+
+  it('should activate the lead when Emailable says risky but the domain is an unconfirmable catch-all', async () => {
+    singleCandidateRun()
+    mockVerifyEmail.mockResolvedValue(verificationWithAcceptAll('risky', 'low_deliverability', true))
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(insertedRow()).toMatchObject({ email_status: 'risky', status: 'active' })
+    expect(insertedRow().email_verified_at).toEqual(expect.any(String))
+    expect(summary.emailableDeliverable).toBe(1)
+    expect(summary.emailableRejected).toBe(0)
+    expect(summary.verified).toBe(1)
+  })
+
+  it('should still park a risky lead when the domain is not accept_all', async () => {
+    singleCandidateRun()
+    mockVerifyEmail.mockResolvedValue(verificationWithAcceptAll('risky', 'low_deliverability', false))
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(insertedRow()).toMatchObject({ email_status: 'risky', status: 'parked' })
+    expect(summary.emailableRejected).toBe(1)
+  })
+
+  it('should still park a risky/low_quality lead even when the domain is accept_all', async () => {
+    singleCandidateRun()
+    mockVerifyEmail.mockResolvedValue(verificationWithAcceptAll('risky', 'low_quality', true))
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(insertedRow()).toMatchObject({ email_status: 'risky', status: 'parked' })
     expect(summary.emailableRejected).toBe(1)
   })
 
