@@ -58,6 +58,8 @@ export interface DiscoverySummary {
   verified: number
   emailableChecked: number
   emailableDeliverable: number
+  /** Subset of emailableDeliverable activated via the accept_all/low_deliverability catch-all carve-out, not a clean `deliverable` verdict — see map-verification.ts. */
+  emailableAcceptAllActivated: number
   emailableRejected: number
   emailableFailedOpen: number
   /** Apollo-verified leads parked without an Emailable call: suppressed for this client. */
@@ -281,6 +283,7 @@ interface VerifyBatchResult {
   rows: LeadInsert[]
   checked: number
   deliverable: number
+  acceptAllActivated: number
   rejected: number
   failedOpen: number
 }
@@ -333,6 +336,7 @@ async function verifyBatch(
 
   const verdicts = new Map<number, LeadVerificationVerdict>()
   let deliverable = 0
+  let acceptAllActivated = 0
   let rejected = 0
   let failedOpen = 0
 
@@ -349,8 +353,11 @@ async function verifyBatch(
       const verdict = mapEmailableVerdict(outcome, checkedAt)
       verdicts.set(target.index, verdict)
       if (!outcome.ok) failedOpen += 1
-      else if (verdict.leadStatus === 'active') deliverable += 1
-      else rejected += 1
+      else if (verdict.leadStatus === 'active') {
+        deliverable += 1
+        // The carve-out is the only way a `risky` emailStatus ends up active.
+        if (verdict.emailStatus === 'risky') acceptAllActivated += 1
+      } else rejected += 1
     })
   }
 
@@ -366,7 +373,7 @@ async function verifyBatch(
     }
   })
 
-  return { rows, checked: verifiable.length, deliverable, rejected, failedOpen }
+  return { rows, checked: verifiable.length, deliverable, acceptAllActivated, rejected, failedOpen }
 }
 
 interface EnrichResult {
@@ -375,6 +382,7 @@ interface EnrichResult {
   verifiedCount: number
   emailableChecked: number
   emailableDeliverable: number
+  emailableAcceptAllActivated: number
   emailableRejected: number
   emailableFailedOpen: number
   suppressedSkipped: number
@@ -473,6 +481,7 @@ async function enrichCandidates(
   let verifiedCount = 0
   let emailableChecked = 0
   let emailableDeliverable = 0
+  let emailableAcceptAllActivated = 0
   let emailableRejected = 0
   let emailableFailedOpen = 0
   let suppressedSkipped = 0
@@ -677,6 +686,7 @@ async function enrichCandidates(
     const verified = await verifyBatch(campaign, batchRows, skipVerification)
     emailableChecked += verified.checked
     emailableDeliverable += verified.deliverable
+    emailableAcceptAllActivated += verified.acceptAllActivated
     emailableRejected += verified.rejected
     emailableFailedOpen += verified.failedOpen
     for (const row of verified.rows) {
@@ -690,6 +700,7 @@ async function enrichCandidates(
     verifiedCount,
     emailableChecked,
     emailableDeliverable,
+    emailableAcceptAllActivated,
     emailableRejected,
     emailableFailedOpen,
     suppressedSkipped,
@@ -740,6 +751,7 @@ export async function runDiscoveryForCampaign(
     let verifiedSoFar = 0
     let emailableChecked = 0
     let emailableDeliverable = 0
+    let emailableAcceptAllActivated = 0
     let emailableRejected = 0
     let emailableFailedOpen = 0
     let suppressedSkipped = 0
@@ -758,6 +770,7 @@ export async function runDiscoveryForCampaign(
       enrichedCount += result.rows.length
       emailableChecked += result.emailableChecked
       emailableDeliverable += result.emailableDeliverable
+      emailableAcceptAllActivated += result.emailableAcceptAllActivated
       emailableRejected += result.emailableRejected
       emailableFailedOpen += result.emailableFailedOpen
       suppressedSkipped += result.suppressedSkipped
@@ -872,6 +885,7 @@ export async function runDiscoveryForCampaign(
       verified: verifiedSoFar,
       emailableChecked,
       emailableDeliverable,
+      emailableAcceptAllActivated,
       emailableRejected,
       emailableFailedOpen,
       suppressedSkipped,

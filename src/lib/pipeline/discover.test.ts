@@ -637,6 +637,15 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
     expect(summary.verified).toBe(1)
   })
 
+  it('should count an activated catch-all lead separately from a clean deliverable one', async () => {
+    singleCandidateRun()
+    mockVerifyEmail.mockResolvedValue(verificationWithAcceptAll('risky', 'low_deliverability', true))
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, icp })
+
+    expect(summary.emailableAcceptAllActivated).toBe(1)
+  })
+
   it('should still park a risky lead when the domain is not accept_all', async () => {
     singleCandidateRun()
     mockVerifyEmail.mockResolvedValue(verificationWithAcceptAll('risky', 'low_deliverability', false))
