@@ -12,6 +12,13 @@ function ok(state: string, reason: string) {
   return mapEmailableVerdict({ ok: true, result: result(state, reason) }, CHECKED_AT)
 }
 
+function okWithAcceptAll(state: string, reason: string, acceptAll: boolean | null | undefined) {
+  return mapEmailableVerdict(
+    { ok: true, result: { ...result(state, reason), accept_all: acceptAll } },
+    CHECKED_AT,
+  )
+}
+
 describe('mapEmailableVerdict', () => {
   it('should activate the lead when the state is deliverable', () => {
     const verdict = ok('deliverable', 'accepted_email')
@@ -39,6 +46,47 @@ describe('mapEmailableVerdict', () => {
       expect(verdict.leadStatus).toBe('parked')
     },
   )
+
+  it('should activate a risky/low_deliverability lead when the domain is accept_all', () => {
+    const verdict = okWithAcceptAll('risky', 'low_deliverability', true)
+
+    expect(verdict.emailStatus).toBe('risky')
+    expect(verdict.leadStatus).toBe('active')
+  })
+
+  it.each([false, null, undefined])(
+    'should still park a risky/low_deliverability lead when accept_all is %s',
+    (acceptAll) => {
+      const verdict = okWithAcceptAll('risky', 'low_deliverability', acceptAll)
+
+      expect(verdict.leadStatus).toBe('parked')
+    },
+  )
+
+  it('should still park a risky/low_quality lead even when the domain is accept_all', () => {
+    const verdict = okWithAcceptAll('risky', 'low_quality', true)
+
+    expect(verdict.emailStatus).toBe('risky')
+    expect(verdict.leadStatus).toBe('parked')
+  })
+
+  it('should be case and whitespace insensitive about the reason in the catch-all carve-out', () => {
+    const verdict = okWithAcceptAll('risky', ' Low_Deliverability ', true)
+
+    expect(verdict.leadStatus).toBe('active')
+  })
+
+  it('should preserve accept_all in the audit record for an activated catch-all lead', () => {
+    const verdict = okWithAcceptAll('risky', 'low_deliverability', true)
+
+    expect(verdict.verification).toMatchObject({
+      provider: 'emailable',
+      outcome: 'checked',
+      state: 'risky',
+      reason: 'low_deliverability',
+      accept_all: true,
+    })
+  })
 
   it.each(['no_connect', 'timeout', 'unavailable_smtp', 'unexpected_error'])(
     'should park the lead as unverified when unknown for reason %s',

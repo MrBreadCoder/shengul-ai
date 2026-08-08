@@ -34,7 +34,9 @@ function toJson(value: unknown): Json {
  * Emailable is never called for any other lead.
  *
  * Emailable only ever narrows: it can demote a lead Apollo verified, never
- * promote one Apollo did not. Only `deliverable` activates.
+ * promote one Apollo did not. `deliverable` activates, and so does the one
+ * carve-out below (`risky` + `low_deliverability` + `accept_all`) — every
+ * other verdict parks.
  *
  * A state we do not recognise parks the lead. That is deliberate and is NOT
  * the same as the fail-open branch below: an unrecognised state is a definite
@@ -59,9 +61,26 @@ export function mapEmailableVerdict(
 
   const state = outcome.result.state.toLowerCase().trim()
   const emailStatus = STATE_MAP[state] ?? 'unverified'
+  const reason = outcome.result.reason?.toLowerCase().trim()
+
+  // Carve-out: a `risky`/`low_deliverability` verdict on a domain Emailable
+  // itself reports as `accept_all` means the mail server accepts every
+  // address — Emailable cannot confirm this specific mailbox either way, so
+  // the verdict is "unconfirmable", not "bad". Apollo already verified this
+  // address once; parking it here would discard a working lead on nothing
+  // more than the domain's own catch-all configuration. In production this
+  // was the entire `risky` bucket (100% of a sampled batch), which is why it
+  // was silently discarding most of the pipeline's verified yield — see
+  // docs/superpowers/plans/2026-08-08-emailable-accept-all-catch-all.md.
+  // `low_quality` risky results (role/disposable-style signals) are a
+  // different, genuine quality concern and are NOT covered by this
+  // carve-out — they stay parked regardless of accept_all.
+  const isUnconfirmableCatchAll =
+    emailStatus === 'risky' && reason === 'low_deliverability' && outcome.result.accept_all === true
+
   return {
     emailStatus,
-    leadStatus: emailStatus === 'verified' ? 'active' : 'parked',
+    leadStatus: emailStatus === 'verified' || isUnconfirmableCatchAll ? 'active' : 'parked',
     verification: toJson({
       provider: 'emailable',
       outcome: 'checked',
