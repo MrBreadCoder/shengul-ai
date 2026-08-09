@@ -18,6 +18,7 @@
 //   pnpm rewrite-draft-emails --client-id=<uuid>                # dry run
 //   pnpm rewrite-draft-emails --client-id=<uuid> --apply         # persists
 //   pnpm rewrite-draft-emails --client-id=<uuid> --count=50 --apply
+//   pnpm rewrite-draft-emails --client-id=<uuid> --model-id=gemini-3.6-flash  # try a different model, dry run
 //
 // Static imports here are limited to packages and type-only app imports, for
 // the same reason as regenerate-sample-emails.ts: every app module that
@@ -45,6 +46,10 @@ const argsSchema = z.object({
   count: z.number().int().min(1).max(200),
   clientId: z.string().uuid().nullable(),
   apply: z.boolean(),
+  // Overrides generateJson's module-default model (gemini-3-flash-preview,
+  // see src/lib/llm/client.ts) for this run only — e.g. to compare a newer
+  // model's output before adopting it as the default anywhere.
+  modelId: z.string().nullable(),
 })
 type Args = z.infer<typeof argsSchema>
 
@@ -62,6 +67,7 @@ function parseArgs(argv: readonly string[]): Args {
     count: rawCount === undefined ? DEFAULT_COUNT : Number(rawCount),
     clientId: values.get('--client-id') ?? null,
     apply: argv.includes('--apply'),
+    modelId: values.get('--model-id') ?? null,
   })
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join(', ')}`, {})
@@ -137,6 +143,7 @@ interface AppDeps {
   generateJson: typeof import('../src/lib/llm/client').generateJson
   draftSchema: typeof import('../src/lib/pipeline/draft-schema').draftSchema
   selectSystemPrompt: typeof import('../src/lib/pipeline/write').selectSystemPrompt
+  EMAIL_WRITER_MODEL_ID: string
   MAX_OUTPUT_TOKENS: number
   buildPrompt: typeof import('../src/lib/pipeline/write').buildPrompt
   appendSignatureBlock: typeof import('../src/lib/pipeline/signature').appendSignatureBlock
@@ -170,6 +177,7 @@ async function loadAppDeps(): Promise<AppDeps> {
     generateJson: llmMod.generateJson,
     draftSchema: schemaMod.draftSchema,
     selectSystemPrompt: writeMod.selectSystemPrompt,
+    EMAIL_WRITER_MODEL_ID: writeMod.EMAIL_WRITER_MODEL_ID,
     MAX_OUTPUT_TOKENS: writeMod.MAX_OUTPUT_TOKENS,
     buildPrompt: writeMod.buildPrompt,
     appendSignatureBlock: signatureMod.appendSignatureBlock,
@@ -200,6 +208,7 @@ async function regenerateAndMaybeApply(
   deps: AppDeps,
   draft: DraftEmail,
   apply: boolean,
+  modelId: string | null,
 ): Promise<RewriteResult | null> {
   const [kase, lead, campaign, knowledge, client] = await Promise.all([
     deps.getCaseById(supabase, draft.caseId),
@@ -234,6 +243,9 @@ async function regenerateAndMaybeApply(
       prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
       schema: deps.draftSchema,
       maxOutputTokens: deps.MAX_OUTPUT_TOKENS,
+      // --model-id overrides for an experimental comparison; otherwise match
+      // write.ts's real default so this script's output stays representative.
+      modelId: modelId ?? deps.EMAIL_WRITER_MODEL_ID,
       thinkingLevel: 'minimal',
     },
   )
@@ -295,13 +307,14 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `Found ${drafts.length} draft(s). Mode: ${args.apply ? 'APPLY (writing to DB)' : 'DRY RUN (preview only — pass --apply to write)'}`,
+    `Found ${drafts.length} draft(s). Mode: ${args.apply ? 'APPLY (writing to DB)' : 'DRY RUN (preview only — pass --apply to write)'}` +
+      (args.modelId ? ` | Model override: ${args.modelId}` : ''),
   )
 
   let appliedCount = 0
   let skippedCount = 0
   for (const draft of drafts) {
-    const result = await regenerateAndMaybeApply(supabase, deps, draft, args.apply)
+    const result = await regenerateAndMaybeApply(supabase, deps, draft, args.apply, args.modelId)
     if (!result) {
       skippedCount += 1
       console.log(`\n[skip] ${draft.id} — missing case/lead/campaign, cannot rehydrate context.`)

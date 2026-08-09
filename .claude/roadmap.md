@@ -3516,3 +3516,66 @@ subjects in the DB match the regenerated ones.
 Full repo suite: 198 files / 2117 tests green, `tsc --noEmit` and `eslint`
 clean (unchanged from the prior entry — this pass only added the new
 script and ran it). Not committed (per instruction).
+
+## 2026-08-09 — Closed 5 prompt gaps in FORMAL_INTRO_SYSTEM_PROMPT, then switched the email writer to gemini-3.6-flash
+
+Reviewing the 8 formal_intro drafts applied the day before surfaced a real
+personalization problem: on thin-dossier cases (a single firmographic
+`case_knowledge` line — industry/size/founding year/location, nothing
+else) the model was fabricating a claim to fill the mandatory hook beat
+("...you likely require...", "...I know...is a priority") — a direct
+instance of the speculative-gap-filling pattern `HUMAN_VOICE_INSTRUCTION`
+is supposed to ban, but the beat-4 structural requirement was winning
+against it. Confirmed by inspecting real `case_knowledge` rows directly
+(Elkhart PD/Cheyenne PD: one bare `(company)` line; Extra Supermarket: 8
+facts including 2 `pain_point`s and `news`, of which the old prompt kept
+only one fragment). A same-day comparison against `gemini-3.6-flash`
+(model id confirmed live via web search — GA July 21, 2026) showed the
+fabrication dropped but didn't fix the underlying gap: the model either
+fell back to a near-miss of a banned filler phrase ("I am reaching out to
+[company]... regarding your... needs") or a disconnected trivia sentence —
+confirming this was a prompt-structure problem, not a model-capability one.
+
+Fixed 5 concrete gaps in `FORMAL_INTRO_SYSTEM_PROMPT` (`write.ts`):
+(1) beat 4 now has an explicit fallback for a bare-firmographic-only
+dossier — state the one fact plainly, no added claim, or skip it outright;
+(2)+(3) the hook now explicitly prefers `(pain_point)`/`(news)` facts over
+generic `(company)` firmographics, reinforced structurally by a new
+`DOSSIER_KIND_PRIORITY` sort in `buildPrompt` so the sharpest facts are
+listed first regardless of how well the model reads the text instruction;
+(4) the hook can now run to two sentences when multiple strong facts
+exist, word cap raised 120→130; (5) the local instruction now explicitly
+names the exact filler phrase pattern models were reaching for. A further
+round of manual review (the user's own read of the output) caught a sixth
+issue past those five: even fixed, beat 4 still surfaced as an isolated
+"Company X has done Y since Z" sentence reading like a database record.
+Rewrote the structure instruction so personalization is folded into the
+capabilities sentence (beat 3) and/or the ask (beat 5) instead of forced
+into its own paragraph — thin-dossier cases now produce 4 paragraphs, not
+5, with the one available fact woven into an existing sentence rather than
+given its own line.
+
+Verified with repeated dry runs (`pnpm rewrite-draft-emails`, no `--apply`)
+against the same 3 real cases (Dove Green, Al Ittihad, Cheyenne PD) across
+each prompt revision — confirmed each fix landed before moving to the
+next, never re-verified lead emails, never touched sent mail.
+
+Separately, switched `write.ts`'s first-touch generation specifically to
+`gemini-3.6-flash` via `generateJson`'s existing per-call `modelId`
+override (`EMAIL_WRITER_MODEL_ID`, same pattern as `ai-relevance.ts`'s
+`gemini-3.1-flash-lite`) — it showed better discipline against inventing
+claims in the comparison above. Scoped to `write.ts` only (`followup.ts`/
+`redesign.ts` keep the pipeline's shared default); this applies to every
+client's first-touch generation, not just Uniforms Fashion, since model
+choice isn't a per-client setting anywhere in this codebase (unlike
+`email_style`). `scripts/regenerate-sample-emails.ts` and
+`scripts/rewrite-draft-emails.ts` both updated to default to the same
+model (matching write.ts's real path); `rewrite-draft-emails.ts` keeps its
+`--model-id` CLI flag as an override for one-off comparisons.
+
+Full repo suite: 198 files / 2121 tests green (4 new: dossier-priority
+sort, sender/company prompt lines present/absent, gemini-3.6-flash
+modelId), `tsc --noEmit` and `eslint` clean. Not committed (per
+instruction). The 8 drafts applied the day before still carry the
+pre-fix formal_intro copy — not yet re-rewritten with the corrected
+prompt/model.

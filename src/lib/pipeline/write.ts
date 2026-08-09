@@ -24,6 +24,15 @@ import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 export const MAX_OUTPUT_TOKENS = 1_400
 const ACTOR = 'email_writer_agent'
 
+// Overrides the pipeline's shared default (gemini-3-flash-preview, see
+// src/lib/llm/client.ts) for first-touch email generation specifically —
+// gemini-3.6-flash (GA July 2026) is more disciplined about not padding a
+// thin dossier with an invented claim (see docs/superpowers/specs/
+// 2026-08-08-uniforms-fashion-formal-intro-email-style-design.md's
+// follow-up notes). Scoped to write.ts only: followup.ts and redesign.ts
+// keep the shared default.
+export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
+
 export type ReplyMode = Database['public']['Enums']['reply_mode']
 
 export interface RunWriteInput {
@@ -44,6 +53,20 @@ export interface WriteSummary {
 }
 
 export type EmailStyle = Database['public']['Enums']['email_style']
+
+// Lower number = surfaced first in the dossier text handed to the model. A
+// (pain_point) or (news) fact makes a far sharper personalization hook than
+// a bare (company) firmographic line (industry/size/founding year/location)
+// — putting the sharpest facts first means the model reaches for them before
+// it ever gets to the generic ones, regardless of how well it follows the
+// prioritization instruction in FORMAL_INTRO_SYSTEM_PROMPT's hook beat.
+const DOSSIER_KIND_PRIORITY: Record<Database['public']['Enums']['knowledge_kind'], number> = {
+  pain_point: 0,
+  news: 1,
+  answer: 2,
+  person: 3,
+  company: 4,
+}
 
 // Shared between both system prompts below so subject-line formatting can
 // never drift between styles.
@@ -84,18 +107,31 @@ export const FORMAL_INTRO_SYSTEM_PROMPT = [
   'a year, a location, or any specific you were not given.',
   ...SUBJECT_LINE_RULES,
   HUMAN_VOICE_INSTRUCTION,
-  'Structure the body as exactly five short paragraphs, in this order:',
+  'Structure the body around these ideas. Weave dossier facts into the sentences that need them —',
+  'never isolate a fact into its own flat sentence like "Company X has done Y since Z"; that reads',
+  'like a database record, not a personal email. Spread what you know about the recipient across',
+  'multiple paragraphs below instead of stacking it all into one:',
   '1. Greeting: "Dear [Recipient first name]," using the recipient\'s first name from the Recipient',
   'line below; if no name is given, use "Dear," alone.',
   '2. Self-introduction: one sentence giving the sender name and company name exactly as given in',
   '"Sender name" / "Our company name" below, plus the company\'s home base and years of experience —',
   'only the ones you have evidence for in "About our company"; drop whichever you don\'t have',
-  'rather than guessing.',
-  '3. Capabilities: one sentence on what the company manufactures or does, grounded in the value',
-  'proposition and "About our company" below.',
-  '4. Hook: one sentence connecting to this specific recipient — cite a real fact about their',
-  'company or industry from the dossier. Never use a generic line like "I came across your',
-  'company" or "I wanted to introduce ourselves" — the hook must trace to a dossier fact.',
+  'rather than guessing. One sentence, no added claims about the sender.',
+  '3. Capabilities: what the company manufactures or does, grounded in the value proposition and',
+  '"About our company" below. Fold in the recipient\'s industry, sector, or location where it fits',
+  'naturally (e.g. "...for police and corrections agencies like yours in Wyoming" or "...for',
+  'supermarket chains operating in humid climates") instead of listing capabilities generically.',
+  '4. Personalize: use the strongest available dossier fact(s) to show this is not a mass-blast —',
+  'prefer a (pain_point) or (news) fact over a bare (company) firmographic line (industry/size/',
+  'founding year/location). If several strong facts are available, split them between this',
+  'paragraph and the capabilities sentence above rather than stacking them all here. If the',
+  'dossier has only a bare (company) firmographic line and nothing sharper, do not give it its own',
+  'paragraph — fold that one detail (location, size, or sector) into the capabilities sentence',
+  'above or the ask below instead, and skip this paragraph entirely. Whichever paragraph a fact',
+  'ends up in, state it plainly; never add a claim about why it matters, what the recipient needs,',
+  'or what is "a priority" for them — that invents something the dossier does not say. Never fall',
+  'back to a generic line like "I came across your company", "I wanted to introduce ourselves", "I',
+  'am reaching out to [company]", or "regarding your [X] needs".',
   '5. Ask: a qualifying question asking whether the recipient is the right person to discuss the',
   'kind of procurement or project relevant to their industry, followed by an offer to send the',
   'company profile, references, and product capabilities if so. Only mention the booking link',
@@ -103,7 +139,8 @@ export const FORMAL_INTRO_SYSTEM_PROMPT = [
   'entire ask.',
   'End the body immediately after the offer sentence. Do not add "Best regards," a name, or any',
   'sign-off — a signature block is appended separately in code.',
-  '120 words or fewer, including the greeting.',
+  'Four to five short paragraphs total once personalization is folded in as above. 130 words or',
+  'fewer, including the greeting.',
 ].join(' ')
 
 // Picks the system prompt for a client's configured voice. Falls back to
@@ -120,7 +157,8 @@ export function buildPrompt(
   clientKnowledge: string,
   client: ClientRow | null,
 ): string {
-  const dossier = knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
+  const sortedKnowledge = [...knowledge].sort((a, b) => DOSSIER_KIND_PRIORITY[a.kind] - DOSSIER_KIND_PRIORITY[b.kind])
+  const dossier = sortedKnowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   return [
     `Recipient: ${lead.full_name}${lead.title ? `, ${lead.title}` : ''} at ${input.companyName}`,
     `Our value proposition: ${input.valueProp ?? 'n/a'}`,
@@ -158,6 +196,7 @@ async function processLead(
     prompt: buildPrompt(input, lead, knowledge, clientKnowledge, client),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    modelId: EMAIL_WRITER_MODEL_ID,
     // Straight-line generation, not a judgment call — pinning thinking to
     // 'minimal' keeps reasoning tokens from competing with MAX_OUTPUT_TOKENS
     // for the actual JSON payload (see .claude/roadmap.md 2026-08-08: the

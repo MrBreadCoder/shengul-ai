@@ -127,6 +127,7 @@ interface AppDeps {
   generateJson: typeof import('../src/lib/llm/client').generateJson
   draftSchema: typeof import('../src/lib/pipeline/draft-schema').draftSchema
   selectSystemPrompt: typeof import('../src/lib/pipeline/write').selectSystemPrompt
+  EMAIL_WRITER_MODEL_ID: string
   MAX_OUTPUT_TOKENS: number
   buildPrompt: typeof import('../src/lib/pipeline/write').buildPrompt
   listKnowledgeForCase: typeof import('../src/lib/db/case-knowledge').listKnowledgeForCase
@@ -156,6 +157,7 @@ async function loadAppDeps(): Promise<AppDeps> {
     generateJson: llmMod.generateJson,
     draftSchema: schemaMod.draftSchema,
     selectSystemPrompt: writeMod.selectSystemPrompt,
+    EMAIL_WRITER_MODEL_ID: writeMod.EMAIL_WRITER_MODEL_ID,
     MAX_OUTPUT_TOKENS: writeMod.MAX_OUTPUT_TOKENS,
     buildPrompt: writeMod.buildPrompt,
     listKnowledgeForCase: caseKnowledgeMod.listKnowledgeForCase,
@@ -206,6 +208,7 @@ async function regenerateOne(
       prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
       schema: deps.draftSchema,
       maxOutputTokens: deps.MAX_OUTPUT_TOKENS,
+      modelId: deps.EMAIL_WRITER_MODEL_ID,
       thinkingLevel: 'minimal',
     },
   )

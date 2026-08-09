@@ -37,9 +37,20 @@ vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEve
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
-import { runWriteForCase, CONCISE_SYSTEM_PROMPT, FORMAL_INTRO_SYSTEM_PROMPT } from './write'
+import { runWriteForCase, buildPrompt, CONCISE_SYSTEM_PROMPT, FORMAL_INTRO_SYSTEM_PROMPT } from './write'
+import type { KnowledgeRow } from '@/lib/db/case-knowledge'
+import type { LeadRow } from '@/lib/db/leads'
 
 const lead = { id: 'lead1', client_id: 'c1', case_id: 'case1', full_name: 'Jane Doe', title: 'CTO', email: 'jane@acme.com' }
+// Full LeadRow shape (unlike `lead` above, which only carries the fields the
+// mocked db layer needs) — buildPrompt is called directly in the tests below,
+// so its `lead` argument is real-typechecked against LeadRow, not loosened by
+// a vi.fn() mock boundary.
+const fullLead: LeadRow = {
+  ...lead, campaign_id: 'camp1', company_name: 'Acme', company_domain: 'acme.com', linkedin_url: null,
+  source: null, source_id: null, raw: null, email_status: 'verified', email_verified_at: null,
+  email_verification: null, status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+}
 const input = {
   clientId: 'c1', campaignId: 'camp1', caseId: 'case1', replyMode: 'auto_send' as const,
   valueProp: 'We save time', bookingLink: 'https://cal.com/x', mailboxIds: ['m1'], companyName: 'Acme',
@@ -88,6 +99,19 @@ describe('runWriteForCase', () => {
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ thinkingLevel: 'minimal' }),
+    )
+  })
+
+  it('should generate first-touch emails with the gemini-3.6-flash override', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    await runWriteForCase({} as never, input)
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
     )
   })
 
@@ -199,5 +223,48 @@ describe('runWriteForCase', () => {
       expect.anything(),
       expect.objectContaining({ instructions: CONCISE_SYSTEM_PROMPT }),
     )
+  })
+})
+
+function knowledgeRow(kind: KnowledgeRow['kind'], content: string): KnowledgeRow {
+  return {
+    id: `k-${kind}`, client_id: 'c1', case_id: 'case1', kind, content,
+    source_url: null, citation: null, created_by: 'agent', created_at: '2026-01-01T00:00:00Z',
+  }
+}
+
+describe('buildPrompt', () => {
+  it('should surface pain_point and news dossier facts before generic company facts', () => {
+    const knowledge = [
+      knowledgeRow('company', 'Acme — widgets industry, ~50 employees, founded 2001.'),
+      knowledgeRow('pain_point', 'Struggling with slow onboarding for new hires.'),
+      knowledgeRow('news', 'Just raised a Series B and is expanding to a second site.'),
+    ]
+
+    const prompt = buildPrompt(input, fullLead, knowledge, '', null)
+    const dossierSection = prompt.split('Dossier:\n')[1] ?? ''
+    const companyIndex = dossierSection.indexOf('(company)')
+    const painPointIndex = dossierSection.indexOf('(pain_point)')
+    const newsIndex = dossierSection.indexOf('(news)')
+
+    expect(painPointIndex).toBeGreaterThanOrEqual(0)
+    expect(newsIndex).toBeGreaterThanOrEqual(0)
+    expect(painPointIndex).toBeLessThan(companyIndex)
+    expect(newsIndex).toBeLessThan(companyIndex)
+  })
+
+  it('should include the sender name and company name when a client row is passed', () => {
+    const client = {
+      id: 'c1', name: 'Uniforms Fashion', signature_name: 'Cihat Bozkurt',
+    } as never
+    const prompt = buildPrompt(input, fullLead, [], '', client)
+    expect(prompt).toContain('Our company name: Uniforms Fashion')
+    expect(prompt).toContain('Sender name: Cihat Bozkurt')
+  })
+
+  it('should omit the sender/company lines when no client row is available', () => {
+    const prompt = buildPrompt(input, fullLead, [], '', null)
+    expect(prompt).not.toContain('Our company name:')
+    expect(prompt).not.toContain('Sender name:')
   })
 })
