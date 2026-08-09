@@ -37,7 +37,8 @@ create unique index email_styles_single_default_key on email_styles (is_default)
 
 insert into email_styles (name, voice_instructions, is_default) values
   ('Concise (default)',
-   'One clear idea. 90 words or fewer. Lead with the specific dossier fact, not a greeting. '
+   'You write short, human-sounding B2B cold emails. One clear idea. 90 words or fewer. '
+   || 'Lead with the specific dossier fact, not a greeting. '
    || 'Call to action: default to a low-friction reply question (e.g. "worth a quick reply?"), '
    || 'not the booking link. Only offer the booking link if it is clearly the natural next step — '
    || 'it is an optional extra, never the default ask.',
@@ -92,7 +93,6 @@ drop type email_style;
 // fact-inventing copy: this is the entire trust boundary between "operator
 // picks words" and "operator can break compliance."
 const FIXED_GUARDRAILS = [
-  'You write short, human-sounding B2B cold emails.',
   'Always write in English, even if the dossier or company knowledge below is in',
   'another language — translate any facts you use, never copy foreign-language text.',
   'No bulk markers, no unsubscribe footer, no tracking language.',
