@@ -3579,3 +3579,137 @@ modelId), `tsc --noEmit` and `eslint` clean. Not committed (per
 instruction). The 8 drafts applied the day before still carry the
 pre-fix formal_intro copy — not yet re-rewritten with the corrected
 prompt/model.
+
+## 2026-08-09 — Editable/addable email styles: Tasks 1–6 of 9 (DB/CRUD/pipeline/scripts/API, inline, no commits)
+
+Per the approved design (`docs/superpowers/specs/2026-08-09-editable-email-styles-design.md`)
+and plan (`docs/superpowers/plans/2026-08-09-editable-email-styles.md`), replacing
+the fixed `concise`/`formal_intro` enum with an operator-managed `email_styles`
+table. Executed Tasks 1–6 inline in this session (no subagent, no commits —
+work sits uncommitted in the working tree); Tasks 7–9 (the `[styleId]` PATCH/
+DELETE route, the `clients` route's `emailStyle`→`emailStyleId` swap, and the
+`email-style-select.tsx` + manager-dialog UI) are still pending.
+
+**Caught and fixed a plan/reality mismatch before it shipped a regression:**
+the plan's migration seed text for "Formal introduction" was ported from
+write.ts as it stood before `aa32d1f`/`9ffcf3e` (the human-voice-upgrade and
+personalization-gap fixes landed *after* the design doc was written).
+Seeding the stale wording would have silently reverted Uniforms Fashion's
+live emails to an inferior prompt on migration day, breaking the design's
+own explicit "byte-for-byte unchanged" rollout guarantee. Rewrote the
+migration's seed row to match the actual current `FORMAL_INTRO_SYSTEM_PROMPT`
+voice-specific content (structure-around-ideas framing, dossier-kind
+personalization fallback, 130-word cap) instead of the plan's literal SQL.
+
+**Task 1** — `supabase/migrations/0035_email_styles_table.sql` (table +
+partial-unique-index single-default constraint + corrected seed rows +
+`set_default_email_style` security-definer RPC for atomic default-swapping);
+`src/types/database.ts` (`email_styles` table, `clients.email_style_id`,
+FK relationship, `set_default_email_style` function signature, `email_style`
+enum removed); `src/lib/errors/app-error.ts` gained `EMAIL_STYLE_NAME_TAKEN`
+/ `EMAIL_STYLE_NOT_FOUND` / `CANNOT_DELETE_DEFAULT_STYLE`. `tsc --noEmit`
+confirmed failures land only in the files later tasks touch.
+
+**Task 2** — `src/lib/db/email-styles.ts` (new): `listEmailStyles`,
+`getEmailStyleById`, `getDefaultEmailStyle` (throws `INVARIANT_VIOLATION`
+if no row is default), `createEmailStyle`/`updateEmailStyle` (map Postgres
+`23505` to `EMAIL_STYLE_NAME_TAKEN`), `setDefaultEmailStyle` (wraps the RPC),
+`deleteEmailStyle` (blocks on `is_default`, reassigns referencing clients to
+`null` before deleting). 21 new tests, all green.
+
+**Task 3** — `updateClientEmailStyle` in `lib/db/clients.ts` now takes
+`styleId: string | null` instead of the enum; 3 new tests added (no prior
+block existed for it).
+
+**Task 4** — `write.ts`: `CONCISE_SYSTEM_PROMPT`/`FORMAL_INTRO_SYSTEM_PROMPT`/
+`selectSystemPrompt`/`EmailStyle` removed; replaced with `FIXED_GUARDRAILS`
+(English-only, no bulk markers, dossier-grounded facts, subject-line rules,
+human-voice instruction — never editable by an operator) and pure
+`buildSystemPrompt(voiceInstructions)`. `processLead` now resolves
+`getEmailStyleById(client.email_style_id)` falling back to
+`getDefaultEmailStyle`, preserving the "missing client row never blocks
+generation" guarantee. 18 tests green (4 new: style lookup, two fallback
+paths, `buildSystemPrompt` guardrail/ordering checks).
+
+**Task 5** — `scripts/regenerate-sample-emails.ts` and
+`scripts/rewrite-draft-emails.ts` both switched from `deps.selectSystemPrompt`
+to `deps.buildSystemPrompt` + the same client-style/default-fallback lookup,
+via the same `AppDeps` dependency-injection pattern already used there.
+`tsc --noEmit` clean on both.
+
+**Task 6** — `src/app/api/email-styles/route.ts` (new): operator-only
+`GET`→`listEmailStyles`, `POST`→Zod-validated (`name` ≤80 chars,
+`voiceInstructions` ≤4000 chars)→`createEmailStyle`, logs
+`email_style.created`, maps name conflicts to 409. 7 new tests green.
+
+Full repo suite after Task 6: **200 files / 2155 tests green**. `tsc
+--noEmit` shows exactly 3 remaining errors, all in Tasks 7–9's untouched
+files (`email-style-select.tsx`, `clients/[id]/page.tsx`,
+`api/clients/[clientId]/route.ts`) — no surprises elsewhere. Not committed
+(per instruction — "skip commits, inline execution").
+
+**Next:** Task 7 (`api/email-styles/[styleId]/route.ts` PATCH/set-default/
+DELETE), Task 8 (`clients/[clientId]/route.ts` emailStyle→emailStyleId),
+Task 9 (UI: `email-style-select.tsx` rewrite + new
+`email-style-manager-dialog.tsx`).
+
+## 2026-08-09 — Editable & addable email styles: Tasks 7–11 (feature complete)
+
+Finished the remaining tasks from the entry above, same session, still
+inline/no commits. Replaced the fixed `concise`/`formal_intro` email_style
+enum with an operator-managed `email_styles` table end to end.
+
+**Task 7** — `src/app/api/email-styles/[styleId]/route.ts` (new):
+operator-only `PATCH` (edit `name`/`voiceInstructions`, or — mutually
+exclusive with those two — `isDefault: true` to call
+`setDefaultEmailStyle`) and `DELETE` (409 `cannot_delete_default_style` on
+`CANNOT_DELETE_DEFAULT_STYLE`, 404 on `EMAIL_STYLE_NOT_FOUND`). 11 new
+tests green.
+
+**Task 8** — `api/clients/[clientId]/route.ts`: `patchSchema.emailStyle`
+(enum) → `emailStyleId: z.string().uuid().nullable()`; PATCH block and
+`client.email_style_changed` audit payload updated to carry the id, not
+the enum value. Caught a bug in the plan's own test fixture along the way:
+its sample id `'style-2'` isn't a valid UUID and would 400 against the new
+`.uuid()` schema — used a real RFC4122-shaped id instead (version nibble
+`4`, variant nibble in `8-b`) so the tests actually exercise the success
+path they claim to.
+
+**Task 9** — `email-style-select.tsx` rewritten to render every style from
+a live `styles` list (no more hardcoded 2-value array) and PATCH
+`emailStyleId`; new `email-style-manager-dialog.tsx` (Dialog pattern
+matching `edit-signature-dialog.tsx`/`rename-client-dialog.tsx`) adds
+inline create/edit/delete/set-default, with an explicit "this changes it
+for every client using it" warning on both the list view and the edit
+form. Verified all UI primitives/icons used (`Button` `icon-xs` size,
+`Star`/`Trash`/`Plus`/`PencilSimple` from `@phosphor-icons/react`, `sonner`
+toasts) actually exist in this codebase before writing the file, not just
+copied from the plan's sketch. One `eslint` fix: unescaped apostrophe →
+`&apos;`. No test file, consistent with every other `*-select.tsx`/
+`*-dialog.tsx` on this page.
+
+**Task 10** — `clients/[id]/page.tsx` now fetches `listEmailStyles`
+alongside the client and resolves `selectedEmailStyle` (client's
+`email_style_id`, falling back to whichever style `is_default` — this
+matters beyond migration day, since a future style deletion can null a
+client's `email_style_id` again). `tsc --noEmit` clean across the whole
+repo — this was the last file referencing the old shape.
+
+**Full-suite verification (Task 11):** `pnpm vitest run` → **201 files /
+2167 tests green**. `pnpm exec tsc --noEmit` → clean, zero errors.
+`pnpm exec eslint .` → zero errors, 7 warnings (all pre-existing,
+unrelated `no-unused-vars` in `smtp/connect`, `env`/`env-public`,
+`smtp-connection`, `tokens` test files this work never touched).
+
+Every existing client's resolved voice is unchanged after migration — the
+backfill is explicit (matched by name), not a bare default. The one
+deliberate correction to the design doc's own sketch: migration
+`0035`'s "Formal introduction" seed row was rewritten to match `write.ts`
+as it actually stands at HEAD (post `9ffcf3e`), not the pre-human-voice-
+upgrade wording the design doc's SQL sketch carried — using the stale text
+would have silently regressed Uniforms Fashion's live emails on migration
+day. Design: `docs/superpowers/specs/2026-08-09-editable-email-styles-design.md`.
+Plan: `docs/superpowers/plans/2026-08-09-editable-email-styles.md` (all 11
+tasks' non-commit steps checked off; commit steps deliberately left
+unchecked — nothing in this feature has been committed yet, per
+instruction).

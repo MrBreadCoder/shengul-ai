@@ -42,7 +42,7 @@
 - Produces: `Database['public']['Tables']['clients']['Row']['email_style_id']: string | null`
 - Produces: `AppErrorCode` gains `'EMAIL_STYLE_NAME_TAKEN' | 'EMAIL_STYLE_NOT_FOUND' | 'CANNOT_DELETE_DEFAULT_STYLE'`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0035_email_styles_table.sql`:
 
@@ -145,7 +145,7 @@ end;
 $$;
 ```
 
-- [ ] **Step 2: Update `src/types/database.ts` — `clients` table**
+- [x] **Step 2: Update `src/types/database.ts` — `clients` table**
 
 In the `clients.Row` block, replace:
 
@@ -185,7 +185,7 @@ Replace the `clients` table's `Relationships: []` with:
         ]
 ```
 
-- [ ] **Step 3: Add the `email_styles` table type**
+- [x] **Step 3: Add the `email_styles` table type**
 
 Immediately after the `clients` table block's closing `}` (before the `app_users:` block), insert:
 
@@ -212,7 +212,7 @@ Immediately after the `clients` table block's closing `}` (before the `app_users
       }
 ```
 
-- [ ] **Step 4: Remove the `email_style` enum, add the `set_default_email_style` function**
+- [x] **Step 4: Remove the `email_style` enum, add the `set_default_email_style` function**
 
 In the `Enums` block, delete the line:
 
@@ -229,7 +229,7 @@ In the `Functions` block, add (alongside the other RPC entries, e.g. next to `cl
       }
 ```
 
-- [ ] **Step 5: Add the new `AppErrorCode` values**
+- [x] **Step 5: Add the new `AppErrorCode` values**
 
 In `src/lib/errors/app-error.ts`, extend the union:
 
@@ -250,7 +250,7 @@ export type AppErrorCode =
   | 'CANNOT_DELETE_DEFAULT_STYLE'
 ```
 
-- [ ] **Step 6: Type-check**
+- [x] **Step 6: Type-check**
 
 Run: `pnpm exec tsc --noEmit`
 Expected: fails at this point — every file still referencing `email_style`/`selectSystemPrompt`/`EmailStyle`/`Database['public']['Enums']['email_style']` will now show a type error. That's expected; those call sites are fixed in Tasks 2–8. Confirm the errors are *only* in the files this plan's later tasks touch (`src/lib/db/clients.ts`, `src/lib/pipeline/write.ts`, `src/lib/pipeline/write.test.ts`, `src/app/(app)/clients/[id]/page.tsx`, `src/app/(app)/clients/[id]/email-style-select.tsx`, `src/app/api/clients/[clientId]/route.ts`, `src/app/api/clients/[clientId]/route.test.ts`, `scripts/regenerate-sample-emails.ts`, `scripts/rewrite-draft-emails.ts`) — no surprises elsewhere.
@@ -276,7 +276,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `SupabaseClient<Database>` from `@supabase/supabase-js`; `AppError` from `@/lib/errors/app-error`; `Database` from `@/types/database`.
 - Produces: `EmailStyleRow` type; `listEmailStyles(supabase)`, `getEmailStyleById(supabase, id)`, `getDefaultEmailStyle(supabase)`, `createEmailStyle(supabase, { name, voiceInstructions })`, `updateEmailStyle(supabase, id, { name?, voiceInstructions? })`, `setDefaultEmailStyle(supabase, id)`, `deleteEmailStyle(supabase, id)` — all consumed by Tasks 4, 6, 7.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/lib/db/email-styles.test.ts`:
 
@@ -487,12 +487,12 @@ describe('deleteEmailStyle', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/db/email-styles.test.ts`
 Expected: FAIL — `Cannot find module './email-styles'` (the module doesn't exist yet).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/db/email-styles.ts`:
 
@@ -638,7 +638,7 @@ export async function deleteEmailStyle(supabase: SupabaseClient<Database>, id: s
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/db/email-styles.test.ts`
 Expected: PASS — all cases green.
@@ -664,7 +664,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: nothing new.
 - Produces: `updateClientEmailStyle(supabase, id, styleId: string | null): Promise<ClientRow>` — consumed by Task 8's API route.
 
-- [ ] **Step 1: Update the failing expectation in `clients.test.ts`**
+- [x] **Step 1: Update the failing expectation in `clients.test.ts`**
 
 There is no existing `describe('updateClientEmailStyle', ...)` block in `clients.test.ts` today (it was added for the enum version in the prior email-style feature but is not present in the current file — confirm with `grep -n "updateClientEmailStyle" src/lib/db/clients.test.ts` before writing; if a block already exists, replace it, otherwise add it). Add:
 
@@ -701,12 +701,12 @@ describe('updateClientEmailStyle', () => {
 
 Also update the top-of-file `import { ... updateClientEmailStyle ... } from './clients'` list if not already present.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/db/clients.test.ts`
 Expected: FAIL — `updateClientEmailStyle` still takes the old enum type, or the mocked `update` call assertion (`{ email_style_id: ... }`) doesn't match the current implementation's `{ email_style: ... }` call.
 
-- [ ] **Step 3: Update the implementation**
+- [x] **Step 3: Update the implementation**
 
 In `src/lib/db/clients.ts`, replace the `updateClientEmailStyle` function (currently lines 151-168):
 
@@ -756,7 +756,7 @@ export async function updateClientEmailStyle(
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/db/clients.test.ts`
 Expected: PASS.
@@ -782,7 +782,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `getEmailStyleById`, `getDefaultEmailStyle` from `@/lib/db/email-styles` (Task 2).
 - Produces: `buildSystemPrompt(voiceInstructions: string): string` — replaces `selectSystemPrompt`/`CONCISE_SYSTEM_PROMPT`/`FORMAL_INTRO_SYSTEM_PROMPT`/`EmailStyle`, all four removed. Consumed nowhere else in this plan except Task 5's scripts.
 
-- [ ] **Step 1: Update the failing tests in `write.test.ts`**
+- [x] **Step 1: Update the failing tests in `write.test.ts`**
 
 Replace the import line:
 
@@ -937,12 +937,12 @@ describe('buildSystemPrompt', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/lib/pipeline/write.test.ts`
 Expected: FAIL — `buildSystemPrompt` is not exported yet, `CONCISE_SYSTEM_PROMPT`/`FORMAL_INTRO_SYSTEM_PROMPT` no longer exist as imports the file references (compile error) — expected until Step 3.
 
-- [ ] **Step 3: Update `write.ts`**
+- [x] **Step 3: Update `write.ts`**
 
 Update the import block (lines 1-19) — add the new dependency:
 
@@ -1096,7 +1096,7 @@ with:
     prompt: buildPrompt(input, lead, knowledge, clientKnowledge, client),
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/lib/pipeline/write.test.ts`
 Expected: PASS — all cases green, including the new `buildSystemPrompt` and fallback tests.
@@ -1124,7 +1124,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 No test files exist for these scripts today (confirmed: `find scripts -name "*.test.ts"` returns nothing) — consistent with the prior formal-intro-style feature, which updated these same two scripts with no new test coverage. Verification here is `tsc --noEmit` plus a manual dry run against a real client id, not a unit test.
 
-- [ ] **Step 1: Update `scripts/regenerate-sample-emails.ts`**
+- [x] **Step 1: Update `scripts/regenerate-sample-emails.ts`**
 
 In the `AppDeps` interface, replace:
 
@@ -1214,7 +1214,7 @@ with:
       prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
 ```
 
-- [ ] **Step 2: Update `scripts/rewrite-draft-emails.ts`**
+- [x] **Step 2: Update `scripts/rewrite-draft-emails.ts`**
 
 Apply the identical pattern: in `AppDeps`, replace `selectSystemPrompt` with `buildSystemPrompt`, `getEmailStyleById`, `getDefaultEmailStyle`; in `loadAppDeps`, add `import('../src/lib/db/email-styles')` to the `Promise.all` array and destructure/return it the same way; in `regenerateAndMaybeApply`, replace:
 
@@ -1239,7 +1239,7 @@ with:
       prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
 ```
 
-- [ ] **Step 3: Type-check both scripts**
+- [x] **Step 3: Type-check both scripts**
 
 Run: `pnpm exec tsc --noEmit`
 Expected: no errors originating from `scripts/regenerate-sample-emails.ts` or `scripts/rewrite-draft-emails.ts`.
@@ -1265,7 +1265,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `requireUser` (`@/lib/auth/require-user`), `createAdminClient` (`@/lib/supabase/admin`), `listEmailStyles`/`createEmailStyle` (Task 2), `logEvent` (`@/lib/events/log-event`), `isAppError` (`@/lib/errors/app-error`).
 - Produces: `GET` → `{ styles: EmailStyleRow[] }`; `POST` → `{ ok: true, style: EmailStyleRow }` (201). Consumed by Task 9's UI.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/app/api/email-styles/route.test.ts`:
 
@@ -1356,12 +1356,12 @@ describe('POST /api/email-styles', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run src/app/api/email-styles/route.test.ts`
 Expected: FAIL — `Cannot find module './route'`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/app/api/email-styles/route.ts`:
 
@@ -1428,7 +1428,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run src/app/api/email-styles/route.test.ts`
 Expected: PASS.
@@ -1454,7 +1454,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `updateEmailStyle`, `setDefaultEmailStyle`, `deleteEmailStyle` (Task 2); same auth/error helpers as Task 6.
 - Produces: `PATCH` → `{ ok: true, style }`; `DELETE` → `{ ok: true }`. Consumed by Task 9's UI.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/app/api/email-styles/[styleId]/route.test.ts`:
 
@@ -1584,12 +1584,12 @@ describe('DELETE /api/email-styles/[styleId]', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run "src/app/api/email-styles/[styleId]/route.test.ts"`
 Expected: FAIL — `Cannot find module './route'`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/app/api/email-styles/[styleId]/route.ts`:
 
@@ -1702,7 +1702,7 @@ export async function DELETE(
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run "src/app/api/email-styles/[styleId]/route.test.ts"`
 Expected: PASS.
@@ -1728,7 +1728,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `updateClientEmailStyle(supabase, id, styleId: string | null)` (Task 3).
 - Produces: nothing new consumed elsewhere.
 
-- [ ] **Step 1: Update the failing test**
+- [x] **Step 1: Update the failing test**
 
 In `src/app/api/clients/[clientId]/route.test.ts`, replace:
 
@@ -1782,12 +1782,12 @@ with:
   })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run "src/app/api/clients/[clientId]/route.test.ts"`
 Expected: FAIL — the route still parses `emailStyle` as an enum; `emailStyleId` is unrecognized so it's silently dropped by Zod, and `updateClientEmailStyleMock` is never called, so the "at least one field" refine also rejects the empty-looking body with 400 where 200 is expected.
 
-- [ ] **Step 3: Update `src/app/api/clients/[clientId]/route.ts`**
+- [x] **Step 3: Update `src/app/api/clients/[clientId]/route.ts`**
 
 In `patchSchema`, replace:
 
@@ -1863,7 +1863,7 @@ with:
     }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm vitest run "src/app/api/clients/[clientId]/route.test.ts"`
 Expected: PASS.
@@ -1891,7 +1891,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 No dedicated test file — consistent with every other `*-select.tsx` / `*-dialog.tsx` on this page (`warmup-profile-select.tsx`, `edit-signature-dialog.tsx`, etc.), none of which have one.
 
-- [ ] **Step 1: Rewrite `email-style-select.tsx`**
+- [x] **Step 1: Rewrite `email-style-select.tsx`**
 
 Replace the entire file:
 
@@ -1972,7 +1972,7 @@ export function EmailStyleSelect({ clientId, styles, selectedStyleId }: EmailSty
 }
 ```
 
-- [ ] **Step 2: Write `email-style-manager-dialog.tsx`**
+- [x] **Step 2: Write `email-style-manager-dialog.tsx`**
 
 Create `src/app/(app)/clients/[id]/email-style-manager-dialog.tsx`:
 
@@ -2254,7 +2254,7 @@ export function EmailStyleManagerDialog({
 }
 ```
 
-- [ ] **Step 3: Type-check and lint**
+- [x] **Step 3: Type-check and lint**
 
 Run: `pnpm exec tsc --noEmit && pnpm exec eslint src/app/\(app\)/clients/\[id\]/email-style-select.tsx src/app/\(app\)/clients/\[id\]/email-style-manager-dialog.tsx`
 Expected: no errors. (`page.tsx` will still fail to type-check until Task 10 updates its `<EmailStyleSelect>` call — that's expected and resolved next.)
@@ -2279,7 +2279,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `listEmailStyles`, `getDefaultEmailStyle` (Task 2); `EmailStyleSelect` (Task 9).
 - Produces: nothing consumed elsewhere — this is the page's own wiring.
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 In `src/app/(app)/clients/[id]/page.tsx`, alongside the other `lib/db` imports:
 
@@ -2293,7 +2293,7 @@ add directly after it:
 import { listEmailStyles, getDefaultEmailStyle } from '@/lib/db/email-styles'
 ```
 
-- [ ] **Step 2: Fetch styles and resolve the selected id**
+- [x] **Step 2: Fetch styles and resolve the selected id**
 
 Locate:
 
@@ -2319,7 +2319,7 @@ Replace with:
   const t = await getTranslations('clients')
 ```
 
-- [ ] **Step 3: Update the render call**
+- [x] **Step 3: Update the render call**
 
 Replace:
 
@@ -2333,7 +2333,7 @@ with:
             <EmailStyleSelect clientId={client.id} styles={emailStyles} selectedStyleId={selectedEmailStyle.id} />
 ```
 
-- [ ] **Step 4: Type-check the whole project**
+- [x] **Step 4: Type-check the whole project**
 
 Run: `pnpm exec tsc --noEmit`
 Expected: clean — this was the last file referencing the old `email_style`/`EmailStyleSelect` shape.
@@ -2358,17 +2358,17 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: nothing new — this is the final verification pass.
 - Produces: nothing consumed elsewhere.
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite**
 
 Run: `pnpm vitest run`
 Expected: every test file passes, including all files touched in Tasks 2-8. Record the exact "`N` files / `M` tests" summary line from the output for Step 3.
 
-- [ ] **Step 2: Type-check and lint the whole repo**
+- [x] **Step 2: Type-check and lint the whole repo**
 
 Run: `pnpm exec tsc --noEmit && pnpm exec eslint .`
 Expected: both clean. If either surfaces an issue, fix it before proceeding — do not append the roadmap entry or commit until this step is clean.
 
-- [ ] **Step 3: Append the roadmap entry**
+- [x] **Step 3: Append the roadmap entry**
 
 Append to `.claude/roadmap.md` (after the existing final entry, keeping the same `## YYYY-MM-DD — Title` heading style):
 
