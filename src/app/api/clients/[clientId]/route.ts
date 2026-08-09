@@ -43,7 +43,7 @@ const patchSchema = z
     address: nullableTextSchema(200).optional(),
     signatureName: nullableTextSchema(120).optional(),
     signatureTitle: nullableTextSchema(120).optional(),
-    emailStyle: z.enum(['concise', 'formal_intro']).optional(),
+    emailStyleId: z.string().uuid().nullable().optional(),
   })
   .refine(
     (body) =>
@@ -54,7 +54,7 @@ const patchSchema = z
       body.address !== undefined ||
       body.signatureName !== undefined ||
       body.signatureTitle !== undefined ||
-      body.emailStyle !== undefined,
+      body.emailStyleId !== undefined,
     { message: 'At least one field must be provided' },
   )
 
@@ -150,14 +150,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ clien
       }
     }
 
-    if (body.emailStyle !== undefined) {
-      updated = await updateClientEmailStyle(admin, clientId, body.emailStyle)
+    if (body.emailStyleId !== undefined) {
+      updated = await updateClientEmailStyle(admin, clientId, body.emailStyleId)
       try {
         await logEvent({
           clientId,
           actor: `human:${appUser.id}`,
           type: 'client.email_style_changed',
-          payload: { from: client.email_style, to: body.emailStyle },
+          payload: { from: client.email_style_id, to: body.emailStyleId },
         })
       } catch {
         // Audit logging is best-effort — the update already succeeded.
