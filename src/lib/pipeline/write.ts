@@ -5,6 +5,7 @@ import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge
 import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getClientById, type ClientRow } from '@/lib/db/clients'
+import { getEmailStyleById, getDefaultEmailStyle } from '@/lib/db/email-styles'
 import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
@@ -52,8 +53,6 @@ export interface WriteSummary {
   sent: number
 }
 
-export type EmailStyle = Database['public']['Enums']['email_style']
-
 // Lower number = surfaced first in the dossier text handed to the model. A
 // (pain_point) or (news) fact makes a far sharper personalization hook than
 // a bare (company) firmographic line (industry/size/founding year/location)
@@ -68,8 +67,8 @@ const DOSSIER_KIND_PRIORITY: Record<Database['public']['Enums']['knowledge_kind'
   company: 4,
 }
 
-// Shared between both system prompts below so subject-line formatting can
-// never drift between styles.
+// Shared across every style's system prompt so subject-line formatting can
+// never drift between them.
 const SUBJECT_LINE_RULES = [
   `Subject line: 2-5 words, under ${SUBJECT_TARGET_CHARS} characters so it never truncates`,
   'on mobile. Make it specific to the recipient\'s company, role, or a dossier fact —',
@@ -78,76 +77,28 @@ const SUBJECT_LINE_RULES = [
   'act now, urgent, limited time, buy now).',
 ]
 
-// Default voice — dossier-led, low-friction, no greeting. Used for every
-// client unless email_style is explicitly set to 'formal_intro'.
-export const CONCISE_SYSTEM_PROMPT = [
-  'You write short, human-sounding B2B cold emails.',
-  'Always write in English, even if the dossier or company knowledge below is in',
-  'another language — translate any facts you use, never copy foreign-language text.',
-  'No bulk markers, no unsubscribe footer, no tracking language.',
-  'One clear idea. 90 words or fewer.',
-  'Use only facts present in the provided dossier. Never invent specifics.',
-  ...SUBJECT_LINE_RULES,
-  HUMAN_VOICE_INSTRUCTION,
-  'Lead with the specific dossier fact, not a greeting.',
-  'Call to action: default to a low-friction reply question (e.g. "worth a quick reply?"),',
-  'not the booking link. Only offer the booking link if it is clearly the natural next step —',
-  'it is an optional extra, never the default ask.',
-].join(' ')
-
-// Formal introduction voice — a per-client opt-in (clients.email_style =
-// 'formal_intro'), currently used only by Uniforms Fashion. See
-// docs/superpowers/specs/2026-08-08-uniforms-fashion-formal-intro-email-style-design.md
-export const FORMAL_INTRO_SYSTEM_PROMPT = [
-  'You write a formal B2B introduction email for a manufacturer reaching out cold to a new prospect.',
+// Always true regardless of which email_styles row a client is on — never
+// something an operator-authored style's voice_instructions can opt out of.
+// This is the entire trust boundary between "operator picks the voice and
+// structure" and "operator can break compliance": subject formatting,
+// English-only output, no bulk-sender markers, and dossier-grounded facts
+// all live here, in code, never in a database row a non-engineer edits. See
+// docs/superpowers/specs/2026-08-09-editable-email-styles-design.md
+const FIXED_GUARDRAILS = [
   'Always write in English, even if the dossier or company knowledge below is in',
   'another language — translate any facts you use, never copy foreign-language text.',
   'No bulk markers, no unsubscribe footer, no tracking language.',
   'Use only facts present in the provided dossier or company knowledge below. Never invent a name,',
-  'a year, a location, or any specific you were not given.',
+  'a year, a location, or any other specific you were not given.',
   ...SUBJECT_LINE_RULES,
   HUMAN_VOICE_INSTRUCTION,
-  'Structure the body around these ideas. Weave dossier facts into the sentences that need them —',
-  'never isolate a fact into its own flat sentence like "Company X has done Y since Z"; that reads',
-  'like a database record, not a personal email. Spread what you know about the recipient across',
-  'multiple paragraphs below instead of stacking it all into one:',
-  '1. Greeting: "Dear [Recipient first name]," using the recipient\'s first name from the Recipient',
-  'line below; if no name is given, use "Dear," alone.',
-  '2. Self-introduction: one sentence giving the sender name and company name exactly as given in',
-  '"Sender name" / "Our company name" below, plus the company\'s home base and years of experience —',
-  'only the ones you have evidence for in "About our company"; drop whichever you don\'t have',
-  'rather than guessing. One sentence, no added claims about the sender.',
-  '3. Capabilities: what the company manufactures or does, grounded in the value proposition and',
-  '"About our company" below. Fold in the recipient\'s industry, sector, or location where it fits',
-  'naturally (e.g. "...for police and corrections agencies like yours in Wyoming" or "...for',
-  'supermarket chains operating in humid climates") instead of listing capabilities generically.',
-  '4. Personalize: use the strongest available dossier fact(s) to show this is not a mass-blast —',
-  'prefer a (pain_point) or (news) fact over a bare (company) firmographic line (industry/size/',
-  'founding year/location). If several strong facts are available, split them between this',
-  'paragraph and the capabilities sentence above rather than stacking them all here. If the',
-  'dossier has only a bare (company) firmographic line and nothing sharper, do not give it its own',
-  'paragraph — fold that one detail (location, size, or sector) into the capabilities sentence',
-  'above or the ask below instead, and skip this paragraph entirely. Whichever paragraph a fact',
-  'ends up in, state it plainly; never add a claim about why it matters, what the recipient needs,',
-  'or what is "a priority" for them — that invents something the dossier does not say. Never fall',
-  'back to a generic line like "I came across your company", "I wanted to introduce ourselves", "I',
-  'am reaching out to [company]", or "regarding your [X] needs".',
-  '5. Ask: a qualifying question asking whether the recipient is the right person to discuss the',
-  'kind of procurement or project relevant to their industry, followed by an offer to send the',
-  'company profile, references, and product capabilities if so. Only mention the booking link',
-  'here if it is clearly the natural next step; otherwise the offer to send materials is the',
-  'entire ask.',
-  'End the body immediately after the offer sentence. Do not add "Best regards," a name, or any',
-  'sign-off — a signature block is appended separately in code.',
-  'Four to five short paragraphs total once personalization is folded in as above. 130 words or',
-  'fewer, including the greeting.',
 ].join(' ')
 
-// Picks the system prompt for a client's configured voice. Falls back to
-// CONCISE_SYSTEM_PROMPT for null/undefined so a missing client row never
-// blocks first-touch generation.
-export function selectSystemPrompt(emailStyle: EmailStyle | null | undefined): string {
-  return emailStyle === 'formal_intro' ? FORMAL_INTRO_SYSTEM_PROMPT : CONCISE_SYSTEM_PROMPT
+// Combines the fixed guardrails above with a style's operator-authored voice
+// text (email_styles.voice_instructions). The only place style text touches
+// the system prompt — kept pure so it's trivial to unit test.
+export function buildSystemPrompt(voiceInstructions: string): string {
+  return `${FIXED_GUARDRAILS} ${voiceInstructions}`
 }
 
 export function buildPrompt(
@@ -190,9 +141,16 @@ async function processLead(
   if (!lead.email) return 'skipped'
   if (await isSuppressed(supabase, input.clientId, lead.email)) return 'skipped'
 
+  // Resolves the client's configured voice, falling back to the DB-wide
+  // default whenever the client has none set (or has no row at all) — same
+  // "missing client row never blocks generation" guarantee the old
+  // selectSystemPrompt(undefined) fallback provided.
+  const clientStyle = client?.email_style_id ? await getEmailStyleById(supabase, client.email_style_id) : null
+  const style = clientStyle ?? (await getDefaultEmailStyle(supabase))
+
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
   const draft = await generateJson(context, {
-    instructions: selectSystemPrompt(client?.email_style),
+    instructions: buildSystemPrompt(style.voice_instructions),
     prompt: buildPrompt(input, lead, knowledge, clientKnowledge, client),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
