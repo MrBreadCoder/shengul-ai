@@ -148,16 +148,18 @@ export async function updateClientWarmupProfile(
   return data
 }
 
-// The client-level first-touch email voice. See selectSystemPrompt in
-// write.ts for how this is consumed.
+// The client-level first-touch email voice — a reference into email_styles,
+// resolved by write.ts's buildSystemPrompt via getEmailStyleById /
+// getDefaultEmailStyle (see lib/db/email-styles.ts). `null` means "use
+// whichever style is currently marked default."
 export async function updateClientEmailStyle(
   supabase: SupabaseClient<Database>,
   id: string,
-  style: Database['public']['Enums']['email_style'],
+  styleId: string | null,
 ): Promise<ClientRow> {
   const { data, error } = await supabase
     .from('clients')
-    .update({ email_style: style })
+    .update({ email_style_id: styleId })
     .eq('id', id)
     .select('*')
     .single()

@@ -11,6 +11,7 @@ import {
   updateClientStatus,
   deleteClientCascade,
   updateClientWarmupProfile,
+  updateClientEmailStyle,
   updateClientDomain,
   updateClientLogoUrl,
   updateClientMailreachEnabled,
@@ -277,6 +278,35 @@ describe('updateClientWarmupProfile', () => {
     })
     await expect(
       updateClientWarmupProfile({ from: () => ({ update }) } as never, 'c1', 'slow'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientEmailStyle', () => {
+  it('should persist the style id and return the updated client', async () => {
+    const row = { id: 'c1', email_style_id: 's2' }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', 's2')
+    expect(update).toHaveBeenCalledWith({ email_style_id: 's2' })
+    expect(result).toEqual(row)
+  })
+
+  it('should allow clearing the style id with null', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'c1', email_style_id: null }, error: null }) }) }),
+    })
+    await updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', null)
+    expect(update).toHaveBeenCalledWith({ email_style_id: null })
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', 's2'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })
