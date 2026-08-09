@@ -22,7 +22,7 @@ import { getCampaignForCase } from '@/lib/db/campaigns'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
-import { generateText, type LlmCallContext } from '@/lib/llm/client'
+import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { appendSignatureBlock } from './signature'
@@ -257,6 +257,7 @@ export async function runFollowupStep(
       clientKnowledge,
     ),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    modelId: EMAIL_WRITER_MODEL_ID,
   })
 
   // Deterministic — never left to the model's discretion, same as write.ts.

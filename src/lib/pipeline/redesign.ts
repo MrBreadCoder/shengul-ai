@@ -3,7 +3,7 @@ import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 import { getEmailById, listThreadEmails, type EmailRow } from '@/lib/db/emails'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
-import { generateJson, type LlmCallContext } from '@/lib/llm/client'
+import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
@@ -93,6 +93,7 @@ export async function regenerateDraftContent(
     prompt: buildPrompt(email, input.instruction, knowledge, clientKnowledge, thread),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    modelId: EMAIL_WRITER_MODEL_ID,
     // See write.ts — same draftSchema/token ceiling, same fix: pin thinking to
     // 'minimal' so reasoning tokens don't truncate the JSON payload.
     thinkingLevel: 'minimal',

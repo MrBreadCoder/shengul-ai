@@ -15,7 +15,7 @@ import { enqueueCrmSync } from '@/lib/crm/sync'
 import { triggerCollisionNotice } from '@/lib/pipeline/collision-notify'
 import { createKnowledgeRequest } from '@/lib/db/knowledge-requests'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
-import { generateJson, type LlmCallContext } from '@/lib/llm/client'
+import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
@@ -116,6 +116,7 @@ export async function classifyReply(
     schema: classificationSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: CLASSIFY_TIMEOUT_MS,
+    modelId: EMAIL_WRITER_MODEL_ID,
     // Deciding intent and whether the dossier truly supports an answer (vs.
     // inventing one) is exactly the kind of judgment call worth extra reasoning.
     thinkingLevel: 'medium',

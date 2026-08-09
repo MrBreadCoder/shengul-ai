@@ -41,7 +41,10 @@ vi.mock('@/lib/db/suppressions', () => ({ isSuppressed: (...a: unknown[]) => isS
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
 vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
-vi.mock('@/lib/llm/client', () => ({ generateText: (...a: unknown[]) => generateTextMock(...a) }))
+vi.mock('@/lib/llm/client', () => ({
+  generateText: (...a: unknown[]) => generateTextMock(...a),
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+}))
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
@@ -140,6 +143,17 @@ describe('runFollowupStep', () => {
     })
     expect(publishDelayMock).toHaveBeenCalledWith(
       '/api/pipeline/followup', { sequenceId: 'seq1', step: 2 }, 7 * DAY_SECONDS,
+    )
+  })
+
+  it('should generate the nudge with the gemini-3.6-flash override', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
     )
   })
 

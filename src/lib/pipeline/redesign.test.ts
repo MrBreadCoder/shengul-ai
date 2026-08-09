@@ -13,7 +13,10 @@ vi.mock('@/lib/db/emails', () => ({
   listThreadEmails: (...a: unknown[]) => listThreadEmailsMock(...a),
 }))
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
-vi.mock('@/lib/llm/client', () => ({ generateJson: (...a: unknown[]) => generateJsonMock(...a) }))
+vi.mock('@/lib/llm/client', () => ({
+  generateJson: (...a: unknown[]) => generateJsonMock(...a),
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({
   retrieveClientKnowledge: (...a: unknown[]) => retrieveClientKnowledgeMock(...a),
@@ -91,6 +94,15 @@ describe('regenerateDraftContent', () => {
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ thinkingLevel: 'minimal' }),
+    )
+  })
+
+  it('should regenerate the draft with the gemini-3.6-flash override', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    await regenerateDraftContent({} as never, { emailId: 'e1', instruction: 'make it shorter' })
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
     )
   })
 

@@ -10,7 +10,7 @@ import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/ema
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
-import { generateJson, type LlmCallContext } from '@/lib/llm/client'
+import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { appendSignatureBlock } from './signature'
@@ -25,14 +25,14 @@ import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 export const MAX_OUTPUT_TOKENS = 1_400
 const ACTOR = 'email_writer_agent'
 
-// Overrides the pipeline's shared default (gemini-3-flash-preview, see
-// src/lib/llm/client.ts) for first-touch email generation specifically —
-// gemini-3.6-flash (GA July 2026) is more disciplined about not padding a
-// thin dossier with an invented claim (see docs/superpowers/specs/
-// 2026-08-08-uniforms-fashion-formal-intro-email-style-design.md's
-// follow-up notes). Scoped to write.ts only: followup.ts and redesign.ts
-// keep the shared default.
-export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
+// Re-exported so scripts/regenerate-sample-emails.ts and
+// scripts/rewrite-draft-emails.ts (which drive this exact generation path
+// against historical/draft rows) default to the same model write.ts
+// actually uses, without duplicating the constant. Defined once in
+// src/lib/llm/client.ts — every email-writing pipeline stage
+// (followup.ts, redesign.ts, reply.ts, knowledge-answer.ts) imports it
+// from there directly.
+export { EMAIL_WRITER_MODEL_ID }
 
 export type ReplyMode = Database['public']['Enums']['reply_mode']
 

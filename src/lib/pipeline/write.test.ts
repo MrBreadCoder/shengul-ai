@@ -37,7 +37,10 @@ vi.mock('@/lib/db/email-styles', () => ({
   getDefaultEmailStyle: (...a: unknown[]) => getDefaultEmailStyleMock(...a),
 }))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
-vi.mock('@/lib/llm/client', () => ({ generateJson: (...a: unknown[]) => generateJsonMock(...a) }))
+vi.mock('@/lib/llm/client', () => ({
+  generateJson: (...a: unknown[]) => generateJsonMock(...a),
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+}))
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))

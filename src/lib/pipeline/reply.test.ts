@@ -38,7 +38,10 @@ vi.mock('@/lib/db/sequences', () => ({ stopSequenceForLead: (...a: unknown[]) =>
 vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
 vi.mock('@/lib/db/knowledge-requests', () => ({ createKnowledgeRequest: (...a: unknown[]) => createKnowledgeRequestMock(...a) }))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
-vi.mock('@/lib/llm/client', () => ({ generateJson: (...a: unknown[]) => generateJsonMock(...a) }))
+vi.mock('@/lib/llm/client', () => ({
+  generateJson: (...a: unknown[]) => generateJsonMock(...a),
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/knowledge/client-context', () => ({
   retrieveClientKnowledge: (...a: unknown[]) => retrieveClientKnowledgeMock(...a),
@@ -118,6 +121,15 @@ describe('runReplyForInbound', () => {
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.objectContaining({ actor: 'reply_agent' }),
       expect.objectContaining({ thinkingLevel: 'medium' }),
+    )
+  })
+
+  it('should classify the reply with the gemini-3.6-flash override', async () => {
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.', attachResourceIds: [] })
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
     )
   })
 

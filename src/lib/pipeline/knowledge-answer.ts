@@ -5,7 +5,7 @@ import { getEmailById, listThreadEmails, type EmailRow } from '@/lib/db/emails'
 import { getLeadById } from '@/lib/db/leads'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
-import { generateText, type LlmCallContext } from '@/lib/llm/client'
+import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { sendOrDraftReply, replyDisposition } from '@/lib/pipeline/reply'
 import { logEventSafe } from '@/lib/events/log-event'
 import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
@@ -143,6 +143,7 @@ export async function runKnowledgeAnswer(
       attachedFiles: attachResources.map((r) => ({ title: r.title, summary: r.content_summary ?? null })),
     }),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    modelId: EMAIL_WRITER_MODEL_ID,
   })
 
   // A human confirmed the fact, so treat as fully confident.

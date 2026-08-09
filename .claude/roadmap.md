@@ -3713,3 +3713,36 @@ Plan: `docs/superpowers/plans/2026-08-09-editable-email-styles.md` (all 11
 tasks' non-commit steps checked off; commit steps deliberately left
 unchecked — nothing in this feature has been committed yet, per
 instruction).
+
+## 2026-08-09 — Every email-writing agent now uses gemini-3.6-flash
+
+Extended write.ts's earlier model override (gemini-3.6-flash, chosen for
+being more disciplined about not fabricating claims on a thin dossier) to
+every other pipeline stage that writes outbound email copy:
+`followup.ts` (3/7/14-day nudges), `redesign.ts` (`/inbox` AI-rewrite-draft),
+`reply.ts` (inbound reply classification + reply body), and
+`knowledge-answer.ts` (reply once a human supplies a missing fact).
+`ai-relevance.ts` deliberately excluded — it's a company-relevance
+classifier, not an email writer, and stays on its own lighter
+`gemini-3.1-flash-lite`.
+
+`generateText` (`src/lib/llm/client.ts`) didn't support a per-call model
+override at all — only `generateJson` did. Added the identical
+`modelId?: string` field and `resolvedModelId`/`resolvedModel` resolution
+so `followup.ts`/`knowledge-answer.ts` (both `generateText` callers) can
+use it too. `EMAIL_WRITER_MODEL_ID` is now defined once in
+`src/lib/llm/client.ts` (was a local constant in `write.ts`) and
+re-exported from `write.ts` so `scripts/regenerate-sample-emails.ts` /
+`scripts/rewrite-draft-emails.ts` keep working unchanged.
+
+4 new tests in `client.test.ts` (mirroring `generateJson`'s existing
+modelId coverage: default/overridden/usage-log/failure-log), plus one
+`modelId`-assertion test per pipeline file. Every test file that mocks
+`@/lib/llm/client` for one of these five modules needed
+`EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash'` added to its mock factory —
+vitest throws loudly ("No export is defined on the mock") rather than
+silently returning `undefined` for an unmocked named export, which is
+exactly what caught this before it shipped.
+
+Full repo suite: 201 files / 2175 tests green, `tsc --noEmit` and `eslint`
+clean.

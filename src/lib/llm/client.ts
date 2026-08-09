@@ -6,6 +6,17 @@ import { AppError } from '@/lib/errors/app-error'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 
 const MODEL_ID = 'gemini-3-flash-preview'
+
+// Shared modelId override for every pipeline stage that writes outbound
+// email copy (write.ts, followup.ts, redesign.ts, reply.ts,
+// knowledge-answer.ts) — gemini-3.6-flash (GA July 2026) is more
+// disciplined than the module default about not padding a thin dossier
+// with an invented claim. Centralized here (not duplicated per-file) so
+// there is exactly one place to change it. Not used by ai-relevance.ts —
+// that call is a classification, not email writing, and stays on its own
+// lighter model (gemini-3.1-flash-lite).
+export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
+
 const DEFAULT_TIMEOUT_MS = 20_000
 // Tool loops make several external calls, so they need a larger ceiling than a single generation.
 const TOOL_LOOP_TIMEOUT_MS = 45_000
@@ -218,6 +229,8 @@ export interface GenerateTextArgs {
   maxOutputTokens: number
   timeoutMs?: number
   thinkingLevel?: ThinkingLevel
+  /** Overrides the module default (MODEL_ID) for this call only — see generateJson's identical field. */
+  modelId?: string
 }
 
 export async function generateText(
@@ -225,11 +238,13 @@ export async function generateText(
   args: GenerateTextArgs,
 ): Promise<string> {
   const startedAt = Date.now()
+  const resolvedModelId = args.modelId ?? MODEL_ID
+  const resolvedModel = args.modelId ? google(args.modelId) : model
   try {
     const result = await withTimeout(
       (signal) =>
         sdkGenerateText({
-          model,
+          model: resolvedModel,
           instructions: args.instructions,
           prompt: args.prompt,
           maxOutputTokens: args.maxOutputTokens,
@@ -238,10 +253,10 @@ export async function generateText(
         }),
       args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     )
-    await logUsage(context, MODEL_ID, result.usage, Date.now() - startedAt)
+    await logUsage(context, resolvedModelId, result.usage, Date.now() - startedAt)
     return result.text
   } catch (cause) {
-    await logLlmFailure(context, MODEL_ID, 'generateText', cause, Date.now() - startedAt)
+    await logLlmFailure(context, resolvedModelId, 'generateText', cause, Date.now() - startedAt)
     if (cause instanceof AppError) throw cause
     throw new AppError('EXTERNAL_ERROR', 'LLM generateText failed', {
       actor: context.actor,

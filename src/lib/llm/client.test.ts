@@ -218,6 +218,40 @@ describe('generateText', () => {
       generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50 }),
     ).rejects.toBeInstanceOf(AppError)
   })
+
+  it('should use the module default model when modelId is omitted', async () => {
+    generateTextMock.mockResolvedValue({ text: 'hello', usage: {} })
+    await generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50 })
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: { modelId: 'gemini-3-flash-preview' } }),
+    )
+  })
+
+  it('should use the overridden model when modelId is set', async () => {
+    generateTextMock.mockResolvedValue({ text: 'hello', usage: {} })
+    await generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50, modelId: 'gemini-3.6-flash' })
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: { modelId: 'gemini-3.6-flash' } }),
+    )
+  })
+
+  it('should log the overridden model id in the usage event, not the module default', async () => {
+    generateTextMock.mockResolvedValue({ text: 'hello', usage: { inputTokens: 1, outputTokens: 1 } })
+    await generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50, modelId: 'gemini-3.6-flash' })
+    expect(logEventMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: expect.objectContaining({ model: 'gemini-3.6-flash' }),
+    })
+  })
+
+  it('should log the overridden model id in the failure event, not the module default', async () => {
+    generateTextMock.mockRejectedValue(new Error('model down'))
+    await expect(
+      generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50, modelId: 'gemini-3.6-flash' }),
+    ).rejects.toBeInstanceOf(AppError)
+    expect(logErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: expect.objectContaining({ model: 'gemini-3.6-flash' }),
+    })
+  })
 })
 
 describe('generateWithTools', () => {
