@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, listClientRoleAppUsers } from '@/lib/db/clients'
+import { listEmailStyles, getDefaultEmailStyle } from '@/lib/db/email-styles'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
 import { listMailboxesForClient } from '@/lib/db/mailboxes'
 import { listEventsForClient } from '@/lib/db/events'
@@ -86,6 +87,12 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
   const admin = createAdminClient()
   const client = await getClientById(admin, clientId)
   if (!client) notFound()
+  const emailStyles = await listEmailStyles(admin)
+  // A client's email_style_id can be null (never explicitly set, or reset
+  // by a style deletion) — the dropdown always needs a real, resolved
+  // selection to display, so fall back to whichever style is default.
+  const selectedEmailStyle =
+    emailStyles.find((style) => style.id === client.email_style_id) ?? (await getDefaultEmailStyle(admin))
   const t = await getTranslations('clients')
 
   const [campaigns, clientAppUsers, authUsers] = await Promise.all([
@@ -177,7 +184,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             <WarmupProfileSelect clientId={client.id} value={client.warmup_profile} />
             <MailreachToggle clientId={client.id} enabled={client.mailreach_enabled} />
             <DefaultLocaleSelect clientId={client.id} value={client.default_locale} />
-            <EmailStyleSelect clientId={client.id} value={client.email_style} />
+            <EmailStyleSelect clientId={client.id} styles={emailStyles} selectedStyleId={selectedEmailStyle.id} />
           </div>
           <DeleteClientDialog
             clientId={client.id}
