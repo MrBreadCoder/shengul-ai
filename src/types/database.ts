@@ -18,7 +18,7 @@ export interface Database {
           warmup_profile: Database['public']['Enums']['warmup_profile']
           mailreach_enabled: boolean
           reply_mode: Database['public']['Enums']['reply_mode']
-          email_style: Database['public']['Enums']['email_style']
+          email_style_id: string | null
           followup_delays_days: number[]
           default_locale: Database['public']['Enums']['app_locale']
           domain: string | null
@@ -40,7 +40,7 @@ export interface Database {
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           mailreach_enabled?: boolean
           reply_mode?: Database['public']['Enums']['reply_mode']
-          email_style?: Database['public']['Enums']['email_style']
+          email_style_id?: string | null
           followup_delays_days?: number[]
           default_locale?: Database['public']['Enums']['app_locale']
           domain?: string | null
@@ -55,6 +55,34 @@ export interface Database {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['clients']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'clients_email_style_id_fkey'
+            columns: ['email_style_id']
+            isOneToOne: false
+            referencedRelation: 'email_styles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      email_styles: {
+        Row: {
+          id: string
+          name: string
+          voice_instructions: string
+          is_default: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          voice_instructions: string
+          is_default?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['email_styles']['Insert']>
         Relationships: []
       }
       app_users: {
@@ -957,6 +985,10 @@ export interface Database {
         Args: { p_mailbox_id: string }
         Returns: Database['public']['Tables']['mailboxes']['Row'][]
       }
+      set_default_email_style: {
+        Args: { p_id: string }
+        Returns: Database['public']['Tables']['email_styles']['Row'][]
+      }
       mailbox_send_stats: {
         Args: { p_since: string }
         Returns: {
@@ -1073,7 +1105,6 @@ export interface Database {
       client_status: 'active' | 'paused' | 'archived'
       campaign_status: 'active' | 'paused' | 'archived'
       reply_mode: 'auto_send' | 'human_approve' | 'hybrid'
-      email_style: 'concise' | 'formal_intro'
       price_handoff_mode: 'book_call_and_notify' | 'notify_only' | 'configurable'
       lead_email_status: 'unverified' | 'verified' | 'invalid' | 'risky' | 'not_found'
       lead_status: 'new' | 'parked' | 'active'
