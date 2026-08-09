@@ -148,6 +148,25 @@ export async function updateClientWarmupProfile(
   return data
 }
 
+// The client-level first-touch email voice. See selectSystemPrompt in
+// write.ts for how this is consumed.
+export async function updateClientEmailStyle(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  style: Database['public']['Enums']['email_style'],
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ email_style: style })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client email style', { id, cause: error?.message })
+  }
+  return data
+}
+
 export async function updateClientMailreachEnabled(
   supabase: SupabaseClient<Database>,
   id: string,

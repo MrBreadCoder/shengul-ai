@@ -52,6 +52,15 @@ describe('readResourceContent', () => {
     expect(extractPdfTextMock).not.toHaveBeenCalled()
   })
 
+  it('should pin thinking to minimal on the text-summary call so reasoning tokens never truncate the JSON', async () => {
+    downloadClientResourceMock.mockResolvedValue(Buffer.from('Our rate card starts at 2500 EUR'))
+    generateJsonMock.mockResolvedValue({ summary: 'Rate card from 2500 EUR' })
+
+    await readResourceContent({} as never, resource({ mime_type: 'text/plain' }))
+
+    expect(generateJsonMock.mock.calls[0]?.[1]).toMatchObject({ thinkingLevel: 'minimal' })
+  })
+
   it('should use the extracted text when a pdf has a usable text layer', async () => {
     extractPdfTextMock.mockResolvedValue('b'.repeat(500))
     generateJsonMock.mockResolvedValue({ summary: 'A long document' })
@@ -73,6 +82,7 @@ describe('readResourceContent', () => {
     expect(result).toEqual({ status: 'ready', content: '12 brand projects', summary: '12 brand projects' })
     expect(generateJsonMock.mock.calls[0]?.[1]).toMatchObject({
       files: [{ data: bytes, mediaType: 'application/pdf' }],
+      thinkingLevel: 'minimal',
     })
   })
 

@@ -83,6 +83,9 @@ async function readAsText(
     schema: textSchema,
     maxOutputTokens: RESOURCE_READ_MAX_OUTPUT_TOKENS,
     timeoutMs: RESOURCE_READ_TIMEOUT_MS,
+    // A summarization pass, not a judgment call — pin thinking to 'minimal' so
+    // reasoning tokens don't compete with the output budget for the JSON payload.
+    thinkingLevel: 'minimal',
   })
   return { status: 'ready', content, summary: capSummary(summary) }
 }
@@ -99,6 +102,8 @@ async function readWithVision(
     files: [{ data: bytes, mediaType: resource.mime_type }],
     maxOutputTokens: RESOURCE_READ_MAX_OUTPUT_TOKENS,
     timeoutMs: RESOURCE_READ_TIMEOUT_MS,
+    // Same reasoning as readAsText — a description pass, not a judgment call.
+    thinkingLevel: 'minimal',
   })
   return { status: 'ready', content: capContent(content), summary: capSummary(summary) }
 }

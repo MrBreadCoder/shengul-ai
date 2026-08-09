@@ -18,6 +18,7 @@ export interface Database {
           warmup_profile: Database['public']['Enums']['warmup_profile']
           mailreach_enabled: boolean
           reply_mode: Database['public']['Enums']['reply_mode']
+          email_style: Database['public']['Enums']['email_style']
           followup_delays_days: number[]
           default_locale: Database['public']['Enums']['app_locale']
           domain: string | null
@@ -39,6 +40,7 @@ export interface Database {
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           mailreach_enabled?: boolean
           reply_mode?: Database['public']['Enums']['reply_mode']
+          email_style?: Database['public']['Enums']['email_style']
           followup_delays_days?: number[]
           default_locale?: Database['public']['Enums']['app_locale']
           domain?: string | null
@@ -1071,6 +1073,7 @@ export interface Database {
       client_status: 'active' | 'paused' | 'archived'
       campaign_status: 'active' | 'paused' | 'archived'
       reply_mode: 'auto_send' | 'human_approve' | 'hybrid'
+      email_style: 'concise' | 'formal_intro'
       price_handoff_mode: 'book_call_and_notify' | 'notify_only' | 'configurable'
       lead_email_status: 'unverified' | 'verified' | 'invalid' | 'risky' | 'not_found'
       lead_status: 'new' | 'parked' | 'active'

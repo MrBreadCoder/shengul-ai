@@ -85,6 +85,15 @@ describe('regenerateDraftContent', () => {
     }))
   })
 
+  it('should pin thinking to minimal so reasoning tokens never crowd out the JSON draft', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    await regenerateDraftContent({} as never, { emailId: 'e1', instruction: 'make it shorter' })
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ thinkingLevel: 'minimal' }),
+    )
+  })
+
   it('should propagate an LLM failure', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     generateJsonMock.mockRejectedValue(new AppError('EXTERNAL_ERROR', 'LLM generateObject failed'))

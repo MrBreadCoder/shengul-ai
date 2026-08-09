@@ -3424,3 +3424,95 @@ instead of bare `HTTP 400`. 6 new tests (`tools.test.ts` ×3, `log.test.ts` ×3)
 Full repo suite: 198 files / 2102 tests green, `tsc --noEmit` and `eslint`
 clean. Not yet committed — awaiting the user's answer on the BrightData
 zone/account question before treating Cluster B as resolved.
+
+## 2026-08-08 — Upgraded the human-voice prompt to pattern-based rules + a regeneration tool to preview it
+
+`HUMAN_VOICE_INSTRUCTION` (`src/lib/pipeline/email-voice.ts`, shared by
+`write.ts`, `followup.ts`, `redesign.ts`) was a flat banned-phrase list —
+good at catching known clichés, blind to failure modes that recur in
+infinite phrasings (rule of three, copula avoidance, staccato drama, em
+dashes, fake-candor rhetorical openers). Rebuilt it around the structure of
+Wikipedia's "Signs of AI writing" guide: each new rule is a named pattern
+with a worked bad/good pair, not just a word to avoid. Deliberately left out
+the guide's encyclopedia-only sections (headings, boldface, citations,
+notability, emoji) — none of them can occur in a 90-word plaintext email.
+
+Added `scripts/regenerate-sample-emails.ts` (`pnpm regenerate-sample-emails
+[--count=N] [--client-id=<uuid>]`) to compare the new prompt against
+history: pulls first-touch outbound emails from `emails`, rehydrates each
+one's lead/case/campaign/dossier, and reruns write.ts's exact
+`SYSTEM_PROMPT` + `buildPrompt` path (both newly exported from `write.ts`,
+along with `MAX_OUTPUT_TOKENS`, specifically so the script never duplicates
+prompt-construction logic) to print old vs. regenerated side by side, plus a
+heuristic tell-scan. Read-only: no DB writes, no sends. Had to dynamically
+`import()` every app module that transitively reads `@/lib/env` (that module
+eager-validates the *entire* env schema at import time, including
+integrations — Bright Data, QStash, Apollo — this script never touches) so
+`.env.local` loads before those imports resolve; also had to backfill an
+unrelated required-but-absent-locally var (`BRIGHTDATA_SERP_ZONE`) with an
+in-process-only placeholder, since this script's code path never reads it.
+
+Ran it against 2 real historical emails (Uniforms Fashion → Elkhart PD,
+Uniforms Fashion → SKY Airline). Both the stored originals and the
+regenerated versions came back clean on the tell-scan — the prior prompt was
+already decent — but the regenerated copies read slightly more direct
+(e.g. "we manufacture our duty uniforms... rather than reselling" instead of
+"shouldn't involve reseller markups"). Full repo suite: 198 files / 2113
+tests green, `tsc --noEmit` clean. Not yet committed.
+
+## 2026-08-08 — Per-client formal-intro email style for Uniforms Fashion
+
+Added `clients.email_style` (`'concise'` default / `'formal_intro'`,
+migration `0034_client_email_style.sql`). `write.ts` now has two system
+prompts — `CONCISE_SYSTEM_PROMPT` (today's dossier-led, low-friction
+voice, renamed from `SYSTEM_PROMPT`) and `FORMAL_INTRO_SYSTEM_PROMPT` (a
+five-beat structured self-introduction: greeting, sender/company
+self-intro, capabilities, a dossier-grounded personalized hook in place of
+a generic "I came across your company" line, then a qualifying-question +
+send-materials CTA) — selected per client via `selectSystemPrompt`.
+`buildPrompt` gained a `client` parameter so the model has the sender's
+real name/company to introduce, never invented. Scoped to first-touch only
+(`followup.ts`/`redesign.ts` untouched) and to Uniforms Fashion only via a
+new operator toggle on `/clients/[id]` (`EmailStyleSelect`,
+`PATCH /api/clients/[clientId]` with `{ emailStyle }`) — every other
+client keeps `'concise'` and sees zero behavior change.
+`scripts/regenerate-sample-emails.ts` updated to fetch the client and pick
+the matching prompt, so before/after comparisons stay accurate regardless
+of style. Design: `docs/superpowers/specs/2026-08-08-uniforms-fashion-formal-intro-email-style-design.md`.
+
+Operator follow-up (not code): confirm Uniforms Fashion's `signature_name`
+is filled in (e.g. "Cihat Bozkurt") via the existing signature dialog, then
+flip the new toggle to `formal_intro` on the Uniforms Fashion client page.
+
+Full repo suite: 198 files / 2117 tests green, `tsc --noEmit` and `eslint`
+clean. Not yet committed (per instruction — commits skipped for this pass).
+
+## 2026-08-08 — Flipped Uniforms Fashion to formal_intro and rewrote its 8 pending drafts
+
+Follow-up to the entry above, done the same day. Added
+`scripts/rewrite-draft-emails.ts` — the mutating counterpart to
+`regenerate-sample-emails.ts`: regenerates and persists first-touch draft
+emails (`status='draft'`, `sequence_step=0`) through write.ts's exact
+current path (`selectSystemPrompt` + `buildPrompt` + the deterministic
+signature block), writing through the same claim-guarded
+`updateDraftContent` a manual Save/AI-Redesign already uses. Defaults to a
+dry run (prints before/after, writes nothing); `--apply` persists.
+Deliberately touches no lead/email verification — content-only rewrite,
+never re-checks deliverability. `pnpm rewrite-draft-emails
+--client-id=<uuid> [--count=N] [--apply]`.
+
+Confirmed migration `0034_client_email_style.sql` is live against the real
+Supabase project (`clients.email_style` read back `'concise'` before the
+change). Set Uniforms Fashion's `email_style` to `formal_intro`
+(`d99edf8f-b185-47b2-9615-1f6e43853001` — `signature_name` was already
+"Cihat Bozkurt" from the earlier phone-signature feature, so no further
+prerequisite work needed). Dry-ran `rewrite-draft-emails` against its 8
+pending human_approve drafts, confirmed the output matched the intended
+five-beat structure (Dear [name] / self-intro / capabilities / dossier
+hook / qualifying question + offer), then re-ran with `--apply` — all 8
+rewritten in place, still `status='draft'`, none sent. Verified post-write
+subjects in the DB match the regenerated ones.
+
+Full repo suite: 198 files / 2117 tests green, `tsc --noEmit` and `eslint`
+clean (unchanged from the prior entry — this pass only added the new
+script and ran it). Not committed (per instruction).

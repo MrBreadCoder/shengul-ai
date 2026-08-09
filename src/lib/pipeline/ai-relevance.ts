@@ -102,5 +102,10 @@ export async function checkCompanyRelevance(
     schema: relevanceVerdictSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     modelId: AI_RELEVANCE_MODEL_ID,
+    // MAX_OUTPUT_TOKENS is only 200 — a binary pass/fail classification, not a
+    // judgment call worth spending reasoning tokens on. Without this, the
+    // model's default thinking budget can consume the whole 200-token ceiling
+    // before emitting the verdict JSON, truncating it.
+    thinkingLevel: 'minimal',
   })
 }

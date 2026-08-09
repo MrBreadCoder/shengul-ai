@@ -18,7 +18,10 @@ import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
 import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 
-const MAX_OUTPUT_TOKENS = 1_400
+// Exported (not just module-scoped) so scripts/regenerate-sample-emails.ts can
+// drive the exact same generation path against a historical row instead of
+// duplicating the prompt-construction logic.
+export const MAX_OUTPUT_TOKENS = 1_400
 const ACTOR = 'email_writer_agent'
 
 export type ReplyMode = Database['public']['Enums']['reply_mode']
@@ -40,18 +43,28 @@ export interface WriteSummary {
   sent: number
 }
 
-const SYSTEM_PROMPT = [
+export type EmailStyle = Database['public']['Enums']['email_style']
+
+// Shared between both system prompts below so subject-line formatting can
+// never drift between styles.
+const SUBJECT_LINE_RULES = [
+  `Subject line: 2-5 words, under ${SUBJECT_TARGET_CHARS} characters so it never truncates`,
+  'on mobile. Make it specific to the recipient\'s company, role, or a dossier fact —',
+  'never generic filler like "Quick question" or "Following up". No ALL CAPS, no',
+  'exclamation marks, no "Re:"/"Fwd:" prefixes, no spam-trigger words (free, guarantee,',
+  'act now, urgent, limited time, buy now).',
+]
+
+// Default voice — dossier-led, low-friction, no greeting. Used for every
+// client unless email_style is explicitly set to 'formal_intro'.
+export const CONCISE_SYSTEM_PROMPT = [
   'You write short, human-sounding B2B cold emails.',
   'Always write in English, even if the dossier or company knowledge below is in',
   'another language — translate any facts you use, never copy foreign-language text.',
   'No bulk markers, no unsubscribe footer, no tracking language.',
   'One clear idea. 90 words or fewer.',
   'Use only facts present in the provided dossier. Never invent specifics.',
-  `Subject line: 2-5 words, under ${SUBJECT_TARGET_CHARS} characters so it never truncates`,
-  'on mobile. Make it specific to the recipient\'s company, role, or a dossier fact —',
-  'never generic filler like "Quick question" or "Following up". No ALL CAPS, no',
-  'exclamation marks, no "Re:"/"Fwd:" prefixes, no spam-trigger words (free, guarantee,',
-  'act now, urgent, limited time, buy now).',
+  ...SUBJECT_LINE_RULES,
   HUMAN_VOICE_INSTRUCTION,
   'Lead with the specific dossier fact, not a greeting.',
   'Call to action: default to a low-friction reply question (e.g. "worth a quick reply?"),',
@@ -59,11 +72,60 @@ const SYSTEM_PROMPT = [
   'it is an optional extra, never the default ask.',
 ].join(' ')
 
-function buildPrompt(input: RunWriteInput, lead: LeadRow, knowledge: KnowledgeRow[], clientKnowledge: string): string {
+// Formal introduction voice — a per-client opt-in (clients.email_style =
+// 'formal_intro'), currently used only by Uniforms Fashion. See
+// docs/superpowers/specs/2026-08-08-uniforms-fashion-formal-intro-email-style-design.md
+export const FORMAL_INTRO_SYSTEM_PROMPT = [
+  'You write a formal B2B introduction email for a manufacturer reaching out cold to a new prospect.',
+  'Always write in English, even if the dossier or company knowledge below is in',
+  'another language — translate any facts you use, never copy foreign-language text.',
+  'No bulk markers, no unsubscribe footer, no tracking language.',
+  'Use only facts present in the provided dossier or company knowledge below. Never invent a name,',
+  'a year, a location, or any specific you were not given.',
+  ...SUBJECT_LINE_RULES,
+  HUMAN_VOICE_INSTRUCTION,
+  'Structure the body as exactly five short paragraphs, in this order:',
+  '1. Greeting: "Dear [Recipient first name]," using the recipient\'s first name from the Recipient',
+  'line below; if no name is given, use "Dear," alone.',
+  '2. Self-introduction: one sentence giving the sender name and company name exactly as given in',
+  '"Sender name" / "Our company name" below, plus the company\'s home base and years of experience —',
+  'only the ones you have evidence for in "About our company"; drop whichever you don\'t have',
+  'rather than guessing.',
+  '3. Capabilities: one sentence on what the company manufactures or does, grounded in the value',
+  'proposition and "About our company" below.',
+  '4. Hook: one sentence connecting to this specific recipient — cite a real fact about their',
+  'company or industry from the dossier. Never use a generic line like "I came across your',
+  'company" or "I wanted to introduce ourselves" — the hook must trace to a dossier fact.',
+  '5. Ask: a qualifying question asking whether the recipient is the right person to discuss the',
+  'kind of procurement or project relevant to their industry, followed by an offer to send the',
+  'company profile, references, and product capabilities if so. Only mention the booking link',
+  'here if it is clearly the natural next step; otherwise the offer to send materials is the',
+  'entire ask.',
+  'End the body immediately after the offer sentence. Do not add "Best regards," a name, or any',
+  'sign-off — a signature block is appended separately in code.',
+  '120 words or fewer, including the greeting.',
+].join(' ')
+
+// Picks the system prompt for a client's configured voice. Falls back to
+// CONCISE_SYSTEM_PROMPT for null/undefined so a missing client row never
+// blocks first-touch generation.
+export function selectSystemPrompt(emailStyle: EmailStyle | null | undefined): string {
+  return emailStyle === 'formal_intro' ? FORMAL_INTRO_SYSTEM_PROMPT : CONCISE_SYSTEM_PROMPT
+}
+
+export function buildPrompt(
+  input: RunWriteInput,
+  lead: LeadRow,
+  knowledge: KnowledgeRow[],
+  clientKnowledge: string,
+  client: ClientRow | null,
+): string {
   const dossier = knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   return [
     `Recipient: ${lead.full_name}${lead.title ? `, ${lead.title}` : ''} at ${input.companyName}`,
     `Our value proposition: ${input.valueProp ?? 'n/a'}`,
+    client?.name ? `Our company name: ${client.name}` : '',
+    client?.signature_name ? `Sender name: ${client.signature_name}` : '',
     clientKnowledge ? `About our company:\n${clientKnowledge}` : '',
     input.bookingLink ? `Booking link (optional CTA): ${input.bookingLink}` : '',
     `Dossier:\n${dossier}`,
@@ -92,10 +154,16 @@ async function processLead(
 
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
   const draft = await generateJson(context, {
-    instructions: SYSTEM_PROMPT,
-    prompt: buildPrompt(input, lead, knowledge, clientKnowledge),
+    instructions: selectSystemPrompt(client?.email_style),
+    prompt: buildPrompt(input, lead, knowledge, clientKnowledge, client),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    // Straight-line generation, not a judgment call — pinning thinking to
+    // 'minimal' keeps reasoning tokens from competing with MAX_OUTPUT_TOKENS
+    // for the actual JSON payload (see .claude/roadmap.md 2026-08-08: the
+    // model's default thinking budget was truncating output here, causing
+    // intermittent "No object generated" failures).
+    thinkingLevel: 'minimal',
   })
 
   // Deterministic — never left to the model's discretion. Appended here,

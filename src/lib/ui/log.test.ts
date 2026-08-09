@@ -26,6 +26,36 @@ describe('describeEvent', () => {
     expect(result).toBe('Outreach written for 4 leads — 3 sent, 1 left as a draft.')
   })
 
+  it('should append the vendor HTTP status/body to a brightdata search failure when present', () => {
+    const result = describeEvent('brightdata.search.failed', {
+      query: 'Acme Corp',
+      errorMessage: 'HTTP 400',
+      status: 400,
+      body: '{"error":"zone not found"}',
+    })
+
+    expect(result).toBe('Web search failed for "Acme Corp": HTTP 400 (HTTP 400: {"error":"zone not found"}).')
+  })
+
+  it('should fall back to the fetch cause when a brightdata scrape failure has no HTTP status', () => {
+    const result = describeEvent('brightdata.scrape.failed', {
+      url: 'https://acme.com',
+      errorMessage: 'HTTP request failed',
+      cause: 'fetch failed: getaddrinfo ENOTFOUND',
+    })
+
+    expect(result).toBe('Page fetch failed for https://acme.com: HTTP request failed (fetch failed: getaddrinfo ENOTFOUND).')
+  })
+
+  it('should omit the vendor detail suffix entirely when neither body nor cause is present', () => {
+    const result = describeEvent('brightdata.search.failed', {
+      query: 'Acme Corp',
+      errorMessage: 'HTTP 400',
+    })
+
+    expect(result).toBe('Web search failed for "Acme Corp": HTTP 400.')
+  })
+
   it('should surface the error message when given an error payload with no builder', () => {
     const result = describeEvent('some.unmapped.failure', {
       errorCode: 'EXTERNAL_TIMEOUT',

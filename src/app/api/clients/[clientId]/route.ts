@@ -8,6 +8,7 @@ import {
   updateClientWarmupProfile,
   updateClientDomain,
   updateClientSignature,
+  updateClientEmailStyle,
   deleteClientCascade,
   listClientRoleAppUsers,
 } from '@/lib/db/clients'
@@ -42,6 +43,7 @@ const patchSchema = z
     address: nullableTextSchema(200).optional(),
     signatureName: nullableTextSchema(120).optional(),
     signatureTitle: nullableTextSchema(120).optional(),
+    emailStyle: z.enum(['concise', 'formal_intro']).optional(),
   })
   .refine(
     (body) =>
@@ -51,7 +53,8 @@ const patchSchema = z
       body.phone !== undefined ||
       body.address !== undefined ||
       body.signatureName !== undefined ||
-      body.signatureTitle !== undefined,
+      body.signatureTitle !== undefined ||
+      body.emailStyle !== undefined,
     { message: 'At least one field must be provided' },
   )
 
@@ -141,6 +144,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ clien
             signatureName: updated.signature_name,
             signatureTitle: updated.signature_title,
           },
+        })
+      } catch {
+        // Audit logging is best-effort — the update already succeeded.
+      }
+    }
+
+    if (body.emailStyle !== undefined) {
+      updated = await updateClientEmailStyle(admin, clientId, body.emailStyle)
+      try {
+        await logEvent({
+          clientId,
+          actor: `human:${appUser.id}`,
+          type: 'client.email_style_changed',
+          payload: { from: client.email_style, to: body.emailStyle },
         })
       } catch {
         // Audit logging is best-effort — the update already succeeded.

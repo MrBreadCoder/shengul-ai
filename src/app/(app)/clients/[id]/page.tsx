@@ -35,6 +35,7 @@ import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
 import { MailreachToggle } from './mailreach-toggle'
 import { DefaultLocaleSelect } from './default-locale-select'
+import { EmailStyleSelect } from './email-style-select'
 import { WarmupTab } from './warmup-tab'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
@@ -176,6 +177,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             <WarmupProfileSelect clientId={client.id} value={client.warmup_profile} />
             <MailreachToggle clientId={client.id} enabled={client.mailreach_enabled} />
             <DefaultLocaleSelect clientId={client.id} value={client.default_locale} />
+            <EmailStyleSelect clientId={client.id} value={client.email_style} />
           </div>
           <DeleteClientDialog
             clientId={client.id}

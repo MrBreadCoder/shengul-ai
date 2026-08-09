@@ -5,6 +5,7 @@ const getClientByIdMock = vi.fn()
 const updateClientNameMock = vi.fn()
 const updateClientDomainMock = vi.fn()
 const updateClientSignatureMock = vi.fn()
+const updateClientEmailStyleMock = vi.fn()
 const deleteClientCascadeMock = vi.fn()
 const listClientRoleAppUsersMock = vi.fn()
 const deleteAuthUsersMock = vi.fn()
@@ -17,6 +18,7 @@ vi.mock('@/lib/db/clients', () => ({
   updateClientName: (...a: unknown[]) => updateClientNameMock(...a),
   updateClientDomain: (...a: unknown[]) => updateClientDomainMock(...a),
   updateClientSignature: (...a: unknown[]) => updateClientSignatureMock(...a),
+  updateClientEmailStyle: (...a: unknown[]) => updateClientEmailStyleMock(...a),
   deleteClientCascade: (...a: unknown[]) => deleteClientCascadeMock(...a),
   listClientRoleAppUsers: (...a: unknown[]) => listClientRoleAppUsersMock(...a),
 }))
@@ -43,6 +45,7 @@ beforeEach(() => {
   updateClientNameMock.mockReset()
   updateClientDomainMock.mockReset()
   updateClientSignatureMock.mockReset()
+  updateClientEmailStyleMock.mockReset()
   deleteClientCascadeMock.mockReset()
   listClientRoleAppUsersMock.mockReset()
   deleteAuthUsersMock.mockReset()
@@ -158,6 +161,24 @@ describe('PATCH /api/clients/[clientId]', () => {
     const res = await PATCH(req({ phone: 'call me maybe' }), ctx('c1'))
     expect(res.status).toBe(400)
     expect(updateClientSignatureMock).not.toHaveBeenCalled()
+  })
+
+  it('should save the email style and log the event on success', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_style: 'concise' })
+    updateClientEmailStyleMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_style: 'formal_intro' })
+    const res = await PATCH(req({ emailStyle: 'formal_intro' }), ctx('c1'))
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.client.email_style).toBe('formal_intro')
+    expect(updateClientEmailStyleMock).toHaveBeenCalledWith(expect.anything(), 'c1', 'formal_intro')
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'client.email_style_changed' }))
+  })
+
+  it('should return 400 for an invalid email style', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_style: 'concise' })
+    const res = await PATCH(req({ emailStyle: 'shouty' }), ctx('c1'))
+    expect(res.status).toBe(400)
+    expect(updateClientEmailStyleMock).not.toHaveBeenCalled()
   })
 })
 

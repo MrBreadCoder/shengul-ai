@@ -46,6 +46,18 @@ function plural(count: number, singular: string, pluralForm: string): string {
   return count === 1 ? singular : pluralForm
 }
 
+// BrightData failures log the vendor's own status/response body separately
+// from `errorMessage` (see externalErrorDetails in research/tools.ts) since
+// `errorMessage` alone collapses every 4xx to the same generic "HTTP 400" —
+// this appends the actual reason so an operator doesn't have to read source
+// to diagnose it.
+function vendorDetailSuffix(payload: Json): string {
+  const status = readNumber(payload, 'status')
+  const detail = readString(payload, 'body') ?? readString(payload, 'cause')
+  if (!detail) return ''
+  return ` (${status > 0 ? `HTTP ${status}: ` : ''}${detail})`
+}
+
 /**
  * Turns one event row into the sentence an operator reads in the feed. Keyed by
  * event type so each row says what actually happened ("14 leads found") rather
@@ -101,9 +113,9 @@ const SENTENCE_BUILDERS: Record<string, (payload: Json) => string> = {
   'emailable.verify.failed': (p) =>
     `Email verification failed for a lead at ${readString(p, 'domain') ?? 'an unknown domain'}: ${readString(p, 'errorMessage') ?? 'unknown error'}.`,
   'brightdata.search.failed': (p) =>
-    `Web search failed for "${readString(p, 'query') ?? 'unknown query'}": ${readString(p, 'errorMessage') ?? 'unknown error'}.`,
+    `Web search failed for "${readString(p, 'query') ?? 'unknown query'}": ${readString(p, 'errorMessage') ?? 'unknown error'}${vendorDetailSuffix(p)}.`,
   'brightdata.scrape.failed': (p) =>
-    `Page fetch failed for ${readString(p, 'url') ?? 'an unknown URL'}: ${readString(p, 'errorMessage') ?? 'unknown error'}.`,
+    `Page fetch failed for ${readString(p, 'url') ?? 'an unknown URL'}: ${readString(p, 'errorMessage') ?? 'unknown error'}${vendorDetailSuffix(p)}.`,
   'mailbox.send.failed': (p) =>
     `Sending from a mailbox failed: ${readString(p, 'errorMessage') ?? 'unknown error'}.`,
   'mailbox.none_healthy': (p) =>

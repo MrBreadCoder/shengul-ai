@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { ToolSet } from 'ai'
 import { buildResearchTools } from './tools'
+import { AppError } from '@/lib/errors/app-error'
 
 // buildResearchTools always returns both keys with an execute function
 // defined (see tools.ts) — the ToolSet index type and Tool.execute being
@@ -80,6 +81,51 @@ describe('brightdata failure logging', () => {
       type: 'brightdata.scrape.failed',
       source: 'brightdata',
       payload: { url: 'https://acme.com' },
+    })
+  })
+
+  it('should surface the vendor HTTP status/body from an AppError context so the reason is diagnosable', async () => {
+    logErrorMock.mockReset()
+    const error = new AppError('EXTERNAL_ERROR', 'HTTP 400', {
+      url: 'https://api.brightdata.com/request',
+      status: 400,
+      body: '{"error":"zone not found"}',
+    })
+    const research = { search: vi.fn().mockRejectedValue(error), scrape: vi.fn() }
+    const tools = buildResearchTools({ research }, context)
+
+    await getExecute(tools, 'search')({ query: 'Acme' }, {} as never)
+
+    expect(logErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: { query: 'Acme', status: 400, body: '{"error":"zone not found"}', cause: null },
+    })
+  })
+
+  it('should surface the underlying fetch cause when the AppError has no HTTP status (a network-level failure)', async () => {
+    logErrorMock.mockReset()
+    const error = new AppError('EXTERNAL_ERROR', 'HTTP request failed', {
+      url: 'https://acme.com',
+      cause: 'fetch failed: getaddrinfo ENOTFOUND',
+    })
+    const research = { search: vi.fn(), scrape: vi.fn().mockRejectedValue(error) }
+    const tools = buildResearchTools({ research }, context)
+
+    await getExecute(tools, 'scrape')({ url: 'https://acme.com' }, {} as never)
+
+    expect(logErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: { url: 'https://acme.com', status: null, body: null, cause: 'fetch failed: getaddrinfo ENOTFOUND' },
+    })
+  })
+
+  it('should default to null details when the error is not an AppError', async () => {
+    logErrorMock.mockReset()
+    const research = { search: vi.fn().mockRejectedValue(new Error('plain failure')), scrape: vi.fn() }
+    const tools = buildResearchTools({ research }, context)
+
+    await getExecute(tools, 'search')({ query: 'Acme' }, {} as never)
+
+    expect(logErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      payload: { query: 'Acme', status: null, body: null, cause: null },
     })
   })
 })

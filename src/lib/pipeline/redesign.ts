@@ -93,6 +93,9 @@ export async function regenerateDraftContent(
     prompt: buildPrompt(email, input.instruction, knowledge, clientKnowledge, thread),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    // See write.ts — same draftSchema/token ceiling, same fix: pin thinking to
+    // 'minimal' so reasoning tokens don't truncate the JSON payload.
+    thinkingLevel: 'minimal',
   })
 
   await logEventSafe({

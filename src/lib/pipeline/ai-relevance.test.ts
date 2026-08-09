@@ -57,6 +57,15 @@ describe('checkCompanyRelevance', () => {
     )
   })
 
+  it('should pin thinking to minimal so it never eats the 200-token classification budget', async () => {
+    mockGenerateJson.mockResolvedValue({ pass: true, reason: 'ok' })
+    await checkCompanyRelevance(context, campaign, company)
+    expect(mockGenerateJson).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({ thinkingLevel: 'minimal' }),
+    )
+  })
+
   it('should cap maxOutputTokens for a small classification response', async () => {
     mockGenerateJson.mockResolvedValue({ pass: true, reason: 'ok' })
     await checkCompanyRelevance(context, campaign, company)

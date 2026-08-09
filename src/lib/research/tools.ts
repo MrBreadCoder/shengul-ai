@@ -1,6 +1,8 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { logError } from '@/lib/events/log-event'
+import { isAppError } from '@/lib/errors/app-error'
+import type { Json } from '@/types/database'
 import type { WebResearch } from './provider'
 
 /**
@@ -12,6 +14,27 @@ export interface ResearchToolContext {
   clientId: string
   caseId?: string | null
   actor: string
+}
+
+/**
+ * Pulls the vendor's own status/response-body (or, for a network-level
+ * failure, the underlying fetch error) out of `fetchJson`/`fetchText`'s
+ * AppError context — dropped by `describeError` before it reaches the events
+ * table, so without this the "errorMessage" an operator sees is just the
+ * generic "HTTP 400"/"HTTP request failed" with no way to tell why. Only
+ * `status` (a number), `body` (a string capped to 500 chars at the fetch
+ * layer), and `cause` (the underlying error's own message) are ever set on
+ * that context — never headers or the Authorization bearer token — so this
+ * is safe to surface on the client's Logs tab.
+ */
+function externalErrorDetails(error: unknown): { status: Json; body: Json; cause: Json } {
+  if (!isAppError(error)) return { status: null, body: null, cause: null }
+  const { status, body, cause } = error.context
+  return {
+    status: typeof status === 'number' ? status : null,
+    body: typeof body === 'string' && body.length > 0 ? body : null,
+    cause: typeof cause === 'string' && cause.length > 0 ? cause : null,
+  }
 }
 
 // The tool `execute` functions deliberately swallow provider failures and
@@ -38,7 +61,7 @@ export function buildResearchTools(
             type: 'brightdata.search.failed',
             source: 'brightdata',
             error,
-            payload: { query },
+            payload: { query, ...externalErrorDetails(error) },
           })
           return { error: 'search failed' }
         }
@@ -58,7 +81,7 @@ export function buildResearchTools(
             type: 'brightdata.scrape.failed',
             source: 'brightdata',
             error,
-            payload: { url },
+            payload: { url, ...externalErrorDetails(error) },
           })
           return { error: 'scrape failed' }
         }

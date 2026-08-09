@@ -37,7 +37,7 @@ vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEve
 vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
-import { runWriteForCase } from './write'
+import { runWriteForCase, CONCISE_SYSTEM_PROMPT, FORMAL_INTRO_SYSTEM_PROMPT } from './write'
 
 const lead = { id: 'lead1', client_id: 'c1', case_id: 'case1', full_name: 'Jane Doe', title: 'CTO', email: 'jane@acme.com' }
 const input = {
@@ -76,6 +76,19 @@ describe('runWriteForCase', () => {
       expect.objectContaining({ qstashMessageId: 'qmsg1' }),
     )
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+  })
+
+  it('should pin thinking to minimal so reasoning tokens never crowd out the JSON draft', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    await runWriteForCase({} as never, input)
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ thinkingLevel: 'minimal' }),
+    )
   })
 
   it('should draft (not send) when reply_mode is human_approve', async () => {
@@ -152,5 +165,39 @@ describe('runWriteForCase', () => {
     await runWriteForCase({} as never, input)
 
     expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: 'Hi Jane...' }))
+  })
+
+  it('should use the formal-intro system prompt when the client email_style is formal_intro', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Uniforms Fashion', domain: null, phone: null,
+      address: null, signature_name: 'Cihat Bozkurt', signature_title: null, email_style: 'formal_intro',
+    })
+
+    await runWriteForCase({} as never, input)
+
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ instructions: FORMAL_INTRO_SYSTEM_PROMPT }),
+    )
+  })
+
+  it('should default to the concise system prompt when email_style is unset', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await runWriteForCase({} as never, input)
+
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ instructions: CONCISE_SYSTEM_PROMPT }),
+    )
   })
 })
