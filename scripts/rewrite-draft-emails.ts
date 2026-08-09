@@ -1,7 +1,7 @@
 // Mutating counterpart to regenerate-sample-emails.ts: regenerates and
 // PERSISTS the subject/body of first-touch outbound drafts (status='draft',
 // sequence_step=0 — human_approve/hybrid emails an operator hasn't sent yet)
-// using write.ts's exact current generation path (selectSystemPrompt +
+// using write.ts's exact current generation path (buildSystemPrompt +
 // buildPrompt + the deterministic signature block), so a client's queued
 // drafts reflect the latest prompt (e.g. after switching email_style).
 //
@@ -142,7 +142,9 @@ interface RewriteResult {
 interface AppDeps {
   generateJson: typeof import('../src/lib/llm/client').generateJson
   draftSchema: typeof import('../src/lib/pipeline/draft-schema').draftSchema
-  selectSystemPrompt: typeof import('../src/lib/pipeline/write').selectSystemPrompt
+  buildSystemPrompt: typeof import('../src/lib/pipeline/write').buildSystemPrompt
+  getEmailStyleById: typeof import('../src/lib/db/email-styles').getEmailStyleById
+  getDefaultEmailStyle: typeof import('../src/lib/db/email-styles').getDefaultEmailStyle
   EMAIL_WRITER_MODEL_ID: string
   MAX_OUTPUT_TOKENS: number
   buildPrompt: typeof import('../src/lib/pipeline/write').buildPrompt
@@ -158,7 +160,7 @@ interface AppDeps {
 }
 
 async function loadAppDeps(): Promise<AppDeps> {
-  const [writeMod, llmMod, schemaMod, signatureMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod, emailsMod, clientContextMod, buildQueryMod] =
+  const [writeMod, llmMod, schemaMod, signatureMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod, emailStylesMod, emailsMod, clientContextMod, buildQueryMod] =
     await Promise.all([
       import('../src/lib/pipeline/write'),
       import('../src/lib/llm/client'),
@@ -169,6 +171,7 @@ async function loadAppDeps(): Promise<AppDeps> {
       import('../src/lib/db/cases'),
       import('../src/lib/db/campaigns'),
       import('../src/lib/db/clients'),
+      import('../src/lib/db/email-styles'),
       import('../src/lib/db/emails'),
       import('../src/lib/knowledge/client-context'),
       import('../src/lib/knowledge/build-query'),
@@ -176,7 +179,9 @@ async function loadAppDeps(): Promise<AppDeps> {
   return {
     generateJson: llmMod.generateJson,
     draftSchema: schemaMod.draftSchema,
-    selectSystemPrompt: writeMod.selectSystemPrompt,
+    buildSystemPrompt: writeMod.buildSystemPrompt,
+    getEmailStyleById: emailStylesMod.getEmailStyleById,
+    getDefaultEmailStyle: emailStylesMod.getDefaultEmailStyle,
     EMAIL_WRITER_MODEL_ID: writeMod.EMAIL_WRITER_MODEL_ID,
     MAX_OUTPUT_TOKENS: writeMod.MAX_OUTPUT_TOKENS,
     buildPrompt: writeMod.buildPrompt,
@@ -236,10 +241,13 @@ async function regenerateAndMaybeApply(
     queryText: deps.buildKnowledgeQueryText({ primary: dossierText, secondary: [input.valueProp ?? ''] }),
   })
 
+  const clientStyle = client?.email_style_id ? await deps.getEmailStyleById(supabase, client.email_style_id) : null
+  const style = clientStyle ?? (await deps.getDefaultEmailStyle(supabase))
+
   const generated = await deps.generateJson(
     { clientId: draft.clientId, caseId: draft.caseId, actor: ACTOR },
     {
-      instructions: deps.selectSystemPrompt(client?.email_style),
+      instructions: deps.buildSystemPrompt(style.voice_instructions),
       prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
       schema: deps.draftSchema,
       maxOutputTokens: deps.MAX_OUTPUT_TOKENS,
