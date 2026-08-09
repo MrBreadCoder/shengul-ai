@@ -3746,3 +3746,115 @@ exactly what caught this before it shipped.
 
 Full repo suite: 201 files / 2175 tests green, `tsc --noEmit` and `eslint`
 clean.
+
+## 2026-08-09 — Manual company info replaces website-RAG "About our company"
+
+Operator ask: stop auto-injecting website-scraped knowledge into the
+email-writing agents; give the operator a box to type the company
+description themselves. Added `clients.company_info` (nullable `text`,
+migration `0036`), edited from a new `EditCompanyInfoDialog` on the client
+page (`Textarea`, no i18n — operator-only page per the "translate only
+client-facing places" rule). Every outbound-email pipeline stage now reads
+`client.company_info` for its "About our company" line instead of calling
+`retrieveClientKnowledge` (the website-crawl RAG lookup): `write.ts`,
+`followup.ts`, `redesign.ts`, `knowledge-answer.ts` dropped the RAG call
+outright; `redesign.ts` and `knowledge-answer.ts` didn't fetch a client row
+at all before, so both gained a `getClientById` call.
+
+`reply.ts` is the one stage that couldn't just drop the retrieval: it also
+uses `retrieveClientKnowledge` to find a specific uploaded-file excerpt to
+offer as an email attachment (tagged `attachable #N`), a feature unrelated
+to background company info. Fix was a filter, not a removal — added a
+`resourceOnly` option to `retrieveClientKnowledge`
+(`src/lib/knowledge/client-context.ts`) that restricts matches to
+`resourceId !== null`, i.e. it can now only ever surface content from a
+file the operator explicitly uploaded as a sendable resource, never a
+scraped web page. `reply.ts` keeps calling it (`resourceOnly: true`) under
+its own prompt heading ("Company knowledge from files"), separate from the
+manual "About our company" block. `knowledge-answer.ts`'s retrieval call
+had no such attachment role (its attachments are human-picked in /inbox,
+not AI-matched) — removed outright like the other three.
+
+`scripts/regenerate-sample-emails.ts` / `rewrite-draft-emails.ts` mirror
+write.ts's exact generation path per their own header comments, so both
+lost their `retrieveClientKnowledge`/`buildKnowledgeQueryText` deps and
+`buildPrompt(...)` calls dropped the now-removed `clientKnowledge` arg.
+
+The website-crawl knowledge base itself (Knowledge tab, sitemap crawling,
+`client_knowledge_sources`/`client_knowledge_chunks`) is untouched — it
+still exists and still backs `reply.ts`'s file-attachment matching for
+uploaded resources; only its role as an "About our company" source across
+all 5 writers was removed.
+
+Design: `docs/superpowers/specs/2026-08-09-manual-company-info-design.md`.
+Full repo suite: 201 files / 2191 tests green, `tsc --noEmit` and `eslint`
+clean on every touched file.
+
+## 2026-08-09 — Re-checked the two error clusters from the 2026-08-08 Logs diagnosis
+
+User pasted another batch of the same two error signatures ("Gemini
+generateObject failed: No object generated..." / "Web search failed...
+HTTP 400 ... zone ... not found"), ~5h old at time of paste. Re-ran
+`superpowers:systematic-debugging` rather than assuming the prior diagnosis
+still applied.
+
+**Cluster A (Gemini truncation):** Confirmed already fixed in code —
+`thinkingLevel: 'minimal'` is present on all five call sites named in the
+2026-08-08 entry (`write.ts`, `redesign.ts`, `ai-relevance.ts`,
+`derive-content.ts` ×2); none of that is in the current uncommitted diff,
+so it shipped in an earlier commit. Nothing further to fix here in code —
+if the pasted errors are newer than the deploy that included this fix,
+that points at a stale production deploy rather than a code bug.
+
+**Cluster B (BrightData zone 400):** Live-tested `.env.local`'s
+`BRIGHTDATA_SERP_ZONE` (`serp_api1`) directly against
+`https://api.brightdata.com/request` with `BRIGHTDATA_API_KEY` — got a
+real 200 with search results back just now, so that zone name and key are
+valid and funded as of this check. The error body from the pasted logs
+(`zone "serp_api1 serp_api1 serp_api1 serp_api1 serp_api1 serp_api1
+serp_" not found`) is Bright Data echoing back a corrupted zone value with
+`serp_api1` repeated ~6x, not a code-side string-concatenation bug (grepped
+the whole repo — `BRIGHTDATA_SERP_ZONE` is read in exactly one place,
+`brightdata.ts`, and passed straight through, never built up in a loop or
+appended to). Most likely explanation: production's `BRIGHTDATA_SERP_ZONE`
+env var (in Vercel) has the value pasted/duplicated by mistake, unrelated
+to the local `.env.local` value which is correct. Still unresolved —
+needs the user to open the Vercel project's env vars and confirm
+`BRIGHTDATA_SERP_ZONE` there is exactly `serp_api1` with no repetition or
+trailing whitespace, same ask as 2026-08-08's Cluster B, now with a
+concrete guess at what's wrong.
+
+No code changes this session — both findings point outside the repo
+(stale deploy, prod env var), not a bug to fix here.
+
+## 2026-08-09 — write.ts/redesign.ts moved from 'minimal' to 'medium' thinking
+
+User wanted more reasoning depth on the two actual email-composition calls
+(first-touch generation, inbox draft redesign) rather than 'minimal', which
+the 2026-08-08 fix had pinned everywhere to stop the JSON-truncation bug.
+Scoped to just those two — left `ai-relevance.ts` (binary pass/fail on the
+cheap `gemini-3.1-flash-lite` model) and `derive-content.ts` (file
+summarization, not a judgment call) on 'minimal', since neither benefits
+from more reasoning and both would be the first to truncate again given
+their much tighter existing budgets.
+
+Applied `reply.ts`'s `classifyReply` as the reference: the one call already
+running 'medium' thinking successfully, at a 1,600-token ceiling on a
+similarly-sized schema, with `timeoutMs` raised to 30s. Mirrored both:
+
+- `write.ts` / `redesign.ts`: `MAX_OUTPUT_TOKENS` 1,400 → 1,600,
+  `thinkingLevel: 'minimal'` → `'medium'`, added a 30s `GENERATE_TIMEOUT_MS`
+  (previously relied on `generateJson`'s 20s default, which the added
+  thinking budget can now plausibly exceed — same risk reply.ts had already
+  hit and fixed).
+- `scripts/regenerate-sample-emails.ts` / `rewrite-draft-emails.ts`: both
+  hardcoded their own `thinkingLevel: 'minimal'` independent of write.ts
+  rather than importing it, so updated to `'medium'` too — their stated
+  purpose is mirroring write.ts's real generation path, and a stale
+  thinking level would silently make their output unrepresentative of what
+  the live pipeline actually generates.
+
+Updated both `it('should pin thinking to minimal...')` tests in
+write.test.ts/redesign.test.ts to assert `thinkingLevel: 'medium'` and
+`maxOutputTokens: 1_600`. Full suite: 201 files / 2191 tests green,
+`tsc --noEmit` and `eslint` clean on every touched file.

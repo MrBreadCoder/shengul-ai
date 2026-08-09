@@ -43,7 +43,6 @@ vi.mock('@/lib/llm/client', () => ({
 }))
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
-vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runWriteForCase, buildPrompt, buildSystemPrompt } from './write'
@@ -76,7 +75,7 @@ beforeEach(() => {
   // scheduleFirstFollowup's DEFAULT_FOLLOWUP_DELAYS_DAYS fallback covers a
   // null client lookup, so this default keeps every existing test's timing
   // assertions (3-day first follow-up) unchanged.
-  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null, email_style_id: null })
+  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null, company_info: null, email_style_id: null })
   getDefaultEmailStyleMock.mockResolvedValue({ id: 'default-style', name: 'Concise (default)', voice_instructions: 'Default voice text.', is_default: true })
 })
 
@@ -99,7 +98,7 @@ describe('runWriteForCase', () => {
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
   })
 
-  it('should pin thinking to minimal so reasoning tokens never crowd out the JSON draft', async () => {
+  it('should use medium thinking with a token ceiling that keeps the JSON draft from truncating', async () => {
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
     sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
@@ -108,7 +107,7 @@ describe('runWriteForCase', () => {
     await runWriteForCase({} as never, input)
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ thinkingLevel: 'minimal' }),
+      expect.objectContaining({ thinkingLevel: 'medium', maxOutputTokens: 1_600 }),
     )
   })
 
@@ -288,7 +287,7 @@ describe('buildPrompt', () => {
       knowledgeRow('news', 'Just raised a Series B and is expanding to a second site.'),
     ]
 
-    const prompt = buildPrompt(input, fullLead, knowledge, '', null)
+    const prompt = buildPrompt(input, fullLead, knowledge, null)
     const dossierSection = prompt.split('Dossier:\n')[1] ?? ''
     const companyIndex = dossierSection.indexOf('(company)')
     const painPointIndex = dossierSection.indexOf('(pain_point)')
@@ -304,14 +303,26 @@ describe('buildPrompt', () => {
     const client = {
       id: 'c1', name: 'Uniforms Fashion', signature_name: 'Cihat Bozkurt',
     } as never
-    const prompt = buildPrompt(input, fullLead, [], '', client)
+    const prompt = buildPrompt(input, fullLead, [], client)
     expect(prompt).toContain('Our company name: Uniforms Fashion')
     expect(prompt).toContain('Sender name: Cihat Bozkurt')
   })
 
   it('should omit the sender/company lines when no client row is available', () => {
-    const prompt = buildPrompt(input, fullLead, [], '', null)
+    const prompt = buildPrompt(input, fullLead, [], null)
     expect(prompt).not.toContain('Our company name:')
     expect(prompt).not.toContain('Sender name:')
+  })
+
+  it('should include the operator-entered company info as "About our company" when set', () => {
+    const client = { id: 'c1', name: 'Acme', company_info: 'Acme builds inventory software for retailers.' } as never
+    const prompt = buildPrompt(input, fullLead, [], client)
+    expect(prompt).toContain('About our company:\nAcme builds inventory software for retailers.')
+  })
+
+  it('should omit the "About our company" line when the client has no company info on file', () => {
+    const client = { id: 'c1', name: 'Acme', company_info: null } as never
+    const prompt = buildPrompt(input, fullLead, [], client)
+    expect(prompt).not.toContain('About our company:')
   })
 })

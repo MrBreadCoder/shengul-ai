@@ -13,6 +13,7 @@ import {
   updateClientWarmupProfile,
   updateClientEmailStyle,
   updateClientDomain,
+  updateClientCompanyInfo,
   updateClientLogoUrl,
   updateClientMailreachEnabled,
   updateClientReplyMode,
@@ -214,6 +215,35 @@ describe('updateClientDomain', () => {
     })
     await expect(
       updateClientDomain({ from: () => ({ update }) } as never, 'c1', 'acme.com'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('updateClientCompanyInfo', () => {
+  it('should return the client with the new company info', async () => {
+    const row = { id: 'c1', company_info: 'Acme builds inventory software.' }
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
+    })
+    const result = await updateClientCompanyInfo({ from: () => ({ update }) } as never, 'c1', 'Acme builds inventory software.')
+    expect(update).toHaveBeenCalledWith({ company_info: 'Acme builds inventory software.' })
+    expect(result).toEqual(row)
+  })
+
+  it('should allow clearing the company info with null', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'c1', company_info: null }, error: null }) }) }),
+    })
+    await updateClientCompanyInfo({ from: () => ({ update }) } as never, 'c1', null)
+    expect(update).toHaveBeenCalledWith({ company_info: null })
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    })
+    await expect(
+      updateClientCompanyInfo({ from: () => ({ update }) } as never, 'c1', 'text'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

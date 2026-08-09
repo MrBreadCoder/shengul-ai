@@ -7,6 +7,7 @@ import {
 } from '@/lib/db/emails'
 import { getLeadById, type LeadRow } from '@/lib/db/leads'
 import { getCampaignForCase } from '@/lib/db/campaigns'
+import { getClientById } from '@/lib/db/clients'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
 import { addSuppression } from '@/lib/db/suppressions'
 import { stopSequenceForLead } from '@/lib/db/sequences'
@@ -60,8 +61,8 @@ const SYSTEM_PROMPT = [
   'Always write replyBody in English, even if the dossier, company knowledge, or',
   'the prospect\'s message is in another language — translate any facts you use,',
   'never copy foreign-language text.',
-  'Use ONLY the dossier facts, the prior thread, and any company-knowledge line',
-  'tagged "attachable #N". Never invent a business fact.',
+  'Use ONLY the dossier facts, the About our company text, the prior thread, and',
+  'any company-knowledge line tagged "attachable #N". Never invent a business fact.',
   'Classify intent: question, interested, price (pricing/quote/buying signal),',
   'not_interested (opt-out / unsubscribe / "stop"), or other.',
   'Set canAnswer=true only if you can fully answer from the dossier/thread without',
@@ -85,7 +86,13 @@ interface ClassifyPromptArgs {
   knowledge: KnowledgeRow[]
   valueProp: string | null
   inboundBody: string
-  clientKnowledge: string
+  companyInfo: string | null
+  // Chunks retrieved from uploaded resource files only (never a scraped
+  // website page — see retrieveClientKnowledge's resourceOnly option), tagged
+  // "attachable #N" where a chunk matches a resource currently on the menu.
+  // Distinct from companyInfo: this is what tells the model which specific
+  // file excerpt answers the prospect's question, not general background.
+  attachableKnowledge: string
   resourceMenu: string
 }
 
@@ -96,8 +103,9 @@ function buildClassifyPrompt(args: ClassifyPromptArgs): string {
     .join('\n---\n')
   return [
     `Our value proposition: ${args.valueProp ?? 'n/a'}`,
-    args.clientKnowledge ? `About our company:\n${args.clientKnowledge}` : '',
+    args.companyInfo ? `About our company:\n${args.companyInfo}` : '',
     `Dossier:\n${dossier}`,
+    args.attachableKnowledge ? `Company knowledge from files:\n${args.attachableKnowledge}` : '',
     `Thread so far:\n${transcript}`,
     args.resourceMenu ? `Resources you may attach:\n${args.resourceMenu}` : '',
     `Latest inbound reply to triage:\n${args.inboundBody}`,
@@ -250,10 +258,11 @@ export async function runReplyForInbound(
   const campaign = await getCampaignForCase(supabase, inbound.case_id)
   if (!campaign) return { emailId: input.emailId, action: 'skipped' }
 
-  const [thread, knowledge, resources] = await Promise.all([
+  const [thread, knowledge, resources, client] = await Promise.all([
     listThreadEmails(supabase, inbound.lead_id),
     listKnowledgeForCase(supabase, inbound.case_id),
     listActiveResourcesForClient(supabase, inbound.client_id, MAX_RESOURCE_MENU),
+    getClientById(supabase, inbound.client_id),
   ])
   const resourceMenu = buildResourceMenu(resources)
   // Lets retrieval label a chunk that came from one of these files, so a fact
@@ -263,7 +272,10 @@ export async function runReplyForInbound(
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
   const dossierText = knowledge.map((k) => k.content).join(' ')
   const inboundBody = (inbound.body ?? '').trim()
-  const clientKnowledge = await retrieveClientKnowledge(supabase, {
+  // resourceOnly: true — this must never surface a scraped website page, only
+  // an excerpt of a file the operator explicitly uploaded as a sendable
+  // resource. Background company info comes from client.company_info instead.
+  const attachableKnowledge = await retrieveClientKnowledge(supabase, {
     clientId: inbound.client_id,
     queryText: buildKnowledgeQueryText(
       inboundBody.length > 0
@@ -271,9 +283,12 @@ export async function runReplyForInbound(
         : { primary: dossierText, secondary: [campaign.value_prop ?? ''] },
     ),
     resourceOrdinalById,
+    resourceOnly: true,
   })
   const classification = await classifyReply(context, {
-    thread, knowledge, valueProp: campaign.value_prop, inboundBody: inbound.body ?? '', clientKnowledge,
+    thread, knowledge, valueProp: campaign.value_prop, inboundBody: inbound.body ?? '',
+    companyInfo: client?.company_info ?? null,
+    attachableKnowledge,
     resourceMenu: formatResourceMenu(resourceMenu),
   })
 

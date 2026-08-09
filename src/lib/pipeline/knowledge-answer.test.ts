@@ -10,6 +10,7 @@ const generateTextMock = vi.fn()
 const sendOrDraftReplyMock = vi.fn()
 const logEventMock = vi.fn()
 const getActiveResourcesByIdsMock = vi.fn()
+const getClientByIdMock = vi.fn()
 
 vi.mock('@/lib/db/knowledge-requests', () => ({ getKnowledgeRequestById: (...a: unknown[]) => getKrMock(...a) }))
 vi.mock('@/lib/db/emails', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/lib/db/emails', () => ({
 }))
 vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
   generateText: (...a: unknown[]) => generateTextMock(...a),
@@ -28,7 +30,6 @@ vi.mock('@/lib/pipeline/reply', () => ({
   replyDisposition: () => 'send',
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
-vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/db/client-resources', () => ({
   getActiveResourcesByIds: (...a: unknown[]) => getActiveResourcesByIdsMock(...a),
 }))
@@ -36,8 +37,9 @@ vi.mock('@/lib/db/client-resources', () => ({
 import { runKnowledgeAnswer } from './knowledge-answer'
 
 beforeEach(() => {
-  for (const m of [getKrMock, getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, listThreadEmailsMock, listKnowledgeMock, generateTextMock, sendOrDraftReplyMock, logEventMock, getActiveResourcesByIdsMock]) m.mockReset()
+  for (const m of [getKrMock, getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, getClientByIdMock, listThreadEmailsMock, listKnowledgeMock, generateTextMock, sendOrDraftReplyMock, logEventMock, getActiveResourcesByIdsMock]) m.mockReset()
   getActiveResourcesByIdsMock.mockResolvedValue([])
+  getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
   getKrMock.mockResolvedValue({ id: 'kr1', status: 'answered', email_id: 'in1', human_answer: 'Our SLA is 99.9%', client_id: 'c1', case_id: 'case1' })
   getEmailByIdMock.mockResolvedValue({ id: 'in1', client_id: 'c1', case_id: 'case1', lead_id: 'lead1', direction: 'inbound', thread_id: 't1', provider_message_id: 'g1' })
   getLeadByIdMock.mockResolvedValue({ id: 'lead1', email: 'jane@acme.com' })
@@ -68,6 +70,13 @@ describe('runKnowledgeAnswer', () => {
     const result = await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
     expect(sendOrDraftReplyMock).not.toHaveBeenCalled()
     expect(result.action).toBe('skipped')
+  })
+
+  it('should inject the client\'s company info as "About our company" when set', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: 'Acme builds inventory software.' })
+    await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
+    const { prompt } = generateTextMock.mock.calls[0]![1] as { prompt: string }
+    expect(prompt).toContain('About our company:\nAcme builds inventory software.')
   })
 })
 

@@ -138,6 +138,34 @@ describe('retrieveClientKnowledge', () => {
     expect(result).toBe(`- (Pricing) ${original}`)
   })
 
+  it('should drop website-page chunks when resourceOnly is set, keeping only resource-backed chunks', async () => {
+    embedTextsMock.mockResolvedValue([[0.1]])
+    matchClientKnowledgeChunksMock.mockResolvedValue([
+      chunk({ sourceId: 's1', sourceTitle: 'Homepage', resourceId: null, content: 'Scraped from the website.' }),
+      chunk({ sourceId: 's2', sourceTitle: 'Rate card', resourceId: 'r1', content: 'From an uploaded file.' }),
+    ])
+    const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'q', resourceOnly: true })
+    expect(result).toBe('- (Rate card) From an uploaded file.')
+  })
+
+  it('should return an empty string when resourceOnly leaves no candidates', async () => {
+    embedTextsMock.mockResolvedValue([[0.1]])
+    matchClientKnowledgeChunksMock.mockResolvedValue([
+      chunk({ sourceTitle: 'Homepage', resourceId: null, content: 'Scraped from the website.' }),
+    ])
+    const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'q', resourceOnly: true })
+    expect(result).toBe('')
+  })
+
+  it('should include website-page chunks when resourceOnly is not set', async () => {
+    embedTextsMock.mockResolvedValue([[0.1]])
+    matchClientKnowledgeChunksMock.mockResolvedValue([
+      chunk({ sourceTitle: 'Homepage', resourceId: null, content: 'Scraped from the website.' }),
+    ])
+    const result = await retrieveClientKnowledge({} as never, { clientId: 'c1', queryText: 'q' })
+    expect(result).toBe('- (Homepage) Scraped from the website.')
+  })
+
   it('should keep two chunks whose content has low token overlap', async () => {
     embedTextsMock.mockResolvedValue([[0.1]])
     matchClientKnowledgeChunksMock.mockResolvedValue([

@@ -30,6 +30,7 @@ import { RemoveUserDialog } from '../remove-user-dialog'
 import { RenameClientDialog } from './rename-client-dialog'
 import { EditDomainDialog } from './edit-domain-dialog'
 import { EditSignatureDialog } from './edit-signature-dialog'
+import { EditCompanyInfoDialog } from './edit-company-info-dialog'
 import { LogoUpload } from './logo-upload'
 import { ClientLifecycleActions } from './client-lifecycle-actions'
 import { DeleteClientDialog } from './delete-client-dialog'
@@ -167,6 +168,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
                 currentPhone={client.phone}
                 currentAddress={client.address}
               />
+              <EditCompanyInfoDialog clientId={client.id} currentCompanyInfo={client.company_info} />
               <LogoUpload clientId={client.id} hasLogo={Boolean(client.logo_url)} />
             </div>
             <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

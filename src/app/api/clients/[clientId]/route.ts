@@ -8,6 +8,7 @@ import {
   updateClientWarmupProfile,
   updateClientDomain,
   updateClientSignature,
+  updateClientCompanyInfo,
   updateClientEmailStyle,
   deleteClientCascade,
   listClientRoleAppUsers,
@@ -43,6 +44,9 @@ const patchSchema = z
     address: nullableTextSchema(200).optional(),
     signatureName: nullableTextSchema(120).optional(),
     signatureTitle: nullableTextSchema(120).optional(),
+    // Generous cap — this is meant to hold a real paragraph or two of company
+    // description, unlike the one-liner signature fields above.
+    companyInfo: nullableTextSchema(4000).optional(),
     emailStyleId: z.string().uuid().nullable().optional(),
   })
   .refine(
@@ -54,6 +58,7 @@ const patchSchema = z
       body.address !== undefined ||
       body.signatureName !== undefined ||
       body.signatureTitle !== undefined ||
+      body.companyInfo !== undefined ||
       body.emailStyleId !== undefined,
     { message: 'At least one field must be provided' },
   )
@@ -144,6 +149,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ clien
             signatureName: updated.signature_name,
             signatureTitle: updated.signature_title,
           },
+        })
+      } catch {
+        // Audit logging is best-effort — the update already succeeded.
+      }
+    }
+
+    if (body.companyInfo !== undefined) {
+      updated = await updateClientCompanyInfo(admin, clientId, body.companyInfo)
+      try {
+        await logEvent({
+          clientId,
+          actor: `human:${appUser.id}`,
+          type: 'client.company_info_changed',
+          payload: { from: client.company_info, to: body.companyInfo },
         })
       } catch {
         // Audit logging is best-effort — the update already succeeded.

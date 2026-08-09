@@ -5,6 +5,7 @@ const getClientByIdMock = vi.fn()
 const updateClientNameMock = vi.fn()
 const updateClientDomainMock = vi.fn()
 const updateClientSignatureMock = vi.fn()
+const updateClientCompanyInfoMock = vi.fn()
 const updateClientEmailStyleMock = vi.fn()
 const deleteClientCascadeMock = vi.fn()
 const listClientRoleAppUsersMock = vi.fn()
@@ -18,6 +19,7 @@ vi.mock('@/lib/db/clients', () => ({
   updateClientName: (...a: unknown[]) => updateClientNameMock(...a),
   updateClientDomain: (...a: unknown[]) => updateClientDomainMock(...a),
   updateClientSignature: (...a: unknown[]) => updateClientSignatureMock(...a),
+  updateClientCompanyInfo: (...a: unknown[]) => updateClientCompanyInfoMock(...a),
   updateClientEmailStyle: (...a: unknown[]) => updateClientEmailStyleMock(...a),
   deleteClientCascade: (...a: unknown[]) => deleteClientCascadeMock(...a),
   listClientRoleAppUsers: (...a: unknown[]) => listClientRoleAppUsersMock(...a),
@@ -45,6 +47,7 @@ beforeEach(() => {
   updateClientNameMock.mockReset()
   updateClientDomainMock.mockReset()
   updateClientSignatureMock.mockReset()
+  updateClientCompanyInfoMock.mockReset()
   updateClientEmailStyleMock.mockReset()
   deleteClientCascadeMock.mockReset()
   listClientRoleAppUsersMock.mockReset()
@@ -161,6 +164,36 @@ describe('PATCH /api/clients/[clientId]', () => {
     const res = await PATCH(req({ phone: 'call me maybe' }), ctx('c1'))
     expect(res.status).toBe(400)
     expect(updateClientSignatureMock).not.toHaveBeenCalled()
+  })
+
+  it('should save the company info and log the event', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
+    updateClientCompanyInfoMock.mockResolvedValue({
+      id: 'c1', name: 'Acme', company_info: 'Acme builds inventory software for retailers.',
+    })
+    const res = await PATCH(req({ companyInfo: 'Acme builds inventory software for retailers.' }), ctx('c1'))
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.client.company_info).toBe('Acme builds inventory software for retailers.')
+    expect(updateClientCompanyInfoMock).toHaveBeenCalledWith(
+      expect.anything(), 'c1', 'Acme builds inventory software for retailers.',
+    )
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'client.company_info_changed' }))
+  })
+
+  it('should clear the company info when sent empty', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: 'Old text' })
+    updateClientCompanyInfoMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
+    const res = await PATCH(req({ companyInfo: '' }), ctx('c1'))
+    expect(res.status).toBe(200)
+    expect(updateClientCompanyInfoMock).toHaveBeenCalledWith(expect.anything(), 'c1', null)
+  })
+
+  it('should return 400 when the company info exceeds the length cap', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
+    const res = await PATCH(req({ companyInfo: 'x'.repeat(4001) }), ctx('c1'))
+    expect(res.status).toBe(400)
+    expect(updateClientCompanyInfoMock).not.toHaveBeenCalled()
   })
 
   const STYLE_ID = '22222222-2222-4222-a222-222222222222'

@@ -47,7 +47,6 @@ vi.mock('@/lib/llm/client', () => ({
 }))
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
-vi.mock('@/lib/knowledge/client-context', () => ({ retrieveClientKnowledge: vi.fn().mockResolvedValue('') }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import { runFollowupStep, scheduleFirstFollowup } from './followup'
@@ -72,7 +71,7 @@ beforeEach(() => {
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
   getLeadByIdMock.mockResolvedValue(lead)
-  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null })
+  getClientByIdMock.mockResolvedValue({ id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null, signature_name: null, signature_title: null, company_info: null })
   isSuppressedMock.mockResolvedValue(false)
   listThreadEmailsMock.mockResolvedValue([
     { direction: 'outbound', subject: 'Quick idea', body: 'Hi', thread_id: 'thr1', provider_message_id: '<a@mail>' },
@@ -270,6 +269,24 @@ describe('runFollowupStep', () => {
     expect(claimOutboundEmailMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ body: 'Just following up, Jane.' }),
+    )
+  })
+
+  it('should inject the client\'s company info as "About our company" when set', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null,
+      phone: null, address: null, signature_name: null, signature_title: null,
+      company_info: 'Acme builds inventory software for retailers.',
+    })
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: expect.stringContaining('About our company:\nAcme builds inventory software for retailers.') }),
     )
   })
 })

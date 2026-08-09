@@ -22,6 +22,7 @@ const insertEmailAttachmentsMock = vi.fn()
 const loadResourceAttachmentsMock = vi.fn()
 const retrieveClientKnowledgeMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
+const getClientByIdMock = vi.fn()
 
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
@@ -32,6 +33,7 @@ vi.mock('@/lib/db/emails', () => ({
 }))
 vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
 vi.mock('@/lib/db/suppressions', () => ({ addSuppression: (...a: unknown[]) => addSuppressionMock(...a) }))
 vi.mock('@/lib/db/sequences', () => ({ stopSequenceForLead: (...a: unknown[]) => stopSequenceForLeadMock(...a) }))
@@ -82,10 +84,11 @@ beforeEach(() => {
     claimReplyEmailMock, markEmailSentMock, markEmailFailedMock, addSuppressionMock, stopSequenceForLeadMock,
     updateCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
     triggerCollisionNoticeMock, listActiveResourcesForClientMock, insertEmailAttachmentsMock,
-    loadResourceAttachmentsMock, retrieveClientKnowledgeMock, enqueueCrmSyncMock]) m.mockReset()
+    loadResourceAttachmentsMock, retrieveClientKnowledgeMock, enqueueCrmSyncMock, getClientByIdMock]) m.mockReset()
   getEmailByIdMock.mockResolvedValue(inbound)
   getLeadByIdMock.mockResolvedValue(lead)
   getCampaignForCaseMock.mockResolvedValue(campaign)
+  getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
   listThreadEmailsMock.mockResolvedValue([{ direction: 'outbound', subject: 'Quick idea', provider_message_id: 'out1' }])
   listKnowledgeMock.mockResolvedValue([])
   claimReplyEmailMock.mockResolvedValue({ id: 'reply1' })
@@ -270,6 +273,35 @@ describe('runReplyForInbound resource selection', () => {
 
     const call = generateJsonMock.mock.calls[0]![1] as { instructions: string }
     expect(call.instructions).toContain('attachable #N')
+  })
+
+  it('should retrieve only resource-backed knowledge, never a scraped website page', async () => {
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    expect(retrieveClientKnowledgeMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ resourceOnly: true }),
+    )
+  })
+
+  it('should inject the client\'s company info as "About our company", separate from retrieved file knowledge', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: 'Acme builds inventory software.' })
+    retrieveClientKnowledgeMock.mockResolvedValue('- (Rate card, attachable #1) $99/mo.')
+    generateJsonMock.mockResolvedValue({
+      intent: 'other', confidence: 0.9, canAnswer: true,
+      missingQuestion: null, replyBody: 'ok', attachResourceIds: [],
+    })
+
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+
+    const promptArg = generateJsonMock.mock.calls[0]![1] as { prompt: string }
+    expect(promptArg.prompt).toContain('About our company:\nAcme builds inventory software.')
+    expect(promptArg.prompt).toContain('Company knowledge from files:\n- (Rate card, attachable #1) $99/mo.')
   })
 })
 

@@ -155,12 +155,10 @@ interface AppDeps {
   getCampaignForCase: typeof import('../src/lib/db/campaigns').getCampaignForCase
   getClientById: typeof import('../src/lib/db/clients').getClientById
   updateDraftContent: typeof import('../src/lib/db/emails').updateDraftContent
-  retrieveClientKnowledge: typeof import('../src/lib/knowledge/client-context').retrieveClientKnowledge
-  buildKnowledgeQueryText: typeof import('../src/lib/knowledge/build-query').buildKnowledgeQueryText
 }
 
 async function loadAppDeps(): Promise<AppDeps> {
-  const [writeMod, llmMod, schemaMod, signatureMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod, emailStylesMod, emailsMod, clientContextMod, buildQueryMod] =
+  const [writeMod, llmMod, schemaMod, signatureMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod, emailStylesMod, emailsMod] =
     await Promise.all([
       import('../src/lib/pipeline/write'),
       import('../src/lib/llm/client'),
@@ -173,8 +171,6 @@ async function loadAppDeps(): Promise<AppDeps> {
       import('../src/lib/db/clients'),
       import('../src/lib/db/email-styles'),
       import('../src/lib/db/emails'),
-      import('../src/lib/knowledge/client-context'),
-      import('../src/lib/knowledge/build-query'),
     ])
   return {
     generateJson: llmMod.generateJson,
@@ -192,8 +188,6 @@ async function loadAppDeps(): Promise<AppDeps> {
     getCampaignForCase: campaignsMod.getCampaignForCase,
     getClientById: clientsMod.getClientById,
     updateDraftContent: emailsMod.updateDraftContent,
-    retrieveClientKnowledge: clientContextMod.retrieveClientKnowledge,
-    buildKnowledgeQueryText: buildQueryMod.buildKnowledgeQueryText,
   }
 }
 
@@ -235,12 +229,6 @@ async function regenerateAndMaybeApply(
     companyName: kase.company_name,
   }
 
-  const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await deps.retrieveClientKnowledge(supabase, {
-    clientId: draft.clientId,
-    queryText: deps.buildKnowledgeQueryText({ primary: dossierText, secondary: [input.valueProp ?? ''] }),
-  })
-
   const clientStyle = client?.email_style_id ? await deps.getEmailStyleById(supabase, client.email_style_id) : null
   const style = clientStyle ?? (await deps.getDefaultEmailStyle(supabase))
 
@@ -248,13 +236,15 @@ async function regenerateAndMaybeApply(
     { clientId: draft.clientId, caseId: draft.caseId, actor: ACTOR },
     {
       instructions: deps.buildSystemPrompt(style.voice_instructions),
-      prompt: deps.buildPrompt(input, lead, knowledge, clientKnowledge, client),
+      prompt: deps.buildPrompt(input, lead, knowledge, client),
       schema: deps.draftSchema,
       maxOutputTokens: deps.MAX_OUTPUT_TOKENS,
       // --model-id overrides for an experimental comparison; otherwise match
       // write.ts's real default so this script's output stays representative.
       modelId: modelId ?? deps.EMAIL_WRITER_MODEL_ID,
-      thinkingLevel: 'minimal',
+      // Matches write.ts's real thinking level so this script's output stays
+      // representative of what the live pipeline actually generates.
+      thinkingLevel: 'medium',
     },
   )
 

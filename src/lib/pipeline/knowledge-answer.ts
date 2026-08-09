@@ -4,12 +4,11 @@ import { getKnowledgeRequestById } from '@/lib/db/knowledge-requests'
 import { getEmailById, listThreadEmails, type EmailRow } from '@/lib/db/emails'
 import { getLeadById } from '@/lib/db/leads'
 import { getCampaignForCase } from '@/lib/db/campaigns'
+import { getClientById } from '@/lib/db/clients'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
 import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { sendOrDraftReply, replyDisposition } from '@/lib/pipeline/reply'
 import { logEventSafe } from '@/lib/events/log-event'
-import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
-import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { getActiveResourcesByIds, type ClientResourceRow } from '@/lib/db/client-resources'
 import { applyAttachmentBudget } from '@/lib/resources/menu'
 
@@ -60,7 +59,7 @@ function buildAnswerPrompt(args: {
   knowledge: KnowledgeRow[]
   humanAnswer: string
   valueProp: string | null
-  clientKnowledge: string
+  companyInfo: string | null
   attachedFiles: readonly AttachedFile[]
 }): string {
   const dossier = args.knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
@@ -68,7 +67,7 @@ function buildAnswerPrompt(args: {
   return [
     `The colleague's answer to use: ${args.humanAnswer}`,
     `Our value proposition: ${args.valueProp ?? 'n/a'}`,
-    args.clientKnowledge ? `About our company:\n${args.clientKnowledge}` : '',
+    args.companyInfo ? `About our company:\n${args.companyInfo}` : '',
     `Dossier:\n${dossier}`,
     `The prospect's question:\n${lastInbound?.body ?? ''}`,
     buildAttachmentBlock(args.attachedFiles),
@@ -105,9 +104,10 @@ export async function runKnowledgeAnswer(
   const campaign = await getCampaignForCase(supabase, inbound.case_id)
   if (!campaign) return { knowledgeRequestId: kr.id, action: 'skipped' }
 
-  const [thread, knowledge] = await Promise.all([
+  const [thread, knowledge, client] = await Promise.all([
     listThreadEmails(supabase, inbound.lead_id),
     listKnowledgeForCase(supabase, inbound.case_id),
+    getClientById(supabase, inbound.client_id),
   ])
 
   // The operator chose these in /inbox — no LLM selection here. Re-resolved
@@ -128,18 +128,11 @@ export async function runKnowledgeAnswer(
   )
 
   const context: LlmCallContext = { clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR }
-  const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(supabase, {
-    clientId: inbound.client_id,
-    queryText: buildKnowledgeQueryText({
-      primary: kr.human_answer,
-      secondary: [dossierText, campaign.value_prop ?? ''],
-    }),
-  })
   const body = await generateText(context, {
     instructions: SYSTEM_PROMPT,
     prompt: buildAnswerPrompt({
-      thread, knowledge, humanAnswer: kr.human_answer, valueProp: campaign.value_prop, clientKnowledge,
+      thread, knowledge, humanAnswer: kr.human_answer, valueProp: campaign.value_prop,
+      companyInfo: client?.company_info ?? null,
       attachedFiles: attachResources.map((r) => ({ title: r.title, summary: r.content_summary ?? null })),
     }),
     maxOutputTokens: MAX_OUTPUT_TOKENS,

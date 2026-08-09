@@ -15,14 +15,18 @@ import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { appendSignatureBlock } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
-import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
-import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 
 // Exported (not just module-scoped) so scripts/regenerate-sample-emails.ts can
 // drive the exact same generation path against a historical row instead of
 // duplicating the prompt-construction logic.
-export const MAX_OUTPUT_TOKENS = 1_400
+// Bumped alongside the 'medium' thinking level below (matching reply.ts's
+// identically-sized classificationSchema at the same budget) so extra
+// reasoning tokens don't starve the actual subject/body output.
+export const MAX_OUTPUT_TOKENS = 1_600
+// The added 'medium' thinking budget can push a single call past the
+// client's 20s default (see reply.ts's identical CLASSIFY_TIMEOUT_MS).
+const GENERATE_TIMEOUT_MS = 30_000
 const ACTOR = 'email_writer_agent'
 
 // Re-exported so scripts/regenerate-sample-emails.ts and
@@ -105,7 +109,6 @@ export function buildPrompt(
   input: RunWriteInput,
   lead: LeadRow,
   knowledge: KnowledgeRow[],
-  clientKnowledge: string,
   client: ClientRow | null,
 ): string {
   const sortedKnowledge = [...knowledge].sort((a, b) => DOSSIER_KIND_PRIORITY[a.kind] - DOSSIER_KIND_PRIORITY[b.kind])
@@ -115,7 +118,7 @@ export function buildPrompt(
     `Our value proposition: ${input.valueProp ?? 'n/a'}`,
     client?.name ? `Our company name: ${client.name}` : '',
     client?.signature_name ? `Sender name: ${client.signature_name}` : '',
-    clientKnowledge ? `About our company:\n${clientKnowledge}` : '',
+    client?.company_info ? `About our company:\n${client.company_info}` : '',
     input.bookingLink ? `Booking link (optional CTA): ${input.bookingLink}` : '',
     `Dossier:\n${dossier}`,
     'Write the first-touch email. Return a subject and a body.',
@@ -135,7 +138,6 @@ async function processLead(
   input: RunWriteInput,
   lead: LeadRow,
   knowledge: KnowledgeRow[],
-  clientKnowledge: string,
   client: ClientRow | null,
 ): Promise<'sent' | 'drafted' | 'skipped'> {
   if (!lead.email) return 'skipped'
@@ -151,16 +153,19 @@ async function processLead(
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
   const draft = await generateJson(context, {
     instructions: buildSystemPrompt(style.voice_instructions),
-    prompt: buildPrompt(input, lead, knowledge, clientKnowledge, client),
+    prompt: buildPrompt(input, lead, knowledge, client),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // Straight-line generation, not a judgment call — pinning thinking to
-    // 'minimal' keeps reasoning tokens from competing with MAX_OUTPUT_TOKENS
-    // for the actual JSON payload (see .claude/roadmap.md 2026-08-08: the
-    // model's default thinking budget was truncating output here, causing
-    // intermittent "No object generated" failures).
-    thinkingLevel: 'minimal',
+    // Deciding what to lead with and how to phrase a first-touch email is a
+    // judgment call worth the extra reasoning (see .claude/roadmap.md
+    // 2026-08-09) — 'medium' matches reply.ts's classifyReply, which already
+    // proved this thinking level stays within a 1,600-token ceiling without
+    // truncating the JSON payload (the 2026-08-08 "No object generated"
+    // failures traced to 'minimal'/omitted thinkingLevel plus too tight a
+    // budget, not to 'medium' itself).
+    thinkingLevel: 'medium',
   })
 
   // Deterministic — never left to the model's discretion. Appended here,
@@ -230,16 +235,10 @@ export async function runWriteForCase(
   const leads = await listActiveLeadsForCase(supabase, input.caseId)
   const client = await getClientById(supabase, input.clientId)
 
-  const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(supabase, {
-    clientId: input.clientId,
-    queryText: buildKnowledgeQueryText({ primary: dossierText, secondary: [input.valueProp ?? ''] }),
-  })
-
   let sent = 0
   let drafted = 0
   for (const lead of leads) {
-    const outcome = await processLead(supabase, input, lead, knowledge, clientKnowledge, client)
+    const outcome = await processLead(supabase, input, lead, knowledge, client)
     if (outcome === 'sent') sent += 1
     if (outcome === 'drafted') drafted += 1
   }

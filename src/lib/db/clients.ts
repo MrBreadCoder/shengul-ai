@@ -233,6 +233,28 @@ export async function updateClientSignature(
   return data
 }
 
+// Free-text box the operator fills in per client — injected verbatim as
+// "About our company" by every pipeline stage that writes outbound email
+// (write.ts, followup.ts, redesign.ts, reply.ts, knowledge-answer.ts), in
+// place of the website-crawled RAG retrieval those stages used before. `null`
+// clears it, same empty-clears-to-null convention as updateClientDomain.
+export async function updateClientCompanyInfo(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  companyInfo: string | null,
+): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ company_info: companyInfo })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    throw new AppError('DB_ERROR', 'Failed to update client company info', { id, cause: error?.message })
+  }
+  return data
+}
+
 // `null` reverts the client back to its domain favicon (or initials, if no
 // domain is set either). Callers are responsible for deleting the storage
 // object behind the previous `logo_url`, if any.

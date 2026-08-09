@@ -27,8 +27,6 @@ import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { appendSignatureBlock } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
-import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
-import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { DEFAULT_FOLLOWUP_DELAYS_DAYS } from '@/lib/validation/followup-limits'
 
 const DAY_SECONDS = 86_400
@@ -110,7 +108,7 @@ function buildNudgePrompt(
   bookingLink: string | null,
   step: number,
   maxStep: number,
-  clientKnowledge: string,
+  companyInfo: string | null,
 ): string {
   const showBookingLink = bookingLink !== null && step >= BOOKING_LINK_ELIGIBLE_STEP
   return [
@@ -118,7 +116,7 @@ function buildNudgePrompt(
     `Original subject: ${priorSubject}`,
     `Original message:\n${priorBody}`,
     `Our value proposition: ${valueProp ?? 'n/a'}`,
-    clientKnowledge ? `About our company:\n${clientKnowledge}` : '',
+    companyInfo ? `About our company:\n${companyInfo}` : '',
     showBookingLink ? `Booking link (optional CTA): ${bookingLink}` : '',
     'Write only the follow-up body text (no subject line).',
   ]
@@ -237,14 +235,10 @@ export async function runFollowupStep(
     return { sequenceId: sequence.id, action: 'skipped' }
   }
 
+  // Fetched once, up front — feeds both the prompt's "About our company" line
+  // (client.company_info) and the deterministic signature block below.
+  const client = await getClientById(supabase, sequence.client_id)
   const context: LlmCallContext = { clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR }
-  const clientKnowledge = await retrieveClientKnowledge(supabase, {
-    clientId: sequence.client_id,
-    queryText: buildKnowledgeQueryText({
-      primary: (firstOutbound?.body ?? '').trim(),
-      secondary: [campaign.value_prop ?? ''],
-    }),
-  })
   const nudgeBody = await generateText(context, {
     instructions: SYSTEM_PROMPT,
     prompt: buildNudgePrompt(
@@ -254,14 +248,12 @@ export async function runFollowupStep(
       campaign.booking_link,
       input.step,
       maxStep,
-      clientKnowledge,
+      client?.company_info ?? null,
     ),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     modelId: EMAIL_WRITER_MODEL_ID,
   })
 
-  // Deterministic — never left to the model's discretion, same as write.ts.
-  const client = await getClientById(supabase, sequence.client_id)
   const signedBody = appendSignatureBlock(nudgeBody, {
     companyName: client?.name ?? '',
     signatureName: client?.signature_name ?? null,

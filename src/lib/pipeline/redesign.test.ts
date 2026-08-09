@@ -4,23 +4,21 @@ import { AppError } from '@/lib/errors/app-error'
 const getEmailByIdMock = vi.fn()
 const listThreadEmailsMock = vi.fn()
 const listKnowledgeMock = vi.fn()
+const getClientByIdMock = vi.fn()
 const generateJsonMock = vi.fn()
 const logEventMock = vi.fn()
-const retrieveClientKnowledgeMock = vi.fn()
 
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
   listThreadEmails: (...a: unknown[]) => listThreadEmailsMock(...a),
 }))
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
   generateJson: (...a: unknown[]) => generateJsonMock(...a),
   EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
-vi.mock('@/lib/knowledge/client-context', () => ({
-  retrieveClientKnowledge: (...a: unknown[]) => retrieveClientKnowledgeMock(...a),
-}))
 
 import { regenerateDraftContent } from './redesign'
 
@@ -35,11 +33,11 @@ function draftEmail(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   for (const m of [
-    getEmailByIdMock, listThreadEmailsMock, listKnowledgeMock,
-    generateJsonMock, logEventMock, retrieveClientKnowledgeMock,
+    getEmailByIdMock, listThreadEmailsMock, listKnowledgeMock, getClientByIdMock,
+    generateJsonMock, logEventMock,
   ]) m.mockReset()
   listKnowledgeMock.mockResolvedValue([{ kind: 'company', content: 'builds widgets' }])
-  retrieveClientKnowledgeMock.mockResolvedValue('')
+  getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: null })
   generateJsonMock.mockResolvedValue({ subject: 'New subject', body: 'New body' })
 })
 
@@ -88,12 +86,12 @@ describe('regenerateDraftContent', () => {
     }))
   })
 
-  it('should pin thinking to minimal so reasoning tokens never crowd out the JSON draft', async () => {
+  it('should use medium thinking with a token ceiling that keeps the JSON draft from truncating', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     await regenerateDraftContent({} as never, { emailId: 'e1', instruction: 'make it shorter' })
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ thinkingLevel: 'minimal' }),
+      expect.objectContaining({ thinkingLevel: 'medium', maxOutputTokens: 1_600 }),
     )
   })
 
@@ -103,6 +101,16 @@ describe('regenerateDraftContent', () => {
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
+    )
+  })
+
+  it('should inject the client\'s company info as "About our company" when set', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', company_info: 'Acme builds inventory software.' })
+    await regenerateDraftContent({} as never, { emailId: 'e1', instruction: 'make it shorter' })
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: expect.stringContaining('About our company:\nAcme builds inventory software.') }),
     )
   })
 

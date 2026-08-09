@@ -57,6 +57,15 @@ export interface RetrieveClientKnowledgeArgs {
    * the model knows the fact came from a file it can send.
    */
   resourceOrdinalById?: ReadonlyMap<string, number>
+  /**
+   * Restricts matches to chunks derived from an uploaded, sendable resource
+   * (`resourceId !== null`) — never a scraped website page. Set by callers
+   * that use this purely to find an attachable file excerpt (reply.ts), now
+   * that "About our company" background text comes from
+   * `clients.company_info` instead of this retrieval. See
+   * docs/superpowers/specs/2026-08-09-manual-company-info-design.md.
+   */
+  resourceOnly?: boolean
 }
 
 function labelFor(match: MatchedChunk, resourceOrdinalById?: ReadonlyMap<string, number>): string {
@@ -77,7 +86,7 @@ export async function retrieveClientKnowledge(
   supabase: SupabaseClient<Database>,
   args: RetrieveClientKnowledgeArgs,
 ): Promise<string> {
-  const { clientId, queryText, limit = DEFAULT_LIMIT, resourceOrdinalById } = args
+  const { clientId, queryText, limit = DEFAULT_LIMIT, resourceOrdinalById, resourceOnly = false } = args
   if (queryText.trim().length === 0) return ''
   try {
     const [queryEmbedding] = await embedTexts(
@@ -86,7 +95,8 @@ export async function retrieveClientKnowledge(
     )
     if (!queryEmbedding) return ''
     const matches = await matchClientKnowledgeChunks(supabase, clientId, queryEmbedding, queryText, limit)
-    const relevant = matches.filter((m) => m.similarity >= MIN_SIMILARITY)
+    const candidates = resourceOnly ? matches.filter((m) => m.resourceId !== null) : matches
+    const relevant = candidates.filter((m) => m.similarity >= MIN_SIMILARITY)
     const deduped = dedupeNearDuplicates(relevant)
     if (deduped.length === 0) return ''
     return deduped.map((m) => `- (${labelFor(m, resourceOrdinalById)}) ${m.content}`).join('\n')

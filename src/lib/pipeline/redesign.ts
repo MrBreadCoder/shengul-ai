@@ -3,14 +3,18 @@ import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 import { getEmailById, listThreadEmails, type EmailRow } from '@/lib/db/emails'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
+import { getClientById } from '@/lib/db/clients'
 import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { logEventSafe } from '@/lib/events/log-event'
-import { retrieveClientKnowledge } from '@/lib/knowledge/client-context'
-import { buildKnowledgeQueryText } from '@/lib/knowledge/build-query'
 import { draftSchema, type Draft } from './draft-schema'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 
-const MAX_OUTPUT_TOKENS = 1_400
+// See write.ts — same 1,600 ceiling, same reasoning: paired with 'medium'
+// thinking below, matching reply.ts's proven classifyReply budget.
+const MAX_OUTPUT_TOKENS = 1_600
+// See write.ts — 'medium' thinking can push a single call past the client's
+// 20s default.
+const GENERATE_TIMEOUT_MS = 30_000
 const ACTOR = 'email_redesign_agent'
 
 const SYSTEM_PROMPT = [
@@ -38,7 +42,7 @@ function buildPrompt(
   email: EmailRow,
   instruction: string,
   knowledge: KnowledgeRow[],
-  clientKnowledge: string,
+  companyInfo: string | null,
   thread: EmailRow[] | null,
 ): string {
   const dossier = knowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
@@ -48,7 +52,7 @@ function buildPrompt(
   return [
     `Current subject: ${email.subject ?? '(none)'}`,
     `Current body:\n${email.body ?? '(none)'}`,
-    clientKnowledge ? `About our company:\n${clientKnowledge}` : '',
+    companyInfo ? `About our company:\n${companyInfo}` : '',
     `Dossier:\n${dossier}`,
     threadText ? `Prior thread:\n${threadText}` : '',
     `Operator instruction: ${instruction}`,
@@ -76,27 +80,25 @@ export async function regenerateDraftContent(
   }
 
   const isReply = email.in_reply_to_email_id !== null
-  const [knowledge, thread] = await Promise.all([
+  const [knowledge, thread, client] = await Promise.all([
     listKnowledgeForCase(supabase, email.case_id),
     isReply ? listThreadEmails(supabase, email.lead_id) : Promise.resolve(null),
+    getClientById(supabase, email.client_id),
   ])
-
-  const dossierText = knowledge.map((k) => k.content).join(' ')
-  const clientKnowledge = await retrieveClientKnowledge(supabase, {
-    clientId: email.client_id,
-    queryText: buildKnowledgeQueryText({ primary: dossierText, secondary: [input.instruction] }),
-  })
 
   const context: LlmCallContext = { clientId: email.client_id, caseId: email.case_id, actor: ACTOR }
   const draft = await generateJson(context, {
     instructions: SYSTEM_PROMPT,
-    prompt: buildPrompt(email, input.instruction, knowledge, clientKnowledge, thread),
+    prompt: buildPrompt(email, input.instruction, knowledge, client?.company_info ?? null, thread),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // See write.ts — same draftSchema/token ceiling, same fix: pin thinking to
-    // 'minimal' so reasoning tokens don't truncate the JSON payload.
-    thinkingLevel: 'minimal',
+    // See write.ts — same draftSchema/token ceiling, same reasoning: rewriting
+    // a draft per an operator's freeform instruction is a judgment call worth
+    // 'medium' thinking, and the 1,600-token ceiling already proved safe at
+    // this thinking level in reply.ts's classifyReply.
+    thinkingLevel: 'medium',
   })
 
   await logEventSafe({
