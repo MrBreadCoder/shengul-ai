@@ -9,6 +9,7 @@ type KnowledgeReqStatus = Database['public']['Enums']['knowledge_req_status']
 type KnowledgeSourceStatus = Database['public']['Enums']['knowledge_source_status']
 type ClientStatus = Database['public']['Enums']['client_status']
 type CampaignStatus = Database['public']['Enums']['campaign_status']
+type UserRole = Database['public']['Enums']['user_role']
 
 export interface StatusMeta {
   /** Human label shown to the operator. */
@@ -44,6 +45,20 @@ export const LEAD_EMAIL_STATUS: Record<LeadEmailStatus, StatusMeta> = {
   invalid: { label: 'Invalid', color: 'var(--status-lost)' },
   risky: { label: 'Risky', color: 'var(--status-hot-handoff)' },
   not_found: { label: 'Not found', color: 'var(--status-dead)' },
+}
+
+// Client-facing view of a lead's email status. A 'risky' lead is Emailable's
+// accept-all catch-all carve-out (src/lib/emailable/map-verification.ts) —
+// Apollo verified the address, the domain just accepts all mail so Emailable
+// can't individually confirm it, and we send to it anyway (status: 'active').
+// That nuance is an internal deliverability signal, not something a client
+// needs to see the word "risky" over — it reads as "we're emailing risky
+// people," which isn't true and isn't actionable for them. Operators keep the
+// real 'risky' label (via LEAD_EMAIL_STATUS directly) for diagnosis; every
+// other status is unaffected and passes through unchanged for both roles.
+export function leadEmailStatusMetaFor(status: LeadEmailStatus, role: UserRole): StatusMeta {
+  if (role === 'client' && status === 'risky') return LEAD_EMAIL_STATUS.verified
+  return LEAD_EMAIL_STATUS[status]
 }
 
 export const MAILBOX_HEALTH: Record<MailboxHealth, StatusMeta> = {

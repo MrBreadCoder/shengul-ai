@@ -134,7 +134,15 @@ export async function findContactedLeadByEmail(
   return contacted.length === 1 ? contacted[0]! : null
 }
 
-// Verified, case-attached leads for a case — the people we are allowed to email.
+// Send-eligible, case-attached leads for a case — the people we are allowed
+// to email. Filters on `status` alone, not `email_status`: `status = 'active'`
+// is the single send-eligibility signal set by the discovery/verification
+// pipeline (see getVerifiedLeadCompanies and listOtherActiveLeadsForCollisionNotice
+// above, which already rely on this). Emailable's accept-all catch-all
+// carve-out (src/lib/emailable/map-verification.ts) activates a lead while
+// deliberately leaving email_status at 'risky' for audit/tracking — an
+// additional `email_status = 'verified'` filter here would silently strand
+// every carve-out-activated lead, never emailing it despite `status: 'active'`.
 export async function listActiveLeadsForCase(
   supabase: SupabaseClient<Database>,
   caseId: string,
@@ -144,7 +152,6 @@ export async function listActiveLeadsForCase(
     .select('*')
     .eq('case_id', caseId)
     .eq('status', 'active')
-    .eq('email_status', 'verified')
   if (error) {
     throw new AppError('DB_ERROR', 'Failed to list active leads for case', { caseId, cause: error.message })
   }

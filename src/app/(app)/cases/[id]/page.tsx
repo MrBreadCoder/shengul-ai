@@ -25,7 +25,7 @@ import { getCampaignById } from '@/lib/db/campaigns'
 import { listNotesForCase } from '@/lib/db/notes'
 import { listActiveResourcesForClient } from '@/lib/db/client-resources'
 import { listSequencesForCase } from '@/lib/db/sequences'
-import { CASE_STATUS, KNOWLEDGE_REQ_STATUS, LEAD_EMAIL_STATUS } from '@/lib/ui/status'
+import { CASE_STATUS, KNOWLEDGE_REQ_STATUS, leadEmailStatusMetaFor } from '@/lib/ui/status'
 import { buildContactThreads } from '@/lib/ui/mail-threads'
 import { formatAbsolute, formatRelative, humanizeEnum, formatFollowupCountdown } from '@/lib/format'
 import { CompanyMark } from '@/components/company-mark'
@@ -235,7 +235,7 @@ export default async function CasePage({
                       </p>
                     ) : null}
                     <div className="mt-2 flex items-center gap-2">
-                      <StatusPill meta={LEAD_EMAIL_STATUS[lead.email_status]} />
+                      <StatusPill meta={leadEmailStatusMetaFor(lead.email_status, appUser.role)} />
                       {lead.linkedin_url ? (
                         <a
                           href={lead.linkedin_url}

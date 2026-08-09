@@ -170,9 +170,24 @@ function mockLeadMaybe(result: { data: unknown; error: unknown }) {
 function mockActiveLeads(result: { data: unknown; error: unknown }) {
   return {
     from: () => ({
-      select: () => ({ eq: () => ({ eq: () => ({ eq: () => Promise.resolve(result) }) }) }),
+      select: () => ({ eq: () => ({ eq: () => Promise.resolve(result) }) }),
     }),
   } as never
+}
+
+// Mirrors real Postgrest `.eq()` filtering semantics (each chained `.eq()`
+// narrows the row set further) instead of hard-coding a fixed chain depth —
+// so this mock stays valid regardless of how many `.eq()` calls the
+// production query makes, and actually proves which columns are filtered on.
+function mockLeadsFilterQuery(rows: Record<string, unknown>[]) {
+  function chain(filtered: Record<string, unknown>[]) {
+    return {
+      eq: (column: string, value: unknown) => chain(filtered.filter((r) => r[column] === value)),
+      then: (resolve: (result: { data: unknown; error: null }) => void) =>
+        resolve({ data: filtered, error: null }),
+    }
+  }
+  return { from: () => ({ select: () => chain(rows) }) } as never
 }
 
 describe('getLeadById', () => {
@@ -265,8 +280,26 @@ describe('findContactedLeadByEmail', () => {
 
 describe('listActiveLeadsForCase', () => {
   it('should return verified active leads when the query succeeds', async () => {
-    const rows = [{ id: 'lead1', email_status: 'verified' }]
-    expect(await listActiveLeadsForCase(mockActiveLeads({ data: rows, error: null }), 'case1')).toEqual(rows)
+    const rows = [{ id: 'lead1', case_id: 'case1', status: 'active', email_status: 'verified' }]
+    const result = await listActiveLeadsForCase(mockLeadsFilterQuery(rows), 'case1')
+    expect(result).toEqual(rows)
+  })
+
+  // Emailable's accept-all catch-all carve-out (src/lib/emailable/map-verification.ts)
+  // activates a lead (status: 'active') while deliberately leaving email_status
+  // at 'risky' for audit/tracking — status is the single send-eligibility
+  // signal, per getVerifiedLeadCompanies and listOtherActiveLeadsForCollisionNotice
+  // above, which already filter on status alone. A second email_status filter
+  // here would silently strand every carve-out-activated lead.
+  it('should include an active lead whose email_status is risky (Emailable accept-all catch-all carve-out)', async () => {
+    const rows = [
+      { id: 'lead1', case_id: 'case1', status: 'active', email_status: 'verified' },
+      { id: 'lead2', case_id: 'case1', status: 'active', email_status: 'risky' },
+      { id: 'lead3', case_id: 'case1', status: 'parked', email_status: 'risky' },
+      { id: 'lead4', case_id: 'case2', status: 'active', email_status: 'verified' },
+    ]
+    const result = await listActiveLeadsForCase(mockLeadsFilterQuery(rows), 'case1')
+    expect(result.map((r) => r.id)).toEqual(['lead1', 'lead2'])
   })
 
   it('should throw DB_ERROR when the query errors', async () => {

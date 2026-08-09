@@ -436,6 +436,37 @@ Spec amendment: `docs/superpowers/specs/2026-07-21-emailable-verification-design
 - [x] End-to-end regression tests in `src/lib/pipeline/discover.test.ts` proving the carve-out reaches the inserted row — 55/55 tests, 3 new.
 - [ ] Watch bounce rate on `email_status = 'risky' AND status = 'active'` leads over the next 1-2 weeks (queryable directly against `leads.email_verification` — no new counter was added; an optional `emailableAcceptAllActivated` rollup metric is specced in the implementation plan if that turns out to be worth adding later).
 
+**Follow-up fix — 2026-08-09:** the carve-out above set `status: 'active'` on
+catch-all leads but `listActiveLeadsForCase` (`src/lib/db/leads.ts`, last
+touched Aug 7, one day before the carve-out shipped) still additionally
+required `email_status = 'verified'` to consider a lead send-eligible — so
+every carve-out-activated lead was silently stranded one stage later, never
+drafted. Surfaced by an operator report: Uniforms Fashion pulled 14 active
+leads on 2026-08-09 but only 8 emails were drafted; all 6 missing leads
+traced to this exact carve-out case (`accept_all: true`,
+`reason: 'low_deliverability'`, `provider: 'emailable'`). Fixed by dropping
+the `email_status` filter from `listActiveLeadsForCase` — `status = 'active'`
+is now the single send-eligibility signal there too, matching
+`getVerifiedLeadCompanies` and `listOtherActiveLeadsForCollisionNotice`,
+which already relied on `status` alone. TDD: new
+`listActiveLeadsForCase` test (risky-but-active lead included, parked lead
+excluded) written and confirmed red before the fix, green after.
+
+**Client-facing label fix — same day:** the case page (`/cases/[id]`,
+client-facing per its `getTranslations('cases')` usage) rendered
+`lead.email_status` verbatim, so a `risky` catch-all-activated lead showed
+"Risky" directly to the client — read as "you're emailing risky people,"
+alarming and not actionable for them. Added `leadEmailStatusMetaFor(status,
+role)` (`src/lib/ui/status.ts`) — an operator still sees the real "Risky"
+label for diagnosis; a client sees "Verified" for the same lead, since it's a
+domain-level catch-all signal, not an address-level problem, and the lead is
+already being sent to. Every other `lead_email_status` value passes through
+unchanged for both roles. TDD: 4 new tests (operator sees risky, client sees
+verified-for-risky, client sees verified-for-verified, all other statuses
+unaffected for both roles), red before, green after.
+
+Full suite 2196/2196, `tsc --noEmit` clean, `eslint` 0 errors.
+
 ## Apollo company firmographics on cases (2026-07-23)
 
 Apollo's People Enrichment call (`bulkMatchPeople`, already made during
