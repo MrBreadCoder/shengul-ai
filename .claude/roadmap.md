@@ -4101,3 +4101,21 @@ which stays translated (client-facing).
 
 Verified: `tsc --noEmit` clean, `eslint` clean on every touched file,
 full suite 201 files / 2193 tests green.
+
+## 2026-08-10 — Fixed TimeOfDayInput: selecting hour/minute wasn't sticking
+
+Follow-up to the same-day "Invalid value" fix. `TimeOfDayInput` derived
+its `hour`/`minute` display straight from the `value` prop on every
+render. Picking only the hour left the combined string incomplete, so
+`commit()` reported `''` upward — which round-tripped back down as the
+new `value` prop and re-split to `{ hour: '', minute: '' }`, wiping out
+the hour the user had just picked before they reached the minute select.
+Symptom: "when I select a number it doesn't get inserted."
+
+Fix: hold `hour`/`minute` as local `useState`, seeded from `value` once
+at mount via a lazy initializer, instead of re-deriving them from the
+prop every render. Each select's own selection now sticks regardless of
+what the (possibly still-incomplete) combined value looks like.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 201 files /
+2193 tests green.

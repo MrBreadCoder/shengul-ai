@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 const HOURS: readonly string[] = Array.from({ length: 24 }, (_, hour) => hour.toString().padStart(2, '0'))
 const MINUTES: readonly string[] = Array.from({ length: 60 }, (_, minute) => minute.toString().padStart(2, '0'))
 const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/
@@ -37,9 +39,21 @@ export function TimeOfDayInput({
   minuteAriaLabel,
   className,
 }: TimeOfDayInputProps): React.ReactElement {
-  const { hour, minute } = splitTime(value)
+  // Deliberately seeded from `value` only once, not re-derived on every
+  // render: picking just the hour leaves the combined string incomplete, so
+  // commit() below reports '' upward. If hour/minute were derived straight
+  // from `value` (the incomplete '' echoing back down as this component's
+  // prop), that '' would re-split to { hour: '', minute: '' } and wipe out
+  // the hour the user just picked before they got to the minute — exactly
+  // the "selecting a number doesn't get inserted" bug. Holding the pair as
+  // local state makes each select's own selection stick regardless of what
+  // the combined value looks like.
+  const [hour, setHour] = useState(() => splitTime(value).hour)
+  const [minute, setMinute] = useState(() => splitTime(value).minute)
 
   function commit(nextHour: string, nextMinute: string): void {
+    setHour(nextHour)
+    setMinute(nextMinute)
     onChange(nextHour && nextMinute ? `${nextHour}:${nextMinute}` : '')
   }
 
