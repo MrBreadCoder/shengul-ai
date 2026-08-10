@@ -4,11 +4,27 @@ import { buildResearchTools } from './tools'
 import { generateWithTools, generateJson, type LlmCallContext } from '@/lib/llm/client'
 import type { CompanyFirmographics } from '@/lib/apollo/format-company-summary'
 
-const GATHER_STEPS = 6
+// `stopWhen: isStepCount(GATHER_STEPS)` in runResearchAgent cuts the loop the
+// instant this many steps complete, whether the last one was a tool call or
+// a text response — a live test (2026-08-10 roadmap entry) found real
+// research silently discarded when all steps went to search/scrape and none
+// were left for the model to write its notes. Raised from 6 to 10 for
+// headroom; see llm/client.ts's TOOL_LOOP_TIMEOUT_MS comment, which reasons
+// about GATHER_STEPS's worst case and needs to stay in sync with this value.
+const GATHER_STEPS = 10
 // Bumped alongside the 'medium' thinking level below so extra reasoning tokens
 // don't starve the actual notes output.
 const GATHER_MAX_OUTPUT_TOKENS = 4_000
 const EXTRACT_MAX_OUTPUT_TOKENS = 3_600
+// Extraction is a constrained, schema-validated task (turn already-gathered
+// notes into structured entries) — no open-ended reasoning or tool use, so it
+// doesn't need the module default's full capability. Same pattern as
+// ai-relevance.ts's AI_RELEVANCE_MODEL_ID. Runs on every agent call (company
+// + each person), so this is a fixed cost cut across the whole pipeline —
+// a live test (2026-08-10 roadmap entry) found prompt tokens, not output,
+// dominate spend, and this doesn't touch the gather step where the real
+// reasoning happens.
+const EXTRACT_MODEL_ID = 'gemini-3.1-flash-lite'
 
 export type ResearchAgentRole =
   | {
@@ -136,6 +152,7 @@ export async function runResearchAgent(
     prompt: `Research notes:\n${notes}\n\nExtract the dossier entries.`,
     schema: extractionSchema,
     maxOutputTokens: EXTRACT_MAX_OUTPUT_TOKENS,
+    modelId: EXTRACT_MODEL_ID,
   })
   return extracted.entries
 }

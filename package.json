@@ -14,6 +14,7 @@
     "seed:operator": "tsx scripts/seed-operator.ts",
     "seed:dev": "tsx scripts/seed-dev.ts",
     "regenerate-sample-emails": "tsx scripts/regenerate-sample-emails.ts",
+    "test-fake-email": "tsx scripts/test-fake-email.ts",
     "rewrite-draft-emails": "tsx scripts/rewrite-draft-emails.ts",
     "test:apollo-schools": "tsx scripts/test-apollo-schools-search.ts",
     "test:apollo-campaigns": "tsx scripts/test-apollo-campaigns-search.ts"

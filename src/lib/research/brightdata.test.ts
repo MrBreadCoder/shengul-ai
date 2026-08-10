@@ -49,15 +49,22 @@ describe('brightdataResearch.search', () => {
     expect(body.format).toBe('raw')
   })
 
-  it('should propagate AppError when the transport fails', async () => {
-    fetchJsonMock.mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
-    const pending = brightdataResearch.search('x')
-    // Vitest 4.1.10 in this environment mis-flags a directly-awaited mock
-    // rejection as an unhandled error unless another mock call settles first;
-    // this no-op call is a harmless flush, not part of the behavior under test.
-    fetchJsonMock.mockResolvedValueOnce({ organic: [] })
-    await fetchJsonMock('flush')
-    await expect(pending).rejects.toBeInstanceOf(AppError)
+  it('should propagate AppError when every retry attempt fails', async () => {
+    // search retries once (2 total attempts) — both must fail to see the error.
+    fetchJsonMock
+      .mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
+      .mockRejectedValueOnce(new AppError('EXTERNAL_TIMEOUT', 'aborted'))
+    await expect(brightdataResearch.search('x')).rejects.toBeInstanceOf(AppError)
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('should retry once and succeed when the first attempt is a transient failure', async () => {
+    fetchJsonMock
+      .mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'Unexpected response shape'))
+      .mockResolvedValueOnce({ organic: [{ link: 'https://acme.com', title: 'Acme', description: 'ok' }] })
+    const snippets = await brightdataResearch.search('x')
+    expect(snippets).toEqual([{ url: 'https://acme.com', title: 'Acme', content: 'ok' }])
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -81,7 +88,7 @@ describe('brightdataResearch.scrape', () => {
   it('should truncate page text to the max length when the page is oversized', async () => {
     fetchTextMock.mockResolvedValue('x'.repeat(10_000))
     const text = await brightdataResearch.scrape('https://acme.com/huge')
-    expect(text).toHaveLength(6_000)
+    expect(text).toHaveLength(4_000)
   })
 
   it('should accept a custom maxChars ceiling and truncate to it instead of the default', async () => {
@@ -90,11 +97,20 @@ describe('brightdataResearch.scrape', () => {
     expect(text).toHaveLength(40_000)
   })
 
-  it('should wrap a transport failure as AppError', async () => {
-    fetchTextMock.mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
-    const pending = brightdataResearch.scrape('https://acme.com')
-    fetchTextMock.mockResolvedValueOnce('flush')
-    await fetchTextMock('flush')
-    await expect(pending).rejects.toBeInstanceOf(AppError)
+  it('should propagate AppError when every retry attempt fails', async () => {
+    fetchTextMock
+      .mockRejectedValueOnce(new AppError('EXTERNAL_ERROR', 'boom'))
+      .mockRejectedValueOnce(new AppError('EXTERNAL_TIMEOUT', 'aborted'))
+    await expect(brightdataResearch.scrape('https://acme.com')).rejects.toBeInstanceOf(AppError)
+    expect(fetchTextMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('should retry once and succeed when the first attempt is a transient failure', async () => {
+    fetchTextMock
+      .mockRejectedValueOnce(new AppError('EXTERNAL_TIMEOUT', 'aborted'))
+      .mockResolvedValueOnce('# Acme\nWe build widgets.')
+    const text = await brightdataResearch.scrape('https://acme.com')
+    expect(text).toBe('# Acme\nWe build widgets.')
+    expect(fetchTextMock).toHaveBeenCalledTimes(2)
   })
 })

@@ -17,16 +17,23 @@ const MODEL_ID = 'gemini-3-flash-preview'
 // lighter model (gemini-3.1-flash-lite).
 export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
 
-const DEFAULT_TIMEOUT_MS = 60_000
+// Raised 2026-08-10 (60s → 90s) alongside every other timeout in this
+// investigation — see TOOL_LOOP_TIMEOUT_MS below and brightdata.ts's
+// TIMEOUT_MS/SCRAPE_TIMEOUT_MS for the rest.
+const DEFAULT_TIMEOUT_MS = 90_000
 // Tool loops make several external calls (each of which can itself stall for
-// up to brightdata.ts's own SCRAPE_TIMEOUT_MS under a congested zone), so
-// this needs enough headroom for multiple slow steps in the same run, not
-// just one — see 2026-08-10 roadmap entry on the BrightData timeout cluster.
-// At GATHER_STEPS=6 steps and a 40s scrape timeout, this is still below the
-// theoretical worst case (6 slow steps back to back) — see the caveat this
-// entry logs about Vercel's per-function maxDuration possibly capping this
-// before it ever fires.
-const TOOL_LOOP_TIMEOUT_MS = 180_000
+// up to brightdata.ts's own SCRAPE_TIMEOUT_MS under a congested zone, now
+// doubled again by that file's own retry), so this needs enough headroom for
+// multiple slow steps in the same run, not just one — see 2026-08-10 roadmap
+// entries on the BrightData timeout cluster and the follow-up retry/timeout
+// increase. research/agent.ts's GATHER_STEPS (10) and brightdata.ts's
+// SCRAPE_TIMEOUT_MS (60s) × MAX_ATTEMPTS (2) puts the theoretical worst case
+// (10 steps, each a slow scrape that fails once and retries) at 1,200s, far
+// above this 300s value — deliberately: this is a soft ceiling for the
+// overwhelmingly common case, not a guarantee against the absolute worst
+// case, which Vercel's own per-function maxDuration would cap first anyway
+// (see that same caveat in the roadmap).
+const TOOL_LOOP_TIMEOUT_MS = 300_000
 
 const google = createGoogle({ apiKey: env.GEMINI_API_KEY })
 const model = google(MODEL_ID)
@@ -36,7 +43,8 @@ const EMBEDDING_MODEL_ID = 'gemini-embedding-001'
 // supports Matryoshka truncation to 768/1536/3072; 768 keeps the HNSW index and
 // per-chunk storage small without a meaningful quality loss for this use case.
 const EMBEDDING_DIMENSIONS = 768
-const EMBED_TIMEOUT_MS = 45_000
+// Raised 2026-08-10 (45s → 60s) alongside the rest of this file's timeouts.
+const EMBED_TIMEOUT_MS = 60_000
 
 const embeddingModel = google.textEmbeddingModel(EMBEDDING_MODEL_ID)
 

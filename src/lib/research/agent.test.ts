@@ -60,6 +60,18 @@ describe('runResearchAgent', () => {
     expect(gatherPrompt).toContain('Jane Doe')
   })
 
+  it('should route extraction to the lighter flash-lite model, not the gather model', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
+    })
+    expect(generateJsonMock).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({ modelId: 'gemini-3.1-flash-lite' }),
+    )
+  })
+
   it('should return an empty array when extraction yields no entries', async () => {
     generateWithToolsMock.mockResolvedValue('nothing notable')
     generateJsonMock.mockResolvedValue({ entries: [] })

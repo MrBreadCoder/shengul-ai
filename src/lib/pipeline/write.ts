@@ -97,6 +97,18 @@ const FIXED_GUARDRAILS = [
   'No bulk markers, no unsubscribe footer, no tracking language.',
   'Use only facts present in the provided dossier or company knowledge below. Never invent a name,',
   'a year, a location, or any other specific you were not given.',
+  // Merged in from a survey of public cold-email system prompts (Utopian Labs'
+  // cold-email-1, the "Sales Cold Email Coach" GPT, Artisan/Ava's hallucination-
+  // suppression framing, cupel-cloud's Claude-SDR copy frameworks) — the three
+  // rules every one of them enforces that FIXED_GUARDRAILS didn't yet: a body
+  // length target, exactly one CTA, and problem-first framing over a pitch.
+  // Everything else those prompts do (dossier-only facts, no invented specifics,
+  // no hype/jargon, personalize per-recipient) we already cover above and in
+  // HUMAN_VOICE_INSTRUCTION, so only the net-new rules were added.
+  'Lead with the sharpest problem or insight from the dossier, not a pitch for what we do.',
+  'The value proposition backs up the problem; it never opens the email.',
+  'Use exactly one call to action, phrased so it can be answered yes or no in one line. Never stack multiple asks.',
+  'Keep the body to one short paragraph, target around 90 words. Say less, not more.',
   ...SUBJECT_LINE_RULES,
   HUMAN_VOICE_INSTRUCTION,
 ].join(' ')

@@ -4256,3 +4256,246 @@ about our own Apollo integration, and is a separate, still-valid concern.
 Verified: `tsc --noEmit` clean, `eslint` clean on touched files, full
 suite 202 files / 2200 tests green (updated the 2 tests whose assertions
 targeted the old wording).
+
+## 2026-08-10 — Live-tested the research agent against a real fabricated case; found two real bugs
+
+Ran `runResearchAgent` for real (live Gemini `gemini-3-flash-preview` + live
+Bright Data) against Dauterive Hospital (case
+`ec4414f5-5391-4936-8aa5-da00b5ce7adf`, the tradeprosokc.com domain-mismatch
+case from earlier today) via a throwaway script — direct call, not
+`runResearchForCase`, so no case_knowledge/case-status/CRM writes. Found two
+issues, neither one the prompt-wording problem fixed earlier today:
+
+**1. Bright Data zone was blocking this environment's IP outright.** Every
+search/scrape call failed with the generic `"Unexpected response shape
+((root): Invalid input: expected object, received undefined)"` — because
+`fetchJson`/`fetchText` only check `response.ok`, and Bright Data returned
+HTTP 200 with an **empty body** on rejection, putting the real reason only
+in response headers we never read (`x-brd-error: Auth Failed (code:
+ip_blacklisted)`, with a direct dashboard link to fix it). With zero real
+tool grounding, the person-role agent — despite this same day's "do not
+invent" and grounding-discipline rewrites — still fabricated an entire
+fictional dossier (a fake SaaS company, fake CTO, fake funding round, fake
+podcast citation) instead of returning nothing. Operator resolved the IP
+block on Bright Data's end; re-running confirmed real search results now
+come back and — critically — the agent did NOT fabricate anything on the
+re-run, even though a couple of individual search calls still timed out
+transiently. `fetchJson`/`fetchText` still don't surface Bright Data's
+`x-brd-*` headers into `AppError` context — worth doing so this doesn't cost
+another from-scratch investigation next time the zone rejects something.
+
+**2. Real research was being silently discarded by the step budget.**
+Reproduced the gather stage directly: it ran a genuine 145s tool loop
+(12,258 prompt tokens — real search/scrape results accumulating in
+context), yet `generateWithTools` returned completely empty text.
+Root cause, confirmed by reading the AI SDK source directly (not
+guessed): `stopWhen: isStepCount(GATHER_STEPS)` stops the tool loop the
+instant the Nth step completes, whether that step was a tool call or a
+text response. At `GATHER_STEPS = 6`, a real research task that needs the
+full budget for search/scrape (disambiguating a common hospital name,
+following up on a promising page) can spend every step on tools and never
+get a turn to write its notes — the extraction step then correctly returns
+`[]` (nothing to extract), but the actual research the tools already found
+is thrown away. This is a distinct failure mode from fabrication: instead
+of inventing facts, the case silently ends up with zero knowledge despite
+successful research.
+
+Per operator: raised `GATHER_STEPS` 6 → 10 for headroom (`agent.ts`).
+Corrected `llm/client.ts`'s `TOOL_LOOP_TIMEOUT_MS` comment, which cited the
+old GATHER_STEPS=6 worst-case math (6 × 40s scrape timeout = 240s) — now
+10 × 40s = 400s, still deliberately above the 180s timeout per the existing
+Vercel-maxDuration caveat, so left the timeout value itself unchanged, just
+fixed the now-stale numbers in the comment.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2200 tests green (no test pinned the old step count).
+
+## 2026-08-10 — Re-confirmed GATHER_STEPS=10, found extraction is innocent, added Bright Data retry
+
+Re-ran the live test to confirm the step-budget fix. Findings:
+
+- **Isolated gather-stage diagnostic (10 steps, notes only):** excellent
+  result — 4,822 characters of accurate, fully-sourced research on Dauterive
+  Hospital, and it caught the `tradeprosokc.com` domain mismatch entirely on
+  its own ("Website Discrepancy: ... incorrect and unrelated to this
+  healthcare entity; it belongs to 'TradePros Heat & Air'..."), unprompted.
+  Proves the fix works and the earlier prompt rewrites hold up on rich,
+  real content.
+- **Fed those exact real notes through the real extraction step:** 12 clean,
+  correctly-classified, properly-cited entries, nothing invented. Extraction
+  was never the bug — ruled out.
+- **Full end-to-end confirmation run (both roles) still came back `[]`.**
+  Traced to Bright Data itself still intermittently failing mid-loop even
+  after the IP-block fix: `"Unexpected response shape"` (a 200 with an
+  empty/malformed body — same symptom as the IP block, but recurring after
+  that was resolved, so a broader upstream flake) and `"aborted"`
+  (TIMEOUT_MS/SCRAPE_TIMEOUT_MS exceeded under a slow proxy hop). Manually
+  retrying the *exact same* failing query moments later succeeded both
+  times — confirms these are transient, not config/auth problems, so a
+  run that happens to burn several of its 10 steps on retries-that-don't-
+  exist-yet can still end up with no budget left to write notes.
+
+Added retry to `research/brightdata.ts`: both `search` and `scrape` now go
+through a `withRetry` wrapper (`MAX_ATTEMPTS = 2`, `RETRY_DELAY_MS = 500`)
+around the existing `fetchJson`/`fetchText` calls — any `AppError` (both
+observed failure modes surface as one) gets one retry after a short delay
+before propagating. Scoped to `brightdata.ts` specifically rather than the
+shared `fetchJson`/`fetchText` helpers, since retry policy is Bright-Data-
+flakiness-specific, not something every other integration (Apollo,
+Emailable, MailReach, HubSpot, Pipedrive) sharing those helpers should
+inherit by default. Still not implemented (flagged as a follow-up, not
+requested this round): surfacing Bright Data's own `x-brd-error`/
+`x-brd-err-msg` response headers into `AppError` context — today's IP-block
+investigation only found its real cause by going around our error handling
+entirely and reading raw headers by hand.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2202 tests green (added 2 new brightdata tests: retry-then-succeed and
+retry-exhausted-then-throw, replacing the old single-attempt-failure tests
+which no longer matched the retrying behavior).
+
+## 2026-08-10 — Raised timeout limits alongside the retry
+
+Operator asked whether the "aborted" failures meant our limits were too low.
+Traced it: "Unexpected response shape" wasn't a timeout at all (Bright Data
+returned 200 with an empty body immediately — confirmed by hand), and for
+"aborted," a fresh retry succeeded fast rather than needing more time on the
+same request — both pointed at retry as the correct fix (already shipped),
+not longer limits. Operator asked to raise the limits anyway, as additional
+headroom on top of the retry:
+
+- `research/brightdata.ts`: `TIMEOUT_MS` 30s → 45s, `SCRAPE_TIMEOUT_MS`
+  40s → 60s.
+- `llm/client.ts`: `DEFAULT_TIMEOUT_MS` (generateJson/generateText — used
+  by extraction and every other non-tool-loop LLM call app-wide, not just
+  research) 60s → 90s; `TOOL_LOOP_TIMEOUT_MS` (generateWithTools) 180s →
+  300s; `EMBED_TIMEOUT_MS` 45s → 60s for consistency, though embeddings
+  aren't part of the research chain this investigation was about.
+
+Deliberately left `fetch-json.ts`/`fetch-text.ts`'s generic
+`DEFAULT_TIMEOUT_MS` (30s) untouched — that default is shared by every
+other integration using those helpers without an explicit timeout (Apollo,
+Emailable, MailReach, HubSpot, Pipedrive), none of which showed any
+evidence of being too tight, and brightdata.ts/llm-client.ts always pass
+their own explicit timeout anyway so this default was never in the actual
+path being investigated.
+
+Caveat flagged, not resolved: no route in this app sets `export const
+maxDuration`, so the research route runs under whatever Vercel's
+plan-default function timeout is. If that default is shorter than the new
+300s `TOOL_LOOP_TIMEOUT_MS` ceiling, Vercel kills the function before our
+own timeout ever fires — our code can't detect or work around this from
+inside the function. Worth checking the actual Vercel project settings
+and setting `maxDuration` explicitly to match if the platform allows it.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2202 tests green (no test pinned any of the changed timeout values).
+
+## 2026-08-10 — Downgraded research extraction to flash-lite for cost
+
+Summed today's test-session token spend from the `events` log: ~214.5K
+tokens across 15 live Gemini calls, 91% of it prompt tokens (accumulated
+tool-loop context), not output. Gave the operator a prioritized cost list
+(extraction model downgrade / sharing company research across person
+agents / trimming MAX_SNIPPETS+MAX_SCRAPE_CHARS); operator picked the
+model downgrade only.
+
+Extraction (`generateJson` in `runResearchAgent`) was running on the same
+`gemini-3-flash-preview` as the open-ended gather/tool-use step, despite
+being a constrained, schema-validated task — turn already-gathered notes
+into structured entries, no reasoning or tool use involved. Added
+`EXTRACT_MODEL_ID = 'gemini-3.1-flash-lite'` (`agent.ts`) and passed it via
+`generateJson`'s existing `modelId` override — same pattern already used by
+`ai-relevance.ts`'s `AI_RELEVANCE_MODEL_ID` for its own classification call.
+Runs on every agent call (company + each person), so this is a fixed cost
+cut across the whole research pipeline, not a one-off. Gather itself is
+untouched — that's where the real reasoning happens and stays on the
+heavier model.
+
+Not implemented this round (operator declined for now): sharing the
+company agent's findings into each person agent's prompt to stop
+rediscovering the same company facts per lead (the bigger structural
+saving when `contactsPerCompany` > 1), and trimming `MAX_SNIPPETS`/
+`MAX_SCRAPE_CHARS`.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2203 tests green (added 1 test asserting extraction routes to the
+lite model).
+
+## 2026-08-10 — Trimmed MAX_SCRAPE_CHARS 6,000 → 4,000 for cost
+
+Follow-up: operator asked for this specific one from the earlier cost list,
+on its own (not `MAX_SNIPPETS`, left unchanged at 8). Every scraped page's
+text becomes part of the running context for every later step in the same
+tool loop, so trimming the per-scrape ceiling compounds savings across
+`GATHER_STEPS`. Updated the one test that pinned the old default
+(truncation-length assertion, 6,000 → 4,000).
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2203 tests green.
+
+## 2026-08-10 — Merged cross-industry cold-email prompt research into FIXED_GUARDRAILS/HUMAN_VOICE_INSTRUCTION
+
+Operator asked for a deep web survey of publicly available cold-outreach
+email system prompts (Utopian Labs' leaked `cold-email-1` prompt, the
+"Sales Cold Email Coach" GPT, Artisan/Ava's hallucination-suppression
+framing, cupel-cloud's Claude-SDR copy frameworks, plus cross-industry
+AI-writing-tell blacklists), then to merge only the net-new rules into
+our own prompt — skip anything we already cover or don't need (e.g.
+"only write the email, not the subject" doesn't apply, our schema
+requires both).
+
+Added to `FIXED_GUARDRAILS` (write.ts): problem-first framing (lead with
+the sharpest dossier fact, value prop backs it up rather than opening
+the email), exactly-one-CTA answerable yes/no, and a ~90-word body
+length target — the three rules every prompt surveyed enforces that we
+didn't have. Dossier-only facts, no-invented-specifics, no-jargon,
+per-recipient personalization were already covered and left untouched.
+
+Added to `HUMAN_VOICE_INSTRUCTION` (email-voice.ts): a ban on numeric
+ROI-multiplier hype ("10x", "5x", "cut costs in half") unless it's a
+dossier fact, a ban on unearned prospect flattery not backed by a
+dossier fact, and extended the AI-vocabulary blacklist with words that
+kept surfacing across surveyed word-lists but weren't in ours yet
+(multifaceted, realm, meticulous, unwavering, underpinnings, bespoke,
+myriad, plethora, unparalleled) plus the chat-artifact opener
+"Certainly!".
+
+Deliberately did NOT add a hard `zod` max-length on `draftSchema.body`
+— the word-count rule is prompt guidance, not schema validation, to
+avoid reintroducing the generation-failure risk documented in the
+2026-08-10 MAX_OUTPUT_TOKENS entry above (a hard ceiling the model
+slightly overshoots fails the whole call; a soft target doesn't).
+
+Verified: `tsc --noEmit` clean on both files, `eslint` clean, existing
+`write.test.ts` suite (78 tests across write/redesign/followup/reply)
+green unchanged — tests call `buildSystemPrompt()` directly rather than
+asserting a literal string, so the new guardrail lines needed no test
+updates.
+
+## 2026-08-10 — Added scripts/test-fake-email.ts, ran the live prompt against synthetic data
+
+Operator wanted to see write.ts's actual generation path produce an email
+without needing a real DB case. Added `pnpm test-fake-email` (`--style=concise`
+default or `--style=formal`), which calls the exact same `buildSystemPrompt` +
+`buildPrompt` + `generateJson` sequence `processLead()` uses, against a fully
+synthetic lead (Sarah Chen / Northwind Logistics), client (Vantage Robotics),
+and a 4-fact dossier (pain_point/news/person/company) — no Supabase reads or
+writes, nothing sent. Voice-instruction strings are byte-for-byte copies of
+the two seeded rows in `supabase/migrations/0035_email_styles_table.sql`, so
+the script exercises real production wording, not an approximation of it.
+Prints the full system prompt, user prompt, raw model output (with a word
+count), the final signed body via the real `appendSignatureBlock()`, and the
+same tell-scan `regenerate-sample-emails.ts` uses.
+
+Ran both styles live against `gemini-3.6-flash`: concise came back 72 words,
+led with the pain_point fact, one CTA ("Would you be open to seeing how this
+works next week?"), no banned tells. Formal came back 78 words, followed the
+5-part structure (greeting/self-intro/capabilities/personalize/ask) correctly,
+folded the Series B news and pain_point fact into their own paragraphs, no
+signoff (append handles that), no banned tells. Confirms the 2026-08-10
+FIXED_GUARDRAILS/HUMAN_VOICE_INSTRUCTION additions above are live and working
+as intended.
+
+Verified: `tsc --noEmit` clean, `eslint` clean (one unused-import warning
+fixed), both style variants ran end to end against the real model.

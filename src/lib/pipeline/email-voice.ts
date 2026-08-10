@@ -25,17 +25,21 @@ export const HUMAN_VOICE_INSTRUCTION = [
 
   'Never use false-urgency or hype closers: "don\'t miss out", "limited spots", "act fast", "exclusive opportunity", "game changing results", "10x your".',
 
+  'Never promise a specific multiplier or magnitude of return ("10x", "5x", "3x your pipeline", "cut costs in half", "double your revenue") unless that exact figure is a dossier fact. Cold email credibility comes from a believable claim, not a big one.',
+
+  'Never compliment the prospect or their company without a specific dossier fact backing it up ("great work you\'re doing", "impressive growth", "love what you\'re building"). Unearned flattery reads as filler, not sincerity — cite the fact instead of praising it.',
+
   'Never use generic sign-offs: "looking forward to hearing from you", "please don\'t hesitate to reach out", "at your earliest convenience", "let me know your thoughts", "thanks in advance".',
 
   'Pattern - generic positive send-off. Bad: "Excited to see where this goes!" / "The future looks bright for you both." Good: end on the concrete ask or fact, then stop. Never close on a vague upbeat feeling instead of a real next step.',
 
-  'Never use AI-vocabulary words: "delve", "intricate/intricacies", "tapestry", "testament", "underscore" (verb), "garner", "fostering", "interplay", "align with", "landscape" (as in "the landscape of X"), "pivotal", "crucial", "vibrant", "valuable", "enduring", "showcase" (verb), "highlight" (verb, as in "this highlights").',
+  'Never use AI-vocabulary words: "delve", "intricate/intricacies", "tapestry", "testament", "underscore" (verb), "garner", "fostering", "interplay", "align with", "landscape" (as in "the landscape of X"), "pivotal", "crucial", "vibrant", "valuable", "enduring", "showcase" (verb), "highlight" (verb, as in "this highlights"), "multifaceted", "realm", "meticulous", "unwavering", "underpinnings", "bespoke", "myriad", "plethora", "unparalleled".',
 
   'Never use persuasive-authority filler: "the real question is", "at its core", "in reality", "what really matters", "fundamentally", "the heart of the matter". These pretend to cut through noise to a deeper truth right before restating an ordinary point.',
 
   'Never use signposting/announcement phrases: "let\'s dive in", "here\'s what you need to know", "let\'s break this down", "without further ado". Say the thing instead of announcing that you are about to say it.',
 
-  'Never leak chatbot correspondence artifacts: "I hope this helps", "let me know if you\'d like me to elaborate/expand on this", "want me to send more details?", "happy to explain further if useful". This is an email from a person, not an assistant\'s reply.',
+  'Never leak chatbot correspondence artifacts: "I hope this helps", "let me know if you\'d like me to elaborate/expand on this", "want me to send more details?", "happy to explain further if useful", "Certainly!", "Sure, here you go". This is an email from a person, not an assistant\'s reply.',
 
   'Never use sycophantic phrases: "great question", "you\'re absolutely right", "that\'s an excellent point", "I completely agree". These only make sense replying to something the recipient said; don\'t manufacture agreement that wasn\'t earned.',
 
