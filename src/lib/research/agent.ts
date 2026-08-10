@@ -6,8 +6,8 @@ import { generateWithTools, generateJson, type LlmCallContext } from '@/lib/llm/
 const GATHER_STEPS = 6
 // Bumped alongside the 'medium' thinking level below so extra reasoning tokens
 // don't starve the actual notes output.
-const GATHER_MAX_OUTPUT_TOKENS = 3_000
-const EXTRACT_MAX_OUTPUT_TOKENS = 2_800
+const GATHER_MAX_OUTPUT_TOKENS = 4_000
+const EXTRACT_MAX_OUTPUT_TOKENS = 3_600
 
 export type ResearchAgentRole =
   | { kind: 'company'; companyName: string; companyDomain: string | null }

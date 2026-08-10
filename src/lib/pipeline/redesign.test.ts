@@ -91,7 +91,7 @@ describe('regenerateDraftContent', () => {
     await regenerateDraftContent({} as never, { emailId: 'e1', instruction: 'make it shorter' })
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ thinkingLevel: 'medium', maxOutputTokens: 1_600 }),
+      expect.objectContaining({ thinkingLevel: 'low', maxOutputTokens: 2_600 }),
     )
   })
 

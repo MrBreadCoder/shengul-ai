@@ -3939,3 +3939,128 @@ Fix, full stack (design doc:
 
 Full suite: 202 files / 2197 tests green, `tsc --noEmit` and `eslint`
 clean on every touched file.
+
+## 2026-08-10 — Raised all the timeout/token-budget limits behind the two live error clusters
+
+User pasted a fresh batch of the same two clusters from the Logs tab
+("Write job crashed... No object generated" / "Web search failed...
+This operation was aborted" / "Unexpected response shape... received
+undefined"). Ran `superpowers:systematic-debugging` again rather than
+reusing the 2026-08-08/09 diagnosis verbatim, since the BrightData
+symptom had changed (abort/parse failures, not the earlier `zone "..."
+not found` 400) — root-caused as a mitigation-level fix per explicit user
+request ("increase all the limits"), not the deeper architectural ones
+(concurrency cap on research agents, revisiting whether `write.ts`/
+`redesign.ts` need `medium` thinking at all) still open below.
+
+**Cluster A (`generateObject` truncation) — real regression, not stale
+deploy this time:** the 2026-08-09 entry above switched `write.ts`/
+`redesign.ts` from `'minimal'` back to `'medium'` thinking, justifying the
+unchanged 1,600-token ceiling by analogy to `reply.ts`'s `classifyReply`.
+That analogy doesn't hold: `classifyReply`'s `replyBody` is nullable (price/
+not_interested/can't-answer cases skip prose entirely), while `draftSchema`
+has no null branch — `write.ts`/`redesign.ts` must produce a full subject +
+body on every call, so 100% of calls compete for the same budget against
+`medium`'s reasoning tokens with no cheap-output escape valve. Raised
+`MAX_OUTPUT_TOKENS` 1,600 → 2,600 in both, and matched `reply.ts` to the
+same 2,600 for consistency even though it was never the primary truncation
+risk. `GENERATE_TIMEOUT_MS`/`CLASSIFY_TIMEOUT_MS` 30s → 45s alongside (the
+larger budget means more tokens the model can still be mid-generation on
+when the clock runs out).
+
+**Cluster B (BrightData aborts / bad JSON) — different symptom than the
+prior zone-corruption diagnosis, points at concurrency saturation:**
+`research.ts` runs one agent per lead + one for the company fully in
+parallel (`Promise.allSettled`, no cap), each a 6-step tool loop where the
+model can fire multiple `search`/`scrape` calls per step, and QStash fans
+out one `research` route call per case on top of that. The
+`contactsPerCompany` fix two commits ago (this session) means
+`runResearchForCase` now legitimately spins up more concurrent agents per
+case than it ever did before (the bug it fixed was silently capping
+per-company leads near 1) — timed exactly with when this failure burst
+started. Raised every timeout in the request path so a congested zone gets
+more slack before the client gives up: `brightdata.ts` search 8s → 15s,
+scrape 12s → 20s; `fetch-json.ts`/`fetch-text.ts` shared default 8s → 15s;
+`client.ts`'s `TOOL_LOOP_TIMEOUT_MS` 45s → 90s (a 6-step agent loop can now
+absorb several slow steps instead of just one), `DEFAULT_TIMEOUT_MS` 20s →
+30s, `EMBED_TIMEOUT_MS` 15s → 25s. Also raised `agent.ts`'s
+`GATHER_MAX_OUTPUT_TOKENS` 3,000 → 4,000 and `EXTRACT_MAX_OUTPUT_TOKENS`
+2,800 → 3,600 for the same truncation-headroom reason as Cluster A, since
+the research agent's own `generateWithTools`/`generateJson` calls share the
+identical risk shape.
+
+**Explicitly not done — still the real fix for Cluster B:** raising
+timeouts makes each request more tolerant of a slow zone, it does not stop
+the pipeline from firing more concurrent BrightData requests than the zone
+can serve. Still needed: a concurrency cap (semaphore) around research
+agents in `research.ts` and/or the `search`/`scrape` tool executors in
+`tools.ts`, sized to whatever BrightData's dashboard reports as the zone's
+actual concurrent-connection limit. Flagged to the user, not implemented
+this session — scoped to exactly what was asked ("increase all the
+limits"), not a bundled architectural change.
+
+Updated `write.test.ts`/`redesign.test.ts`'s `maxOutputTokens: 1_600`
+assertions to `2_600`; `scripts/regenerate-sample-emails.ts`/
+`rewrite-draft-emails.ts` need no change since both import
+`write.ts`'s `MAX_OUTPUT_TOKENS` rather than hardcoding it. Full suite:
+202 files / 2197 tests green, `tsc --noEmit` and `eslint` clean on every
+touched file.
+
+## 2026-08-10 — Timeouts raised again, plus the platform ceiling that could cap all of it
+
+User asked to raise the timeouts further (token budgets untouched this
+round — "increase the timeouts even more"). Roughly doubled every value
+from the entry above:
+
+- `brightdata.ts`: search 15s → 30s, scrape 20s → 40s.
+- `fetch-json.ts` / `fetch-text.ts` shared default: 15s → 30s.
+- `client.ts`: `DEFAULT_TIMEOUT_MS` 30s → 60s, `TOOL_LOOP_TIMEOUT_MS`
+  90s → 180s, `EMBED_TIMEOUT_MS` 25s → 45s.
+- `write.ts` / `redesign.ts` `GENERATE_TIMEOUT_MS` and `reply.ts`
+  `CLASSIFY_TIMEOUT_MS`: 45s → 90s.
+
+**Flagged, not fixed:** grepped every route under `src/app/api` for
+`export const maxDuration` — none exists anywhere in the repo, so every
+route (`research`, `write`, `followup`, `discover`, `knowledge-scrape`,
+etc.) runs under Vercel's plan-default function timeout. None of the
+timeout increases above can matter past whatever that platform ceiling
+actually is: if it's lower than 180s, `TOOL_LOOP_TIMEOUT_MS` will never
+get the chance to fire — the function gets killed first, which looks
+identical to a timeout in the logs but isn't one our code controls.
+Separately, `src/lib/qstash/client.ts`'s `publishJSON` calls pass no
+explicit `timeout` option either, so QStash's own per-delivery wait (not
+verified against their current docs this session) is a second ceiling
+that could sit below these numbers. Both need the user to check/set in
+the Vercel project settings and QStash publish config respectively —
+static analysis can't see either from here. Did not add `maxDuration` to
+the routes unprompted since it's a distinct, cost-relevant change (longer
+allowed execution = more compute billed) beyond "increase the timeouts."
+
+Full suite: 202 files / 2197 tests green, `tsc --noEmit` and `eslint`
+clean on every touched file.
+
+## 2026-08-10 — Email-writing agents dropped from 'medium' to 'low' thinking
+
+User asked to review all email-writing agents' thinking level and set it
+to Low. Changed `thinkingLevel: 'medium'` → `'low'` in the three actual
+email-writing agents:
+
+- `write.ts` (`runWriteForLead`'s `generateJson` call — first-touch draft)
+- `redesign.ts` (draft rewrite per operator instruction)
+- `reply.ts` (`classifyReply` — inbound intent classification + reply draft)
+
+Left `research/agent.ts` (`runResearchAgent`'s gather step), `ai-relevance.ts`,
+and `derive-content.ts` untouched — none of those write email copy (dossier
+research, lead-relevance scoring, resource-content summarization
+respectively), so they're out of scope for "email writing agents."
+
+Kept `MAX_OUTPUT_TOKENS` (2,600) and the 90s generate/classify timeouts
+unchanged in all three files — they're cheap headroom to keep even at
+'low' thinking, and draftSchema still has no null branch (a full
+subject+body is still owed every call). Updated the stale in-code comments
+that justified those constants by referencing 'medium' specifically, plus
+the three `thinkingLevel: 'medium'` assertions in `write.test.ts` /
+`redesign.test.ts` / `reply.test.ts`.
+
+Verified: `vitest run` on all three touched pipeline test files — 55/55
+tests green.

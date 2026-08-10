@@ -10,8 +10,8 @@ import type { WebResearch, WebSnippet } from './provider'
 const BRIGHTDATA_REQUEST_URL = 'https://api.brightdata.com/request'
 const MAX_SNIPPETS = 8
 const MAX_SCRAPE_CHARS = 6_000
-const TIMEOUT_MS = 8000
-const SCRAPE_TIMEOUT_MS = 12_000
+const TIMEOUT_MS = 30_000
+const SCRAPE_TIMEOUT_MS = 40_000
 
 const serpResponseSchema = z.object({
   organic: z

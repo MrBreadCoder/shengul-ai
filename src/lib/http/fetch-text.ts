@@ -1,6 +1,6 @@
 import { AppError } from '@/lib/errors/app-error'
 
-const DEFAULT_TIMEOUT_MS = 8000
+const DEFAULT_TIMEOUT_MS = 30_000
 
 export async function fetchText(
   url: string,

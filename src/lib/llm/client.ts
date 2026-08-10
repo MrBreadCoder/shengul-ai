@@ -17,9 +17,16 @@ const MODEL_ID = 'gemini-3-flash-preview'
 // lighter model (gemini-3.1-flash-lite).
 export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
 
-const DEFAULT_TIMEOUT_MS = 20_000
-// Tool loops make several external calls, so they need a larger ceiling than a single generation.
-const TOOL_LOOP_TIMEOUT_MS = 45_000
+const DEFAULT_TIMEOUT_MS = 60_000
+// Tool loops make several external calls (each of which can itself stall for
+// up to brightdata.ts's own SCRAPE_TIMEOUT_MS under a congested zone), so
+// this needs enough headroom for multiple slow steps in the same run, not
+// just one — see 2026-08-10 roadmap entry on the BrightData timeout cluster.
+// At GATHER_STEPS=6 steps and a 40s scrape timeout, this is still below the
+// theoretical worst case (6 slow steps back to back) — see the caveat this
+// entry logs about Vercel's per-function maxDuration possibly capping this
+// before it ever fires.
+const TOOL_LOOP_TIMEOUT_MS = 180_000
 
 const google = createGoogle({ apiKey: env.GEMINI_API_KEY })
 const model = google(MODEL_ID)
@@ -29,7 +36,7 @@ const EMBEDDING_MODEL_ID = 'gemini-embedding-001'
 // supports Matryoshka truncation to 768/1536/3072; 768 keeps the HNSW index and
 // per-chunk storage small without a meaningful quality loss for this use case.
 const EMBEDDING_DIMENSIONS = 768
-const EMBED_TIMEOUT_MS = 15_000
+const EMBED_TIMEOUT_MS = 45_000
 
 const embeddingModel = google.textEmbeddingModel(EMBEDDING_MODEL_ID)
 

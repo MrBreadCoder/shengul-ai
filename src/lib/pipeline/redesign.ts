@@ -9,12 +9,13 @@ import { logEventSafe } from '@/lib/events/log-event'
 import { draftSchema, type Draft } from './draft-schema'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 
-// See write.ts — same 1,600 ceiling, same reasoning: paired with 'medium'
-// thinking below, matching reply.ts's proven classifyReply budget.
-const MAX_OUTPUT_TOKENS = 1_600
-// See write.ts — 'medium' thinking can push a single call past the client's
-// 20s default.
-const GENERATE_TIMEOUT_MS = 30_000
+// See write.ts — same 2,600 ceiling, same reasoning: draftSchema has no null
+// branch, so reasoning tokens (even at 'low') compete against a body that
+// must always be written in full.
+const MAX_OUTPUT_TOKENS = 2_600
+// See write.ts — headroom kept from the 'medium'-thinking era; cheap to keep
+// after the 2026-08-10 drop to 'low' thinking.
+const GENERATE_TIMEOUT_MS = 90_000
 const ACTOR = 'email_redesign_agent'
 
 const SYSTEM_PROMPT = [
@@ -94,11 +95,10 @@ export async function regenerateDraftContent(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // See write.ts — same draftSchema/token ceiling, same reasoning: rewriting
-    // a draft per an operator's freeform instruction is a judgment call worth
-    // 'medium' thinking, and the 1,600-token ceiling already proved safe at
-    // this thinking level in reply.ts's classifyReply.
-    thinkingLevel: 'medium',
+    // See write.ts — dropped from 'medium' to 'low' (2026-08-10). MAX_OUTPUT_TOKENS
+    // above still carries real headroom past whatever reasoning tokens 'low' spends
+    // before it writes the body.
+    thinkingLevel: 'low',
   })
 
   await logEventSafe({

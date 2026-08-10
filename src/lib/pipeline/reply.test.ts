@@ -123,7 +123,7 @@ describe('runReplyForInbound', () => {
     await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(generateJsonMock).toHaveBeenCalledWith(
       expect.objectContaining({ actor: 'reply_agent' }),
-      expect.objectContaining({ thinkingLevel: 'medium' }),
+      expect.objectContaining({ thinkingLevel: 'low' }),
     )
   })
 

@@ -20,13 +20,16 @@ import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 // Exported (not just module-scoped) so scripts/regenerate-sample-emails.ts can
 // drive the exact same generation path against a historical row instead of
 // duplicating the prompt-construction logic.
-// Bumped alongside the 'medium' thinking level below (matching reply.ts's
-// identically-sized classificationSchema at the same budget) so extra
-// reasoning tokens don't starve the actual subject/body output.
-export const MAX_OUTPUT_TOKENS = 1_600
-// The added 'medium' thinking budget can push a single call past the
-// client's 20s default (see reply.ts's identical CLASSIFY_TIMEOUT_MS).
-const GENERATE_TIMEOUT_MS = 30_000
+// Raised 1,600 -> 2,600 (2026-08-10): unlike reply.ts's classificationSchema,
+// draftSchema has no null branch — every call must produce a full subject +
+// body, and reasoning tokens (even at 'low') compete against a body that
+// can never be skipped. 1,600 was proven unsafe for that always-prose case
+// (see .claude/roadmap.md 2026-08-10, recurrence of the 2026-08-08
+// "No object generated" truncation bug).
+export const MAX_OUTPUT_TOKENS = 2_600
+// Headroom kept from the 'medium'-thinking era in case a call runs long;
+// cheap to keep even after the 2026-08-10 drop to 'low' thinking.
+const GENERATE_TIMEOUT_MS = 90_000
 const ACTOR = 'email_writer_agent'
 
 // Re-exported so scripts/regenerate-sample-emails.ts and
@@ -158,14 +161,11 @@ async function processLead(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // Deciding what to lead with and how to phrase a first-touch email is a
-    // judgment call worth the extra reasoning (see .claude/roadmap.md
-    // 2026-08-09) — 'medium' matches reply.ts's classifyReply, which already
-    // proved this thinking level stays within a 1,600-token ceiling without
-    // truncating the JSON payload (the 2026-08-08 "No object generated"
-    // failures traced to 'minimal'/omitted thinkingLevel plus too tight a
-    // budget, not to 'medium' itself).
-    thinkingLevel: 'medium',
+    // Dropped from 'medium' to 'low' (2026-08-10) — cost/latency trade-off.
+    // MAX_OUTPUT_TOKENS keeps its 2,600 headroom regardless: draftSchema has
+    // no null branch, so every call still owes a full subject + body even at
+    // 'low' (see the 2026-08-08 "No object generated" truncation bug).
+    thinkingLevel: 'low',
   })
 
   // Deterministic — never left to the model's discretion. Appended here,

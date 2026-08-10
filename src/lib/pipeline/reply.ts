@@ -28,11 +28,15 @@ import {
 import { loadResourceAttachments } from '@/lib/resources/load-attachments'
 
 const ACTOR = 'reply_agent'
-// Bumped alongside the 'medium' thinking level below so extra reasoning tokens
-// don't starve the actual classification/reply output.
-const MAX_OUTPUT_TOKENS = 1_600
-// The added thinking budget can push a single call past the client's 20s default.
-const CLASSIFY_TIMEOUT_MS = 30_000
+// Bumped alongside write.ts/redesign.ts's identical 2026-08-10 raise so
+// reasoning tokens don't starve the actual classification/reply output.
+// replyBody is nullable here so this call was never the primary truncation
+// risk, but it shares the same schema/thinking shape and deserves the same
+// headroom.
+const MAX_OUTPUT_TOKENS = 2_600
+// Headroom kept from the 'medium'-thinking era; cheap to keep after the
+// 2026-08-10 drop to 'low' thinking.
+const CLASSIFY_TIMEOUT_MS = 90_000
 // Below this the hybrid mode routes to a human draft instead of auto-sending.
 const HYBRID_CONFIDENCE_THRESHOLD = 0.75
 
@@ -125,9 +129,8 @@ export async function classifyReply(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: CLASSIFY_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // Deciding intent and whether the dossier truly supports an answer (vs.
-    // inventing one) is exactly the kind of judgment call worth extra reasoning.
-    thinkingLevel: 'medium',
+    // Dropped from 'medium' to 'low' (2026-08-10) — cost/latency trade-off.
+    thinkingLevel: 'low',
   })
 }
 

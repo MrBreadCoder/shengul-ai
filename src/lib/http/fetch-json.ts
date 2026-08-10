@@ -1,7 +1,7 @@
 import { ZodType, type ZodError } from 'zod'
 import { AppError } from '@/lib/errors/app-error'
 
-const DEFAULT_TIMEOUT_MS = 8000
+const DEFAULT_TIMEOUT_MS = 30_000
 
 const ROOT_PATH_LABEL = '(root)'
 
