@@ -1,10 +1,12 @@
 'use client'
 
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { TimeOfDayInput } from '@/components/ui/time-of-day-input'
 import { apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
 
 const SENIORITY_KEY: Record<(typeof apolloPersonSeniorities)[number], string> = {
@@ -79,6 +81,11 @@ interface CampaignSettingsFieldsProps {
 // submit target, submit label) differs between the two callers.
 export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFieldsProps): React.ReactElement {
   const t = useTranslations('campaigns')
+  // Uncontrolled everywhere else in this component — FormData is read
+  // straight off the DOM on submit. discoverTime is the one exception: it's
+  // driven by TimeOfDayInput's two <select> elements, so it needs state to
+  // combine them into a single "HH:mm" string for the hidden field below.
+  const [discoverTime, setDiscoverTime] = useState(defaultValues.discoverTime)
 
   return (
     <>
@@ -149,12 +156,17 @@ export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFields
           hint={t('newCampaignForm.discoverTimeHint')}
         >
           <input
-            id="discoverTime"
+            type="hidden"
             name="discoverTime"
-            type="time"
-            defaultValue={defaultValues.discoverTime}
-            className={NATIVE_SELECT_CLASSNAME}
+            value={discoverTime}
             toolparamdescription={t('newCampaignForm.discoverTimeToolParamDescription')}
+          />
+          <TimeOfDayInput
+            value={discoverTime}
+            onChange={setDiscoverTime}
+            hourAriaLabel={t('newCampaignForm.discoverTimeHourAriaLabel')}
+            minuteAriaLabel={t('newCampaignForm.discoverTimeMinuteAriaLabel')}
+            className={NATIVE_SELECT_CLASSNAME}
           />
         </Field>
 

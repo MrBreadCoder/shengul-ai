@@ -4064,3 +4064,40 @@ the three `thinkingLevel: 'medium'` assertions in `write.test.ts` /
 
 Verified: `vitest run` on all three touched pipeline test files — 55/55
 tests green.
+
+## 2026-08-10 — Fixed campaign "Invalid value" time picker; moved discovery schedule to operator
+
+The native `<input type="time">` on the campaign form's "Discovery run
+time" field was throwing the browser's native "Invalid value" constraint
+bubble even on a normally-entered time — a well-known cross-browser
+flakiness of the segmented time widget (worst on macOS Chrome/Safari,
+where the picker renders 12-hour AM/PM while the underlying wire value
+must stay 24-hour "HH:mm", and a partially-committed segment reports
+`badInput` regardless of how the field looks). Root-caused via
+systematic-debugging rather than patched around it.
+
+Fix: built `TimeOfDayInput` (`src/components/ui/time-of-day-input.tsx`),
+a controlled component of two plain `<select>`s (hour 00–23, minute
+00–59) that combines to the same "HH:mm" string `timeOfDaySchema`
+expects. A `<select>` can only ever hold one of its own listed options,
+so there is no invalid state to land in — this removes the native
+widget's failure mode entirely rather than working around a symptom.
+Wired into `campaign-settings-fields.tsx` (shared by new + edit campaign
+forms) behind a hidden `name="discoverTime"` input so the existing
+FormData-reading submit handlers needed no changes.
+
+Also moved the *client-owned* discovery schedule (timezone +
+default_discover_time) off the client-facing `/settings` page onto the
+operator-only `/clients/[id]` page, per instruction — clients no longer
+set their own schedule; operators do. Deleted
+`settings/schedule-section.tsx` + `settings/schedule-actions.ts` (+ test).
+Added `clients/[id]/schedule-actions.ts` (operator-role-gated,
+mirrors the `locale-actions.ts` `Result` pattern) and
+`clients/[id]/schedule-settings.tsx` (auto-saves on change, like the
+sibling `WarmupProfileSelect`/`DefaultLocaleSelect` controls). No i18n on
+the new operator component per the "operator-only pages don't need
+translation" rule — hardcoded English, unlike the campaign-form instance
+which stays translated (client-facing).
+
+Verified: `tsc --noEmit` clean, `eslint` clean on every touched file,
+full suite 201 files / 2193 tests green.

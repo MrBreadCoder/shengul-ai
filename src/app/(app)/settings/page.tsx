@@ -17,7 +17,6 @@ import { MailboxRow } from './mailbox-row'
 import { MailboxesWebMcpTools } from './mailboxes-webmcp-tools'
 import { ReplyModeSection } from './reply-mode-section'
 import { FollowupCadenceSection } from './followup-cadence-section'
-import { ScheduleSection } from './schedule-section'
 import { ConnectCrmButtons } from './connect-crm-buttons'
 import { PipelinePicker } from './pipeline-picker'
 import { ConnectionCard } from './connection-card'
@@ -111,12 +110,6 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
       {client ? (
         <Section title={t('followupCadenceSectionTitle')}>
           <FollowupCadenceSection initialDelaysDays={client.followup_delays_days} />
-        </Section>
-      ) : null}
-
-      {client ? (
-        <Section title={t('scheduleSectionTitle')}>
-          <ScheduleSection initialTimezone={client.timezone} initialDefaultDiscoverTime={client.default_discover_time} />
         </Section>
       ) : null}
 
