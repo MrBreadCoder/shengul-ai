@@ -55,6 +55,7 @@ export interface CampaignSettingsDefaults {
   valueProp: string
   bookingLink: string
   dailyTarget: number
+  contactsPerCompany: number
   personTitles: string
   organizationLocations: string
   excludeOrganizationLocations: string
@@ -120,6 +121,23 @@ export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFields
             max={100}
             className="tnum"
             toolparamdescription={t('newCampaignForm.dailyTargetToolParamDescription')}
+          />
+        </Field>
+
+        <Field
+          id="contactsPerCompany"
+          label={t('newCampaignForm.contactsPerCompanyLabel')}
+          hint={t('newCampaignForm.contactsPerCompanyHint')}
+        >
+          <Input
+            id="contactsPerCompany"
+            name="contactsPerCompany"
+            type="number"
+            defaultValue={defaultValues.contactsPerCompany}
+            min={1}
+            max={10}
+            className="tnum"
+            toolparamdescription={t('newCampaignForm.contactsPerCompanyToolParamDescription')}
           />
         </Field>
       </div>

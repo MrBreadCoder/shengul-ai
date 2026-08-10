@@ -149,15 +149,16 @@ export interface CampaignSettingsPatch {
   value_prop: string
   booking_link: string | null
   daily_target: number
+  contacts_per_company: number
   icp: Json
   discover_time: string | null
   discover_timezone: string | null
 }
 
 // Full-replace update of a campaign's editable settings (name, value prop,
-// booking link, daily target, ICP). client_id and status are not part of
-// this patch — status has its own updateCampaignStatus, client_id is
-// immutable once a campaign exists.
+// booking link, daily target, contacts per company, ICP). client_id and
+// status are not part of this patch — status has its own
+// updateCampaignStatus, client_id is immutable once a campaign exists.
 export async function updateCampaignSettings(
   supabase: SupabaseClient<Database>,
   id: string,

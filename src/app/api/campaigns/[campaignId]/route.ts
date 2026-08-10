@@ -60,8 +60,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ camp
 }
 
 // Updates a campaign's editable settings (name, value prop, booking link,
-// daily target, ICP filters). client_id and status are not editable here —
-// status has its own stop/resume/delete actions, client_id is immutable.
+// daily target, contacts per company, ICP filters). client_id and status
+// are not editable here — status has its own stop/resume/delete actions,
+// client_id is immutable.
 export async function PATCH(request: Request, context: { params: Promise<{ campaignId: string }> }) {
   const { appUser } = await requireUser()
   if (appUser.role !== 'operator') {
@@ -94,6 +95,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       value_prop: body.valueProp,
       booking_link: body.bookingLink,
       daily_target: body.dailyTarget,
+      contacts_per_company: body.contactsPerCompany,
       icp,
       discover_time: body.discoverTime,
       discover_timezone: body.discoverTimezone,

@@ -43,6 +43,7 @@ export default async function EditCampaignPage({
         valueProp={campaign.value_prop ?? ''}
         bookingLink={campaign.booking_link}
         dailyTarget={campaign.daily_target}
+        contactsPerCompany={campaign.contacts_per_company}
         icp={icp}
         discoverTime={campaign.discover_time}
         discoverTimezone={campaign.discover_timezone}

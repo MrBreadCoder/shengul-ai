@@ -40,6 +40,7 @@ export async function POST(request: Request) {
       name: campaign.name,
       valueProp: campaign.value_prop,
       dailyTarget: campaign.daily_target,
+      contactsPerCompany: campaign.contacts_per_company,
       icp,
     })
     return NextResponse.json({ ok: true, summary })

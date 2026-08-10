@@ -198,6 +198,7 @@ describe('updateCampaignSettings', () => {
     value_prop: 'New prop',
     booking_link: null,
     daily_target: 25,
+    contacts_per_company: 2,
     icp: {},
     discover_time: null,
     discover_timezone: null,

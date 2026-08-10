@@ -20,6 +20,7 @@ interface EditCampaignFormProps {
   valueProp: string
   bookingLink: string | null
   dailyTarget: number
+  contactsPerCompany: number
   icp: ApolloIcpFilters
   discoverTime: string | null
   discoverTimezone: string | null
@@ -32,6 +33,7 @@ export function EditCampaignForm({
   valueProp,
   bookingLink,
   dailyTarget,
+  contactsPerCompany,
   icp,
   discoverTime,
   discoverTimezone,
@@ -51,6 +53,7 @@ export function EditCampaignForm({
       valueProp: String(formData.get('valueProp') ?? ''),
       bookingLink: bookingLinkRaw ? String(bookingLinkRaw) : null,
       dailyTarget: Number(formData.get('dailyTarget') ?? 50),
+      contactsPerCompany: Number(formData.get('contactsPerCompany') ?? 2),
       personTitles: splitCsv(formData.get('personTitles')),
       organizationLocations: splitCsv(formData.get('organizationLocations')),
       employeeRangeMin: employeeMinRaw ? Number(employeeMinRaw) : null,
@@ -110,6 +113,7 @@ export function EditCampaignForm({
           valueProp,
           bookingLink: bookingLink ?? '',
           dailyTarget,
+          contactsPerCompany,
           personTitles: icp.personTitles.join(', '),
           organizationLocations: icp.organizationLocations.join(', '),
           excludeOrganizationLocations: icp.excludeOrganizationLocations.join(', '),

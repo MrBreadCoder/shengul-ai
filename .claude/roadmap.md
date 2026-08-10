@@ -3889,3 +3889,53 @@ Updated both `it('should pin thinking to minimal...')` tests in
 write.test.ts/redesign.test.ts to assert `thinkingLevel: 'medium'` and
 `maxOutputTokens: 1_600`. Full suite: 201 files / 2191 tests green,
 `tsc --noEmit` and `eslint` clean on every touched file.
+
+## 2026-08-10 — new `contactsPerCompany` campaign setting, fixes "N companies × 1 lead" bug
+
+User report: a campaign with `daily_target` 4 returned 4 different
+companies with 1 lead each, instead of the expected 2 companies with 2
+people each. Root cause (`src/lib/pipeline/discover.ts`): the breadth
+phase was always handed the *entire* remaining quota as its pick budget,
+and breadth picks at most 1 person per brand-new company — so a
+fully-successful round 1 opens exactly `quota` distinct companies at 1
+lead each and hits quota immediately, and the round loop exits before a
+second round (the only place the depth phase can find a 2nd contact at an
+existing company) ever runs. There was also no config field anywhere for
+"how many contacts per company" — user chose the configurable-per-campaign
+option over a fixed default when asked.
+
+Fix, full stack (design doc:
+`docs/superpowers/specs/2026-08-10-contacts-per-company-design.md`):
+
+- New DB column `campaigns.contacts_per_company integer not null default 2`
+  (1–10, migration `0037_campaign_contacts_per_company.sql`). Default 2
+  matches the depth phase's pre-existing (never-guaranteed) intent, so
+  every existing campaign's next run benefits without an operator having
+  to touch settings.
+- `campaignSettingsSchema` (`src/lib/apollo/campaign-settings-schema.ts`):
+  `contactsPerCompany: z.number().int().min(1).max(10).default(2)`.
+- `CampaignForDiscovery.contactsPerCompany` (required) drives two changes
+  in the round loop: (1) the depth-target filter generalized from the
+  hardcoded `count === 1` to `count < contactsPerCompany`, so depth keeps
+  returning to a company across rounds until it hits the target or Apollo
+  runs dry; (2) breadth's pick budget changed from the full remaining
+  quota to `Math.ceil(breadthQuota / contactsPerCompany)`, reserving room
+  for depth instead of opening one new company per remaining lead.
+- Wired through `POST/PATCH /api/campaigns`, `insertCampaign`/
+  `updateCampaignSettings`, the discover route's `CampaignForDiscovery`
+  construction, `CampaignSettingsFields` (new number input, 1–10, next to
+  Daily discovery target), both create/edit forms, and `en.json`/`tr.json`
+  (this form is operator-only per this repo's translation rule, but the
+  file already used `next-intl` throughout before this change — matched
+  the existing pattern rather than a scope-creeping refactor).
+- Added a direct regression test (`discover.test.ts`) proving
+  `dailyTarget: 4, contactsPerCompany: 2` now yields 2 companies × 2
+  contacts instead of 4 companies × 1. Updated 4 existing tests whose
+  mocked Apollo call sequences assumed the old unreserved-breadth
+  behavior (call counts/order shifted now that breadth stops as soon as
+  its smaller reserved quota is met); one test (`dailyTarget: 0` →
+  `DEFAULT_DAILY_QUOTA`) explicitly sets `contactsPerCompany: 1` since it
+  tests the quota fallback, not per-company distribution.
+
+Full suite: 202 files / 2197 tests green, `tsc --noEmit` and `eslint`
+clean on every touched file.

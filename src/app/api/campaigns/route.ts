@@ -52,6 +52,7 @@ export async function POST(request: Request) {
       value_prop: body.valueProp,
       booking_link: body.bookingLink,
       daily_target: body.dailyTarget,
+      contacts_per_company: body.contactsPerCompany,
       reply_mode: client.reply_mode,
       icp,
       discover_time: body.discoverTime,

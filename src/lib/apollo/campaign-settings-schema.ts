@@ -10,6 +10,10 @@ export const campaignSettingsSchema = z.object({
   valueProp: z.string().min(1),
   bookingLink: z.string().url().nullable().default(null),
   dailyTarget: z.number().int().min(1).max(100).default(50),
+  // How many verified contacts discovery aims for at each company before
+  // opening a new one — see src/lib/pipeline/discover.ts and
+  // docs/superpowers/specs/2026-08-10-contacts-per-company-design.md.
+  contactsPerCompany: z.number().int().min(1).max(10).default(2),
   personTitles: z.array(z.string()).default([]),
   organizationLocations: z.array(z.string()).default([]),
   employeeRangeMin: z.number().int().nonnegative().max(APOLLO_MAX_EMPLOYEE_COUNT).nullable().default(null),

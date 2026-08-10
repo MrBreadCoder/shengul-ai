@@ -40,6 +40,11 @@ export interface CampaignForDiscovery {
   /** Campaign value proposition — same purpose as `name` above. Nullable: not every campaign has one set. */
   valueProp: string | null
   dailyTarget: number
+  /** How many verified contacts to aim for at each company before opening a
+   * new one — see the breadth/depth reservation math in
+   * runDiscoveryForCampaign below. 1 disables depth targeting entirely
+   * (every company stays at exactly 1 verified lead, the old behavior). */
+  contactsPerCompany: number
   icp: ApolloIcpFilters
 }
 
@@ -199,11 +204,12 @@ interface DepthSearchResult extends SearchPassResult {
   exhaustedDomains: Set<string>
 }
 
-// Depth (2nd contact): a company-scoped search (Apollo domain filter)
-// targeting exactly the companies that currently sit at 1 verified
-// contact, trying to find a second, different person at each. A company
-// that doesn't surface a match here simply stays at 1 — case activation
-// already accepts that (group-lead.ts), so it is not treated as a failure.
+// Depth (Nth contact): a company-scoped search (Apollo domain filter)
+// targeting companies that currently sit below campaign.contactsPerCompany
+// verified contacts, trying to find one more, different person at each. A
+// company that doesn't surface a match here simply stays below target —
+// case activation already accepts that (group-lead.ts), so it is not
+// treated as a failure.
 //
 // Deliberately omits icp.keywords / q_keywords: the domain restriction
 // already pins the exact company, so an additional free-text company-level
@@ -799,7 +805,10 @@ export async function runDiscoveryForCampaign(
       let roundPicks = 0
 
       const targetDomains = [...verifiedCompanyCounts.entries()]
-        .filter(([key, count]) => count === 1 && domainBackedCompanyKeys.has(key) && !exhaustedDomains.has(key))
+        .filter(
+          ([key, count]) =>
+            count < campaign.contactsPerCompany && domainBackedCompanyKeys.has(key) && !exhaustedDomains.has(key),
+        )
         .map(([key]) => key)
 
       if (targetDomains.length > 0) {
@@ -816,6 +825,17 @@ export async function runDiscoveryForCampaign(
 
       const breadthQuota = quota - verifiedSoFar
       if (breadthQuota > 0) {
+        // Reserve room for depth instead of handing breadth the entire
+        // remaining quota: breadth picks at most 1 person per brand-new
+        // company, so passing it the full shortfall would open that many
+        // distinct companies at once and starve depth of anything to do in
+        // a later round — the root cause of the "N companies x 1 lead
+        // instead of N/contactsPerCompany companies x contactsPerCompany"
+        // bug. Opening at most ceil(shortfall / contactsPerCompany) new
+        // companies this round leaves the rest of each one's quota for
+        // depth to fill against the same, now-existing company in the next
+        // round (see the targetDomains filter above).
+        const newCompanyQuota = Math.ceil(breadthQuota / campaign.contactsPerCompany)
         // Throwaway snapshot: runBreadthSearch mutates it optimistically
         // (immediate +1 on pick, before verification is known) purely to
         // avoid picking two people from the same brand-new company within
@@ -825,7 +845,7 @@ export async function runDiscoveryForCampaign(
         const breadth = await runBreadthSearch(
           campaign,
           rounds,
-          breadthQuota,
+          newCompanyQuota,
           known,
           breadthPickCounts,
           domainBackedCompanyKeys,

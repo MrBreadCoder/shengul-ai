@@ -126,6 +126,7 @@ export interface Database {
           price_handoff_mode: Database['public']['Enums']['price_handoff_mode']
           mailbox_ids: string[]
           daily_target: number
+          contacts_per_company: number
           discover_time: string | null
           discover_timezone: string | null
           next_discover_at: string
@@ -144,6 +145,7 @@ export interface Database {
           price_handoff_mode?: Database['public']['Enums']['price_handoff_mode']
           mailbox_ids?: string[]
           daily_target?: number
+          contacts_per_company?: number
           discover_time?: string | null
           discover_timezone?: string | null
           next_discover_at?: string
