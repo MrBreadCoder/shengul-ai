@@ -7,6 +7,7 @@ import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
 import { isAppError } from '@/lib/errors/app-error'
+import { formatZodMessage } from '@/lib/errors/format-zod-message'
 
 export const runtime = 'nodejs'
 
@@ -52,7 +53,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ camp
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
+      return NextResponse.json({ error: formatZodMessage(error), issues: error.flatten() }, { status: 400 })
     }
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })
@@ -119,7 +120,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
     return NextResponse.json({ ok: true, campaign: rescheduled })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'validation_error', issues: error.flatten() }, { status: 400 })
+      return NextResponse.json({ error: formatZodMessage(error), issues: error.flatten() }, { status: 400 })
     }
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })

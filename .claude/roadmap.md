@@ -4119,3 +4119,30 @@ what the (possibly still-incomplete) combined value looks like.
 
 Verified: `tsc --noEmit` clean, `eslint` clean, full suite 201 files /
 2193 tests green.
+
+## 2026-08-10 — Campaign save errors now show which field failed, not a bare code
+
+User hit "Could not save changes / validation_error" editing a campaign.
+Traced the discoverTime/discoverTimezone path exhaustively (both the new
+TimeOfDayInput and the pre-existing form-submit ternaries) and could not
+find a way a completed, valid HH:mm selection produces an invalid
+payload — verified via a direct `campaignSettingsSchema.safeParse` probe
+with the exact shapes the client can produce. What *is* real and
+pre-existing (untouched by the TimeOfDayInput change): both
+`POST /api/campaigns` and `PATCH /api/campaigns/[campaignId]` returned
+the bare literal string `'validation_error'` as `error` on any Zod
+failure — for *any* field, not just discoverTime — which is exactly the
+opaque message the user saw, with no indication of which field or why.
+
+Added `formatZodMessage` (`src/lib/errors/format-zod-message.ts`),
+which renders the first 3 Zod issues as `"path: message"` pairs (still
+no stack traces or internal names — just field paths and Zod's own
+validation text) and wired it into both routes' ZodError branches. The
+existing client code already displays `json.error` verbatim in the
+toast, so no client-side change was needed — the same failure will now
+name the actual field on retry.
+
+Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
+2197 tests green (added 4 new tests for `formatZodMessage`, including
+one asserting Zod's exact message text so a future Zod upgrade that
+changes wording fails loudly).
