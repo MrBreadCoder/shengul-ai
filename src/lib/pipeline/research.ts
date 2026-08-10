@@ -8,6 +8,7 @@ import { enqueueCrmSync } from '@/lib/crm/sync'
 import { logEventSafe } from '@/lib/events/log-event'
 import { type LlmCallContext } from '@/lib/llm/client'
 import { isAppError } from '@/lib/errors/app-error'
+import type { CompanyFirmographics } from '@/lib/apollo/format-company-summary'
 
 const ACTOR = 'research_agent'
 
@@ -16,7 +17,9 @@ export interface RunResearchInput {
   caseId: string
   companyName: string
   companyDomain: string | null
-  valueProp: string | null
+  // Apollo's org match for this case, if discovery captured one — handed to
+  // the company research agent as an unverified claim to check, not a fact.
+  companyFirmographics: CompanyFirmographics | null
   leads: ResearchLead[]
 }
 
@@ -27,7 +30,10 @@ export interface ResearchSummary {
 
 function buildRoles(input: RunResearchInput): ResearchAgentRole[] {
   const company: ResearchAgentRole = {
-    kind: 'company', companyName: input.companyName, companyDomain: input.companyDomain,
+    kind: 'company',
+    companyName: input.companyName,
+    companyDomain: input.companyDomain,
+    firmographics: input.companyFirmographics,
   }
   const people: ResearchAgentRole[] = input.leads.map((lead) => ({
     kind: 'person', lead, companyName: input.companyName, companyDomain: input.companyDomain,
@@ -80,7 +86,7 @@ export async function runResearchForCase(
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
 
   const results = await Promise.allSettled(
-    roles.map((role) => runResearchAgent(context, deps, { role, valueProp: input.valueProp })),
+    roles.map((role) => runResearchAgent(context, deps, { role })),
   )
 
   const entries: AgentDossierEntry[] = []

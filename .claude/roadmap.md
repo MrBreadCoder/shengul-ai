@@ -4146,3 +4146,113 @@ Verified: `tsc --noEmit` clean, `eslint` clean, full suite 202 files /
 2197 tests green (added 4 new tests for `formatZodMessage`, including
 one asserting Zod's exact message text so a future Zod upgrade that
 changes wording fails loudly).
+
+## 2026-08-10 — Rewrote the research agent's system prompts to stop hallucinated "facts"
+
+Traced a user report of fabricated `case_knowledge` for the Uniforms
+Fashion hospital campaign to real DB rows: a `pain_point` citing
+"Visual Observation of Social Media" as its source for a claim about
+staff scrub colors, and a company-fact row citing "LinkedIn and ZoomInfo
+Research" with no URL — both impossible, since `buildResearchTools`
+(`src/lib/research/tools.ts`) only ever gives the agent `search`
+(snippets) and `scrape` (one page's text); there is no vision/image
+tool and no ZoomInfo/LinkedIn API integration, so neither citation could
+have been produced honestly. The old system prompts (`COMPANY_GATHER_SYSTEM`
+/ `PERSON_GATHER_SYSTEM` / `EXTRACT_SYSTEM` in `src/lib/research/agent.ts`)
+said "do not invent facts" but never told the model what it actually
+had access to, so nothing stopped it from inventing a plausible-sounding
+research method to attach to a fact it wanted to include.
+
+Per operator instruction: removed the "Our value proposition to them"
+and "Start by searching" sections from `gatherPrompt` — priming the
+agent with the sales pitch before it researches invites exactly the
+kind of invented, narrative-fitting pain point found in the DB.
+`runResearchAgent`'s `valueProp` param and `RunResearchInput.valueProp`
+are gone; `seedQuery` (the hardcoded first search) is deleted too, in
+favor of letting the model choose its own opening query per the
+"start broad, then narrow" guidance below. Downstream email writing
+(`write.ts`, `reply.ts`, `followup.ts`, `knowledge-answer.ts`) still
+gets `campaign.value_prop` as before — only the *research* step now
+runs blind to the pitch, so gathered facts stay objective.
+
+Researched Anthropic's own agent-building and multi-agent-research-system
+writeups before rewriting, and folded in: an explicit "Tools and limits"
+section naming exactly what the agent can and can't do (closes the
+vision/ZoomInfo hallucination hole directly); "start broad, then narrow"
+search strategy instead of a scripted seed query; preference for primary
+sources over SEO/data-broker pages, with instruction to flag — not
+smooth over — numbers pulled from unverified aggregator profiles; and an
+explicit stopping condition so the agent knows when it has enough rather
+than searching indefinitely. `EXTRACT_SYSTEM` now explicitly forbids
+inventing a citation label to cover a missing URL and forbids inferring
+a `pain_point` "to fit a sales narrative" — both were exactly what
+produced the two fabricated rows.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on touched files, full
+suite 202 files / 2197 tests green.
+
+## 2026-08-10 — Fed the research agent Apollo's own data, framed as "verify this" not "trust this"
+
+Follow-up to the same-day system-prompt rewrite. Discussed whether to give
+the research agent more of what Apollo already returns; landed on splitting
+it into two buckets with different risk profiles instead of doing it
+uniformly.
+
+**Precise identifiers (low risk, pure win):** the person's Apollo
+`linkedin_url` was already sitting on `leads.linkedin_url` but never reached
+`ResearchAgentRole` — the person agent had to search-and-guess which
+same-name LinkedIn result was the right one. `ResearchLead` (`provider.ts`)
+now carries `linkedinUrl`; `personGatherPrompt` hands it over as a direct
+scrape target, with an explicit instruction to confirm the name/title match
+before treating the page as a source (a wrong-person match is a real risk
+with a common name).
+
+**Firmographics (real risk, handled carefully):** Apollo's
+industry/employee-count/founded-year/location — the exact fields that were
+wrong in both fabrication cases traced earlier today (Lake Health District's
+Ohio/Oregon contradiction; Dauterive Hospital's domain mismatch) — are now
+passed to the company agent too, but explicitly framed as "Apollo's own
+match — unverified, confirm or correct it," never as ground truth. Extracted
+`parseCompanyFirmographicsFromRaw` out of `group-lead.ts` (previously
+private, now unused there for research purposes) into
+`lib/apollo/format-company-summary.ts` next to the `CompanyFirmographics`
+type it produces, so both `group-lead.ts` (the existing blind-trust
+Apollo-knowledge write) and the new research route can share one parser
+instead of two copies. `route.ts` reads firmographics off the first active
+lead's `raw` (all leads on a case share one company/org match) and passes
+them as `RunResearchInput.companyFirmographics`.
+
+Both system prompts (`COMPANY_GATHER_SYSTEM`, `PERSON_GATHER_SYSTEM`) gained
+a section on how to treat this provided context — check it, don't restate
+it, and treat a contradiction as a finding worth writing down rather than
+silently repeating or silently dropping. `EXTRACT_SYSTEM` now names "a
+confirmed discrepancy against Apollo's provided match" as a valid `company`
+entry. This is the mechanism that would have caught both of today's earlier
+bugs at research time instead of by hand afterward.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on touched files, full
+suite 202 files / 2200 tests green (added 3 new tests: firmographics
+surfaced as unverified in the prompt, the Apollo section omitted when
+there's nothing to pass, and the known-LinkedIn-profile confirmation
+instruction).
+
+## 2026-08-10 — Dialed back "verify Apollo" language per operator: Apollo is trusted
+
+Operator called out that the previous change over-corrected: Apollo is a
+trustable source, so the prompts shouldn't push the agent to actively
+double-check it. Reworded both `COMPANY_GATHER_SYSTEM`'s "If you're given
+Apollo's own match" section and `PERSON_GATHER_SYSTEM`'s "known LinkedIn
+profile" section from "unverified — confirm/correct it" to "trusted
+background — use it directly, no need to spend a step re-verifying it";
+kept one narrow, passive fallback ("if something plainly contradicts it
+along the way, mention it") rather than an active verification mandate.
+Softened the matching inline `gatherPrompt` text (`companyGatherPrompt` /
+`personGatherPrompt`) the same way, and dropped `EXTRACT_SYSTEM`'s explicit
+"confirmed discrepancy against Apollo" clause. Left the **unrelated**
+RocketReach/ZoomInfo skepticism in both system prompts untouched — that's
+about data-broker pages the agent finds on its own during search, not
+about our own Apollo integration, and is a separate, still-valid concern.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on touched files, full
+suite 202 files / 2200 tests green (updated the 2 tests whose assertions
+targeted the old wording).

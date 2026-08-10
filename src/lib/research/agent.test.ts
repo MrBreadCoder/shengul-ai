@@ -22,8 +22,7 @@ describe('runResearchAgent', () => {
       entries: [{ kind: 'company', content: 'Builds widgets', sourceUrl: 'https://acme.com', citation: 'site' }],
     })
     const entries = await runResearchAgent(context, { research }, {
-      role: { kind: 'company', companyName: 'Acme', companyDomain: 'acme.com' },
-      valueProp: 'save time',
+      role: { kind: 'company', companyName: 'Acme', companyDomain: 'acme.com', firmographics: null },
     })
     expect(entries).toEqual([
       { kind: 'company', content: 'Builds widgets', sourceUrl: 'https://acme.com', citation: 'site' },
@@ -37,8 +36,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
-      role: { kind: 'company', companyName: 'Acme', companyDomain: null },
-      valueProp: null,
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     expect(generateWithToolsMock).toHaveBeenCalledWith(
       context,
@@ -50,8 +48,12 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('Jane Doe is CTO, spoke at a conference.')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
-      role: { kind: 'person', lead: { fullName: 'Jane Doe', title: 'CTO' }, companyName: 'Acme', companyDomain: 'acme.com' },
-      valueProp: null,
+      role: {
+        kind: 'person',
+        lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null },
+        companyName: 'Acme',
+        companyDomain: 'acme.com',
+      },
     })
     // generateWithTools is awaited inside runResearchAgent above, so calls[0] exists.
     const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
@@ -62,9 +64,53 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('nothing notable')
     generateJsonMock.mockResolvedValue({ entries: [] })
     const entries = await runResearchAgent(context, { research }, {
-      role: { kind: 'company', companyName: 'Acme', companyDomain: null },
-      valueProp: null,
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     expect(entries).toEqual([])
+  })
+
+  it('should surface Apollo firmographics in the company gather prompt as background context', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      role: {
+        kind: 'company',
+        companyName: 'Acme',
+        companyDomain: 'acme.com',
+        firmographics: {
+          industry: 'hospital & health care', employeeCount: 150, foundedYear: 1913,
+          description: null, city: 'Lakeview', state: 'Oregon', country: 'United States',
+        },
+      },
+    })
+    const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
+    expect(gatherPrompt).toContain('background context')
+    expect(gatherPrompt).toContain('Lakeview, Oregon, United States')
+  })
+
+  it('should omit the Apollo context section when no firmographics are given', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
+    })
+    const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
+    expect(gatherPrompt).not.toContain("Apollo's own match")
+  })
+
+  it('should hand the agent a known LinkedIn profile as its starting point', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      role: {
+        kind: 'person',
+        lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: 'https://linkedin.com/in/janedoe' },
+        companyName: 'Acme',
+        companyDomain: 'acme.com',
+      },
+    })
+    const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
+    expect(gatherPrompt).toContain('https://linkedin.com/in/janedoe')
+    expect(gatherPrompt).toContain('start here')
   })
 })

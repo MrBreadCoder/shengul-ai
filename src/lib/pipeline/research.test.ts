@@ -20,7 +20,8 @@ import { runResearchForCase } from './research'
 const research = { search: vi.fn(), scrape: vi.fn() }
 const input = {
   clientId: 'c1', caseId: 'case1', companyName: 'Acme', companyDomain: 'acme.com',
-  valueProp: 'We save you time', leads: [{ fullName: 'Jane Doe', title: 'CTO' }],
+  companyFirmographics: null,
+  leads: [{ fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null }],
 }
 
 beforeEach(() => {

@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import type { Json } from '@/types/database'
+
 export interface CompanyFirmographics {
   industry: string | null
   employeeCount: number | null
@@ -6,6 +9,37 @@ export interface CompanyFirmographics {
   city: string | null
   state: string | null
   country: string | null
+}
+
+// discover.ts spreads the already-mapped ApolloEnrichedPerson (camelCase)
+// onto `leads.raw`, not raw Apollo API JSON — despite the column's name — so
+// this schema mirrors ApolloEnrichedPerson's field names, not Apollo's
+// snake_case wire format.
+const rawOrgFieldsSchema = z.object({
+  organizationIndustry: z.string().nullable().optional(),
+  organizationEmployeeCount: z.number().nullable().optional(),
+  organizationFoundedYear: z.number().nullable().optional(),
+  organizationDescription: z.string().nullable().optional(),
+  organizationCity: z.string().nullable().optional(),
+  organizationState: z.string().nullable().optional(),
+  organizationCountry: z.string().nullable().optional(),
+}).passthrough()
+
+// Returns null (not a throw) for a lead inserted before this feature shipped,
+// or any other shape `raw` doesn't carry firmographics in — missing data is
+// not an error condition here.
+export function parseCompanyFirmographicsFromRaw(raw: Json): CompanyFirmographics | null {
+  const parsed = rawOrgFieldsSchema.safeParse(raw)
+  if (!parsed.success) return null
+  return {
+    industry: parsed.data.organizationIndustry ?? null,
+    employeeCount: parsed.data.organizationEmployeeCount ?? null,
+    foundedYear: parsed.data.organizationFoundedYear ?? null,
+    description: parsed.data.organizationDescription ?? null,
+    city: parsed.data.organizationCity ?? null,
+    state: parsed.data.organizationState ?? null,
+    country: parsed.data.organizationCountry ?? null,
+  }
 }
 
 function ensureSentence(text: string): string {

@@ -9,6 +9,7 @@ import { runResearchForCase } from '@/lib/pipeline/research'
 import { brightdataResearch } from '@/lib/research/brightdata'
 import { isAppError } from '@/lib/errors/app-error'
 import { logError } from '@/lib/events/log-event'
+import { parseCompanyFirmographicsFromRaw } from '@/lib/apollo/format-company-summary'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +41,9 @@ export async function POST(request: Request) {
     await updateCaseStatus(admin, caseId, 'researching')
 
     const leads = await listActiveLeadsForCase(admin, caseId)
+    // Every active lead on a case shares one company, so any lead's `raw`
+    // carries the same Apollo org match — the first lead is enough.
+    const companyFirmographics = leads[0] ? parseCompanyFirmographicsFromRaw(leads[0].raw) : null
     const summary = await runResearchForCase(
       admin,
       { research: brightdataResearch },
@@ -48,8 +52,8 @@ export async function POST(request: Request) {
         caseId,
         companyName: kase.company_name,
         companyDomain: kase.company_domain,
-        valueProp: campaign.value_prop,
-        leads: leads.map((l) => ({ fullName: l.full_name, title: l.title })),
+        companyFirmographics,
+        leads: leads.map((l) => ({ fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url })),
       },
     )
     return NextResponse.json({ ok: true, summary })
