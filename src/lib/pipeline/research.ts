@@ -28,6 +28,19 @@ export interface ResearchSummary {
   knowledgeCount: number
 }
 
+// Person-level research disabled (2026-08-11): for our current ICP (school
+// finance/business/procurement admin staff) the agent almost never finds a
+// real hook about the *named* lead — no LinkedIn posts, interviews, or talks
+// for this audience — and extraction has no way to tell "fact about the
+// recipient" from "fact about whoever else I ran into scraping the site"
+// (the principal, the CEO), so wrong-person bios were landing in the dossier
+// indistinguishable from real personalization hooks. See roadmap 2026-08-11.
+// Flip back to true once the person agent/extraction is fixed to tag facts
+// with who they're about (or add a role-scoped-inference fallback) — the
+// agent implementation itself (agent.ts's PERSON_GATHER_SYSTEM path) is left
+// fully intact for that, not removed.
+const ENABLE_PERSON_RESEARCH = false
+
 function buildRoles(input: RunResearchInput): ResearchAgentRole[] {
   const company: ResearchAgentRole = {
     kind: 'company',
@@ -35,6 +48,7 @@ function buildRoles(input: RunResearchInput): ResearchAgentRole[] {
     companyDomain: input.companyDomain,
     firmographics: input.companyFirmographics,
   }
+  if (!ENABLE_PERSON_RESEARCH) return [company]
   const people: ResearchAgentRole[] = input.leads.map((lead) => ({
     kind: 'person', lead, companyName: input.companyName, companyDomain: input.companyDomain,
   }))

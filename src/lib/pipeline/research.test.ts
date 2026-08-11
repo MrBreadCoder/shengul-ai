@@ -31,39 +31,37 @@ beforeEach(() => {
 })
 
 describe('runResearchForCase', () => {
-  it('should merge entries from all agents, write them, and mark the case ready', async () => {
-    // company agent then person agent
+  it('should run only the company agent, write its entries, and mark the case ready', async () => {
     runResearchAgentMock
       .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: 'https://acme.com', citation: null }])
-      .mockResolvedValueOnce([{ kind: 'person', content: 'Jane spoke at a conf', sourceUrl: null, citation: null }])
-    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }, { id: 'k2' }])
-
-    const result = await runResearchForCase({} as never, { research }, input)
-
-    expect(runResearchAgentMock).toHaveBeenCalledTimes(2)
-    expect(insertKnowledgeMock).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining([
-      expect.objectContaining({ case_id: 'case1', kind: 'company', content: 'Builds widgets' }),
-      expect.objectContaining({ case_id: 'case1', kind: 'person', content: 'Jane spoke at a conf' }),
-    ]))
-    expect(result).toEqual({ caseId: 'case1', knowledgeCount: 2 })
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'ready')
-  })
-
-  it('should proceed to ready with a partial dossier when one agent fails', async () => {
-    runResearchAgentMock
-      .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: null, citation: null }])
-      .mockRejectedValueOnce(new Error('llm timeout'))
     insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
 
     const result = await runResearchForCase({} as never, { research }, input)
 
+    expect(runResearchAgentMock).toHaveBeenCalledTimes(1)
+    expect(insertKnowledgeMock).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining([
+      expect.objectContaining({ case_id: 'case1', kind: 'company', content: 'Builds widgets' }),
+    ]))
     expect(result).toEqual({ caseId: 'case1', knowledgeCount: 1 })
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'ready')
-    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'pipeline.research.agent_failed' }))
   })
 
-  it('should mark the case ready with zero knowledge when agents succeed but find nothing', async () => {
-    runResearchAgentMock.mockResolvedValueOnce([]).mockResolvedValueOnce([])
+  it('should skip person research even when the case has leads (ENABLE_PERSON_RESEARCH is off)', async () => {
+    runResearchAgentMock.mockResolvedValueOnce([{ kind: 'company', content: 'x', sourceUrl: null, citation: null }])
+    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(runResearchAgentMock).toHaveBeenCalledTimes(1)
+    expect(runResearchAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ role: expect.objectContaining({ kind: 'company' }) }),
+    )
+  })
+
+  it('should mark the case ready with zero knowledge when the company agent succeeds but finds nothing', async () => {
+    runResearchAgentMock.mockResolvedValueOnce([])
     insertKnowledgeMock.mockResolvedValue([])
 
     const result = await runResearchForCase({} as never, { research }, input)
@@ -72,19 +70,18 @@ describe('runResearchForCase', () => {
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'ready')
   })
 
-  it('should NOT mark ready and should not insert when every agent fails', async () => {
-    runResearchAgentMock
-      .mockRejectedValueOnce(new Error('down'))
-      .mockRejectedValueOnce(new Error('down'))
+  it('should NOT mark ready and should not insert when the company agent fails', async () => {
+    runResearchAgentMock.mockRejectedValueOnce(new Error('down'))
 
     const result = await runResearchForCase({} as never, { research }, input)
 
     expect(result.knowledgeCount).toBe(0)
     expect(insertKnowledgeMock).not.toHaveBeenCalled()
     expect(updateCaseStatusMock).not.toHaveBeenCalledWith(expect.anything(), 'case1', 'ready')
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'pipeline.research.agent_failed' }))
     expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'pipeline.research.completed',
-      payload: expect.objectContaining({ knowledgeCount: 0, agentsFailed: 2 }),
+      payload: expect.objectContaining({ knowledgeCount: 0, agentsFailed: 1 }),
     }))
   })
 
@@ -100,7 +97,6 @@ describe('runResearchForCase', () => {
   it('should enqueue a CRM sync once the case is marked ready', async () => {
     runResearchAgentMock
       .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: null, citation: null }])
-      .mockResolvedValueOnce([])
     insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
 
     await runResearchForCase({} as never, { research }, input)
@@ -109,9 +105,7 @@ describe('runResearchForCase', () => {
   })
 
   it('should not enqueue a CRM sync when the case never reaches ready', async () => {
-    runResearchAgentMock
-      .mockRejectedValueOnce(new Error('down'))
-      .mockRejectedValueOnce(new Error('down'))
+    runResearchAgentMock.mockRejectedValueOnce(new Error('down'))
 
     await runResearchForCase({} as never, { research }, input)
 

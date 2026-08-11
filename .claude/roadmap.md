@@ -4499,3 +4499,74 @@ as intended.
 
 Verified: `tsc --noEmit` clean, `eslint` clean (one unused-import warning
 fixed), both style variants ran end to end against the real model.
+
+## 2026-08-11 — Fixed formal-intro style: false footprint claim + isolated-fact regression
+
+Operator flagged a live Uniforms Fashion → International Jubilee Private
+School email that (1) claimed "we manufacture custom school uniforms ...
+for K-12 institutions in Abu Dhabi" — Uniforms Fashion (Istanbul) has no
+Abu Dhabi footprint, the model just glued the recipient's location onto the
+capabilities sentence as if it described an existing market — and (2) wrote
+its one personalization fact ("G7 recently shortlisted International
+Jubilee Private School among the top three schools in the UAE for the
+2025-2026 academic year.") as a bare "Company X has done Y since Z"
+sentence, exactly the pattern step 4 of the prompt already says never to do.
+
+Root causes, both in the "Formal introduction" `email_styles` row seeded by
+migration 0035: step 3's only example of folding in the recipient's location
+("...for police and corrections agencies like yours in Wyoming") never made
+the "like yours" analogy framing mandatory, so the model was free to drop it
+and state the location as fact; and the "never isolate a fact" rule was
+never restated for the single-fact case, where there's nothing else nearby
+to weave it against.
+
+Fixed via `0038_fix_formal_intro_overclaim_and_isolation.sql`: step 3 now
+explicitly forbids stating or implying the sender already operates,
+manufactures, or has clients in the recipient's country/region unless
+"About our company" says so; the opening rule now has an explicit
+single-fact case requiring a connecting clause ("because"/"after"/"since"/
+"which is why") instead of a standalone sentence. Also brought
+`scripts/test-fake-email.ts`'s `STYLE_VOICE_INSTRUCTIONS.formal` copy back
+in sync with the seed — it had drifted out of byte-for-byte parity with
+migration 0035 (missing the split/skip-paragraph and generic-fallback
+clauses from step 4) despite its header comment claiming otherwise.
+
+Verified: `vitest run` on `email-styles.test.ts` / `write.test.ts` /
+`signature.test.ts` (46 tests, all pass — none hard-code the seed string) and
+`tsc --noEmit` clean on the touched script.
+
+## 2026-08-11 — Disabled person-level research (feature flag, not deleted)
+
+Operator inspected the 4 live "contacted" school leads' `case_knowledge` and
+found `kind: 'person'` facts present for only 1 of 4 (Prasanth Kumar, IJPS);
+the other 3 cases' `person` entries were real facts, but about the wrong
+person — the school's Principal/CEO/PR Manager the agent ran into while
+scraping the site, not the actual lead being emailed (Vhenchie Jeruela,
+Elena Platonova, Sarah Johnson). Root cause: `PERSON_GATHER_SYSTEM`
+(`research/agent.ts`) correctly refuses to fabricate a hook when it can't
+find one for the named lead, but the extraction step then has no field
+tying a `person` entry to *whose* fact it is, and `write.ts`'s dossier
+flattens every knowledge row into one bullet list with `person` facts
+prioritized above `company` facts — so a wrong-person bio was one dossier
+generation away from reading as a fact about the recipient. Checked the 4
+actual drafts (all `status: draft`, none sent — client is on
+`human_approve`): none misattributed in this batch, the model happened to
+prefer `news`/`pain_point` facts instead, but the risk was live.
+
+Disabled via `ENABLE_PERSON_RESEARCH = false` in `pipeline/research.ts`'s
+`buildRoles()` — company research still runs on every case; per-lead person
+research is skipped entirely, not removed. `agent.ts`'s
+`PERSON_GATHER_SYSTEM`/`personGatherPrompt` path is left fully intact so
+it's a one-line flip to re-enable once fixed (tag `person` entries with who
+they're about, and/or add a role-scoped-inference fallback for this ICP —
+school finance/business/procurement staff rarely have the public footprint
+— LinkedIn posts, interviews, talks — the current prompt chases). Existing
+mislabeled `person` rows already in the DB for the 3 affected cases were
+**not** deleted — flagged to operator, cleanup pending a decision.
+
+Updated `research.test.ts` to match: person-role tests removed/collapsed
+(roles are always `[company]` now regardless of `input.leads`), added a
+dedicated "skips person research even when leads exist" test.
+
+Verified: `vitest run` on `research.test.ts` + `agent.test.ts` (15 tests,
+all pass) and `tsc --noEmit` clean.
