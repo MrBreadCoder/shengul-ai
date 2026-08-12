@@ -8,11 +8,17 @@ import { createBrowserClient } from '@/lib/supabase/client'
 // coalesce a burst into one server round-trip instead of one per row.
 const REFRESH_DEBOUNCE_MS = 1500
 
+interface RealtimeRefresherProps {
+  /** Unique per page so concurrent subscriptions are distinguishable in
+   *  Supabase's realtime logs. The tables watched are the same everywhere. */
+  channel: string
+}
+
 // Renders nothing. It listens for "a row that feeds a metric changed" and asks
 // the server to recompute — the aggregation itself stays server-side and
 // RLS-scoped. Realtime applies the same RLS policies to the subscription, so a
 // client-role viewer is only woken by its own client's rows.
-export function RealtimeRefresher() {
+export function RealtimeRefresher({ channel }: RealtimeRefresherProps) {
   const router = useRouter()
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -26,8 +32,8 @@ export function RealtimeRefresher() {
       }, REFRESH_DEBOUNCE_MS)
     }
 
-    const channel = supabase
-      .channel('analytics-metrics')
+    const realtimeChannel = supabase
+      .channel(channel)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'emails' }, scheduleRefresh)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'emails' }, scheduleRefresh)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads' }, scheduleRefresh)
@@ -37,9 +43,9 @@ export function RealtimeRefresher() {
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
-      void supabase.removeChannel(channel)
+      void supabase.removeChannel(realtimeChannel)
     }
-  }, [router])
+  }, [router, channel])
 
   return null
 }

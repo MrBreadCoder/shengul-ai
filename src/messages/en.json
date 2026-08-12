@@ -18,6 +18,7 @@
     "toggleTheme": "Toggle colour theme"
   },
   "nav": {
+    "home": "Home",
     "pipeline": "Pipeline",
     "inbox": "Inbox",
     "mail": "Mail",
@@ -28,6 +29,36 @@
     "settings": "Settings",
     "awaitingYou": "{count} awaiting you",
     "signOut": "Sign out"
+  },
+  "home": {
+    "pageTitle": "Home",
+    "description": "Where your pipeline stands right now.",
+    "errorTitle": "Home unavailable",
+    "errorDescription": "Your dashboard could not be loaded. Nothing was affected.",
+    "tile": {
+      "leadsFound": "Leads found",
+      "emailsSent": "Emails sent",
+      "replies": "Replies",
+      "activeCampaigns": "Active campaigns"
+    },
+    "sectionNeedsAction": "Needs your action",
+    "allCaughtUpTitle": "You're all caught up",
+    "allCaughtUpDescription": "Nothing is waiting on you right now.",
+    "needsActionTitle": "Waiting on you",
+    "draftsCount": "{count, plural, one {# draft} other {# drafts}}",
+    "questionsCount": "{count, plural, one {# question} other {# questions}}",
+    "sectionCampaigns": "Campaigns",
+    "sectionLatestLeads": "Latest leads found",
+    "sectionRecentMail": "Recent mail",
+    "viewAllMail": "View all",
+    "emptyCampaignsTitle": "No campaigns yet",
+    "emptyCampaignsDescription": "Your operator hasn't set one up yet. Check back once a campaign is running.",
+    "emptyLeadsTitle": "No leads yet",
+    "emptyLeadsDescription": "New leads will appear here as soon as discovery finds them.",
+    "emptyMailTitle": "No mail sent yet",
+    "emptyMailDescription": "Sent messages will appear here once the agent reaches out.",
+    "noCase": "Not linked to a case yet",
+    "noSubject": "(no subject)"
   },
   "settings": {
     "errorTitle": "Settings unavailable",

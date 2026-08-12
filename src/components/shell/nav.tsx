@@ -8,6 +8,7 @@ import {
   ChartLineUp,
   Envelope,
   Gear,
+  House,
   Kanban,
   Lightning,
   type IconProps,
@@ -19,13 +20,25 @@ import { cn } from '@/lib/utils'
 
 interface NavItem {
   readonly href: string
-  readonly labelKey: 'pipeline' | 'inbox' | 'mail' | 'knowledge' | 'analytics' | 'clients' | 'campaigns' | 'settings'
+  readonly labelKey:
+    | 'home'
+    | 'pipeline'
+    | 'inbox'
+    | 'mail'
+    | 'knowledge'
+    | 'analytics'
+    | 'clients'
+    | 'campaigns'
+    | 'settings'
   readonly icon: ComponentType<IconProps>
   /** Operator-only destinations are hidden from client-role users entirely. */
   readonly operatorOnly?: boolean
+  /** Client-only destinations are hidden from operators entirely (the inverse of operatorOnly). */
+  readonly clientOnly?: boolean
 }
 
 const PRIMARY_NAV: readonly NavItem[] = [
+  { href: '/home', labelKey: 'home', icon: House, clientOnly: true },
   { href: '/crm', labelKey: 'pipeline', icon: Kanban },
   { href: '/inbox', labelKey: 'inbox', icon: Tray },
   { href: '/mail', labelKey: 'mail', icon: Envelope },
@@ -59,6 +72,7 @@ export function Nav({ role, inboxCount, onNavigate }: NavProps): React.ReactElem
 
   const renderItem = (item: NavItem): React.ReactElement | null => {
     if (item.operatorOnly && role !== 'operator') return null
+    if (item.clientOnly && role !== 'client') return null
     const active = isActive(pathname, item.href)
     const Icon = item.icon
     const badge = item.href === '/inbox' && inboxCount > 0 ? inboxCount : null

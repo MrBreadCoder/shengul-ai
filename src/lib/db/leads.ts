@@ -237,3 +237,43 @@ export async function listOtherActiveLeadsForCollisionNotice(
   const untouchedIds = new Set((activeSequences ?? []).map((s) => s.lead_id))
   return candidates.filter((c) => untouchedIds.has(c.id))
 }
+
+export interface RecentLeadForClient {
+  id: string
+  fullName: string
+  title: string | null
+  companyName: string | null
+  companyDomain: string | null
+  status: Database['public']['Enums']['lead_status']
+  emailStatus: Database['public']['Enums']['lead_email_status']
+  caseId: string | null
+  createdAt: string
+}
+
+// RLS-scoped: pass a session-bound server client so a client role only sees
+// its own leads. Used by /home's "Latest leads found" widget — newest first,
+// capped by the caller.
+export async function listRecentLeadsForClient(
+  supabase: SupabaseClient<Database>,
+  { limit }: { limit: number },
+): Promise<RecentLeadForClient[]> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id, full_name, title, company_name, company_domain, status, email_status, case_id, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list recent leads for client', { limit, cause: error.message })
+  }
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    fullName: row.full_name,
+    title: row.title,
+    companyName: row.company_name,
+    companyDomain: row.company_domain,
+    status: row.status,
+    emailStatus: row.email_status,
+    caseId: row.case_id,
+    createdAt: row.created_at,
+  }))
+}

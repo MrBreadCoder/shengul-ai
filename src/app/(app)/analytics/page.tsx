@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 import { getTranslations } from 'next-intl/server'
 import { PageHeader } from '@/components/page-header'
+import { RealtimeRefresher } from '@/components/realtime-refresher'
 import { AnalyticsView } from './analytics-view'
-import { RealtimeRefresher } from './realtime-refresher'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +16,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   const t = await getTranslations('analytics')
   return (
     <div className="flex flex-col gap-8">
-      <RealtimeRefresher />
+      <RealtimeRefresher channel="analytics-metrics" />
       <PageHeader
         title={t('title')}
         description={t('description')}

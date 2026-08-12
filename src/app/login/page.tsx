@@ -29,7 +29,7 @@ export default function LoginPage(): React.ReactElement {
       setIsSubmitting(false)
       return
     }
-    router.push('/crm')
+    router.push('/home')
     router.refresh()
   }
 

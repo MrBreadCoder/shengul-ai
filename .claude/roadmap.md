@@ -4570,3 +4570,122 @@ dedicated "skips person research even when leads exist" test.
 
 Verified: `vitest run` on `research.test.ts` + `agent.test.ts` (15 tests,
 all pass) and `tsc --noEmit` clean.
+
+## 2026-08-11 — Fixed dossier fact-selection and negative-fact guardrails (global) + Formal introduction style's fact-inference ban
+
+Operator reviewed Uniforms Fashion's last 4 hospital leads' `case_knowledge`
+against their drafted emails (all on the "Formal introduction" style).
+Found the model picking a purely reputational `news` fact (a trustee
+election) over a sharper `pain_point` fact (2020 near-closure, rural
+staffing instability) for Evans Memorial Hospital, even though
+`DOSSIER_KIND_PRIORITY` in `write.ts` already ranks `pain_point` ahead of
+`news` — kind alone doesn't capture sales relevance, and the prompt had no
+instruction to prefer an operational-change fact over a reputational one
+within/across kinds. Root cause for the drop of the stronger fact:
+avoiding a direct restatement of the hospital's financial distress was the
+right instinct (naming it back reads as an insult), but the model had no
+safe way to *use* it, so it silently fell back to a weaker fact instead.
+
+Added two new bullets to `FIXED_GUARDRAILS` in `write.ts` — global, applies
+to every client and every `email_styles` row, not just manufacturer/formal
+styles: (1) prefer a fact implying a concrete operational change
+(expansion, new facility, funding, contract win, hiring surge, compliance
+event) over a merely reputational one (award, board seat, media profile)
+when both share a dossier kind; (2) if the strongest fact is negative about
+the recipient's org, never restate it directly — reference its neutral
+operational implication instead, or fall back to the next-strongest fact.
+
+Also fixed the "Formal introduction" `email_styles` row (DB, id
+`f5263888-e87d-494e-acee-d34041d8838c`): its personalization step banned
+"any claim about why it matters" for a dossier fact, which is why the
+NewYork-Presbyterian and Northern Westchester emails (the two that read
+best) had to *break* the style's own rule to draw a fact→need connection,
+while the Evans Memorial email obeyed it literally and read flattest as a
+result. Replaced that ban with a scoped allowance: one direct inference
+from a fact to product volume, fit/sizing consistency, or timing is
+permitted via a connecting clause, but budget, priorities, and feelings
+stay off-limits. Kept generic to "product" (not "garment") since the style
+is shared by any manufacturer client, not just Uniforms Fashion.
+
+Not changed (deferred, needs separate validation): the self-intro clause
+("My name is Cihat Bozkurt...") in all 3 emails technically violates
+`HUMAN_VOICE_INSTRUCTION`'s ban on "my name is [X]" — the Formal
+introduction style's step 2 gives the model nowhere else to go. Flagged to
+operator, not fixed this pass.
+
+Verified: `vitest run` on `write.test.ts` (20 tests, all pass — none
+hard-code the old guardrail text) after the `write.ts` edit.
+
+---
+
+## Client Home Dashboard — 2026-08-11
+
+**Goal:** a `/home` landing page for client-role users summarizing analytics,
+running campaigns, latest leads, pending actions, and recent mail —
+replacing `/crm` as the post-login destination for clients. Operators are
+unaffected, still land on `/crm`.
+
+- [x] Design spec: `docs/superpowers/specs/2026-08-11-client-home-dashboard-design.md`.
+- [x] Hoisted `StatTile`, `SparklineChart`, `RealtimeRefresher` out of
+      `/analytics` into `src/components/` so `/home` and `/analytics` share
+      one implementation (`RealtimeRefresher` gained a required `channel`
+      prop).
+- [x] `listRecentLeadsForClient` added to `src/lib/db/leads.ts`.
+- [x] `/home` route: stat tiles (leads found, emails sent, replies, active
+      campaigns), needs-your-action card (drafts + knowledge requests),
+      7-day activity trend, running campaigns, latest leads found, recent
+      mail — all RLS-scoped, real-time, fully translated (`home` i18n
+      namespace + `nav.home`).
+- [x] Nav: new `Home` item (client-only) at the top of the primary nav;
+      login now redirects clients to `/home` (operators still land on
+      `/crm`).
+
+**Demo:** sign in as a client, land on `/home`, see campaigns, leads, mail,
+and analytics at a glance; sign in as an operator, still land on `/crm`.
+
+**Verified:** `pnpm typecheck && pnpm lint && pnpm test` (202 files, 2206
+tests, all passing) and `pnpm build` (production build succeeds, `/home`
+route present) — all clean.
+
+---
+
+## Client Home Dashboard — Visual Redesign — 2026-08-11
+
+**Goal:** the initial `/home` layout looked sparse and required page
+scrolling — four stacked sections, the needs-action banner as its own
+full-width strip, and a mail section rendering full `EmailMessage` bodies
+(up to 900 chars × 5) that pushed the page well past the fold.
+
+- [x] Needs-action card redesigned to match `StatTile`'s label/value/hint
+      shape and folded into the stat bento row as a 5th tile instead of its
+      own section (`needs-action-card.tsx`).
+- [x] Campaigns / latest leads / recent mail reflowed into a 3-column row
+      below the stat tiles, each card stretching to fill the remaining
+      viewport height (`h-full` + internal `overflow-y-auto`) instead of
+      shrink-wrapping its rows and leaving dead background space.
+- [x] New route-local `MailRow` (`mail-row.tsx`) — a one-line summary
+      (icon, subject, company, status, relative time) replacing the full
+      `EmailMessage` card on this page; `CampaignRow` gained a matching
+      icon avatar so all three columns share one row grid.
+- [x] Outer page capped to `lg:h-[calc(100dvh-5rem)]` (5rem = the shell's
+      `py-10` chrome) so desktop viewports need no page-level scroll —
+      overflow is absorbed by each column's own scroll area, and the cap
+      drops entirely below `lg` so mobile/tablet still flow + scroll
+      normally.
+- [x] Follow-up: columns were still visibly underfull with only 5 rows
+      each once they stretched to fill the height. `LIST_LIMIT` raised
+      5 → 12 for leads/mail (real additional rows, not padding); campaigns
+      column now shows every campaign (active first, then paused/archived
+      with their real status pill) instead of active-only, so a client
+      with just 1-2 running campaigns doesn't see a mostly-empty column.
+      Renamed `home.sectionRunningCampaigns` → `home.sectionCampaigns`
+      ("Campaigns"/"Kampanyalar") since the column is no longer
+      active-only.
+- [x] New i18n key: `home.noSubject` ("(no subject)"/"(konu yok)") for
+      `MailRow`'s subject fallback.
+- [x] Design system untouched — Inter, oklch tokens, `border-hairline` /
+      `bg-surface`, `--ease-out-quint`, phosphor-light icons all kept as-is
+      since `/home` shares chrome with every other authenticated page.
+
+**Verified:** `pnpm typecheck && pnpm lint && pnpm test` (202 files, 2206
+tests, all passing, including `messages.test.ts` key-parity).

@@ -19,6 +19,8 @@ import { MAILBOX_HEALTH } from '@/lib/ui/status'
 import { Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { StatusPill } from '@/components/status-dot'
+import { StatTile } from '@/components/stat-tile'
+import { SparklineChart } from '@/components/sparkline-chart'
 import {
   Table,
   TableBody,
@@ -28,8 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { StatTile } from './stat-tile'
-import { SparklineChart } from './sparkline-chart'
 import { AnalyticsFilters } from './filters'
 
 const EVENT_TYPE_LIMIT = 12

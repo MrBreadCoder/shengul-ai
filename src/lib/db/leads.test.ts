@@ -10,6 +10,7 @@ import {
   parkLead,
   countLeadsForCampaign,
   listOtherActiveLeadsForCollisionNotice,
+  listRecentLeadsForClient,
 } from './leads'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -414,5 +415,63 @@ describe('listOtherActiveLeadsForCollisionNotice', () => {
     await expect(
       listOtherActiveLeadsForCollisionNotice(supabase, 'case1', 'triggeringLead'),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+function mockRecentLeads(result: { data: unknown; error: unknown }) {
+  return {
+    from: () => ({
+      select: () => ({
+        order: () => ({
+          limit: () => Promise.resolve(result),
+        }),
+      }),
+    }),
+  } as never
+}
+
+describe('listRecentLeadsForClient', () => {
+  it('should return mapped recent leads when the query succeeds', async () => {
+    const supabase = mockRecentLeads({
+      data: [
+        {
+          id: 'lead1',
+          full_name: 'Jane Doe',
+          title: 'VP Sales',
+          company_name: 'Acme',
+          company_domain: 'acme.com',
+          status: 'active',
+          email_status: 'verified',
+          case_id: 'case1',
+          created_at: '2026-08-10T00:00:00Z',
+        },
+      ],
+      error: null,
+    })
+    const result = await listRecentLeadsForClient(supabase, { limit: 5 })
+    expect(result).toEqual([
+      {
+        id: 'lead1',
+        fullName: 'Jane Doe',
+        title: 'VP Sales',
+        companyName: 'Acme',
+        companyDomain: 'acme.com',
+        status: 'active',
+        emailStatus: 'verified',
+        caseId: 'case1',
+        createdAt: '2026-08-10T00:00:00Z',
+      },
+    ])
+  })
+
+  it('should return an empty array when there are no leads', async () => {
+    const supabase = mockRecentLeads({ data: [], error: null })
+    const result = await listRecentLeadsForClient(supabase, { limit: 5 })
+    expect(result).toEqual([])
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    const supabase = mockRecentLeads({ data: null, error: { message: 'boom' } })
+    await expect(listRecentLeadsForClient(supabase, { limit: 5 })).rejects.toBeInstanceOf(AppError)
   })
 })

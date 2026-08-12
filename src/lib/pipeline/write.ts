@@ -97,6 +97,28 @@ const FIXED_GUARDRAILS = [
   'No bulk markers, no unsubscribe footer, no tracking language.',
   'Use only facts present in the provided dossier or company knowledge below. Never invent a name,',
   'a year, a location, or any other specific you were not given.',
+  // Added 2026-08-11 after a report on Uniforms Fashion's hospital leads found
+  // the model picking a reputational (news) fact — a trustee election — over a
+  // sharper operational one that was ranked ahead of it by
+  // DOSSIER_KIND_PRIORITY. Kind alone doesn't capture sales relevance; this
+  // rule applies to every client on every style, not just this one, since any
+  // dossier can mix reputational and operational facts within the same kind.
+  'When multiple dossier facts share the same kind, prefer the one implying a concrete',
+  'operational change — expansion, new facility, funding round, contract win, leadership',
+  'change tied to strategy, hiring surge, compliance or inspection event — over one that is',
+  'merely reputational, like an award, a conference appearance, a board seat, or a media',
+  'profile. The former gives a real reason to reach out now; the latter does not.',
+  // Added 2026-08-11, same report: the strongest fact for one lead was a
+  // hospital's 2020 near-closure and financial instability, and the model
+  // silently dropped it for a weaker fact rather than cite it — a reasonable
+  // instinct with no instruction to act on safely. Global because any
+  // client's dossier can surface a fact that's unflattering to the recipient.
+  'If the strongest available dossier fact is negative about the recipient\'s organization —',
+  'financial distress, layoffs, low ratings, understaffing, a lawsuit, a data breach, a',
+  'closure — never restate the negative fact directly; naming it back to the recipient reads',
+  'as an insult, not research. Reference the neutral operational condition it implies instead,',
+  'without naming the negative event itself, or fall back to the next-strongest fact if no',
+  'tactful phrasing exists.',
   // Merged in from a survey of public cold-email system prompts (Utopian Labs'
   // cold-email-1, the "Sales Cold Email Coach" GPT, Artisan/Ava's hallucination-
   // suppression framing, cupel-cloud's Claude-SDR copy frameworks) — the three

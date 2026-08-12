@@ -18,6 +18,7 @@
     "toggleTheme": "Renk temasını değiştir"
   },
   "nav": {
+    "home": "Ana Sayfa",
     "pipeline": "Fırsatlar",
     "inbox": "Gelen Kutusu",
     "mail": "E-posta",
@@ -28,6 +29,36 @@
     "settings": "Ayarlar",
     "awaitingYou": "{count} işlem bekliyor",
     "signOut": "Çıkış yap"
+  },
+  "home": {
+    "pageTitle": "Ana Sayfa",
+    "description": "Fırsat hattınızın şu anki durumu.",
+    "errorTitle": "Ana sayfaya ulaşılamıyor",
+    "errorDescription": "Panonuz yüklenemedi. Hiçbir şey etkilenmedi.",
+    "tile": {
+      "leadsFound": "Bulunan kişi",
+      "emailsSent": "Gönderilen e-posta",
+      "replies": "Yanıtlar",
+      "activeCampaigns": "Aktif kampanya"
+    },
+    "sectionNeedsAction": "Sizi bekleyenler",
+    "allCaughtUpTitle": "Bekleyen işlem yok",
+    "allCaughtUpDescription": "Şu anda sizi bekleyen bir şey yok.",
+    "needsActionTitle": "Sizi bekliyor",
+    "draftsCount": "{count, plural, other {# taslak}}",
+    "questionsCount": "{count, plural, other {# soru}}",
+    "sectionCampaigns": "Kampanyalar",
+    "sectionLatestLeads": "Son bulunan kişiler",
+    "sectionRecentMail": "Son e-postalar",
+    "viewAllMail": "Tümünü gör",
+    "emptyCampaignsTitle": "Henüz kampanya yok",
+    "emptyCampaignsDescription": "Operatörünüz henüz bir tane oluşturmadı. Bir kampanya çalışmaya başladığında tekrar kontrol edin.",
+    "emptyLeadsTitle": "Henüz kişi yok",
+    "emptyLeadsDescription": "Keşif yeni kişiler bulduğunda burada görünecek.",
+    "emptyMailTitle": "Henüz gönderilmiş e-posta yok",
+    "emptyMailDescription": "Ajan iletişime geçtiğinde gönderilen mesajlar burada görünecek.",
+    "noCase": "Henüz bir vakaya bağlı değil",
+    "noSubject": "(konu yok)"
   },
   "settings": {
     "errorTitle": "Ayarlara ulaşılamıyor",
