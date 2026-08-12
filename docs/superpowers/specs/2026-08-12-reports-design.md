@@ -18,7 +18,8 @@ the founder to everyone with dashboard access at that client.
 Client-facing feature. No operator UI in v1 (explicit decision — see
 Out of Scope). Two new database tables, three new pipeline routes, two new
 QStash schedules, one new client-facing route group, one new outbound mailer
-fully independent of the cold-outreach mailbox system.
+fully independent of the cold-outreach mailbox system, and a no-AI fake-data
+preview script (§10) for checking real rendering before it ships.
 
 ---
 
@@ -216,8 +217,8 @@ runs these steps in order, so the status column always reflects reality even
 if a later step fails:
 
 1. Compute `period_start`/`period_end` for `type` (§1).
-2. Upsert the `reports` row on `(client_id, type, period_start)`,
-   `status = 'generating'`.
+2. `upsertReport(admin, row)` — upserts the `reports` row on
+   `(client_id, type, period_start)`, `status = 'generating'`.
 3. Compute the metrics snapshot (§3) — `getOverviewMetrics` +
    `getDailyMetrics`, plus `weeklyBreakdown` if `type = 'monthly'`.
 4. Generate AI commentary (§4), falling back to the templated summary on
@@ -661,6 +662,63 @@ external service):
   the correct individual weekly reports; the notification email arrives
   from `Shengul Yavuz <shengul@shengulai.com>`, BCC'd to the same address;
   an operator hitting `/reports` directly still redirects to `/crm`.
+
+---
+
+## 10. Dev preview script
+
+`scripts/test-fake-report.ts` — same category as the existing
+`scripts/test-fake-email.ts` (fully synthetic data, `.env.local` loaded then
+app modules dynamically imported, per that file's own documented pattern),
+run manually via `pnpm test-fake-report`. Purpose: see the actual rendered
+output — email **and** the report page it links to — before this ships,
+without spending an LLM call or waiting for a real cron tick.
+
+Unlike `test-fake-email.ts` (prints to console, touches nothing), this one
+does write real `reports` rows through the real `upsertReport()` — the
+"View Full Report" link in a fake email must resolve to a real page with
+real charts, or the preview doesn't show the thing that matters most. It
+never calls `generateReportCommentary` (no AI call, per your ask) and never
+runs real recipient resolution — every email goes to one hardcoded address.
+
+```
+pnpm test-fake-report                    # both types, demo client
+pnpm test-fake-report --type=weekly      # --type=weekly|monthly|both, default both
+pnpm test-fake-report --client-id=<uuid> # default: getOrCreateOperatorClient()
+```
+
+Flow:
+
+1. Resolve the target client — `getOrCreateOperatorClient(admin)` by
+   default (the same stable demo client `seed-operator.ts` already uses),
+   or `--client-id` if passed.
+2. Insert 4 backdated fake **weekly** `reports` rows (1–4 weeks ago),
+   `status: 'ready'`, no email sent — these exist purely so the monthly
+   preview's weekly-recap table (§5) has real rows to show and link to,
+   matching what it would look like after a month of real weekly runs.
+3. Insert 1 current-week fake weekly report and send its preview email.
+4. Insert 1 fake monthly report — `weeklyBreakdown` built from the 4 rows
+   in step 2, exactly as `generateReport()` would — and send its preview
+   email.
+5. Print a summary table to the console: type, report id, `/reports/{id}`
+   URL, whether an email was sent for that row.
+
+Fake data, both local to this script (never touching the real pipeline):
+
+- `buildFakeMetricsSnapshot(type, periodStart, periodEnd)` — plausible
+  random `overview` totals and a `daily` entry for every day in the period,
+  so the chart in §5 has something real to draw instead of a flat line.
+- `FAKE_COMMENTARY` — one hardcoded `{ headline, summary, highlights }`
+  standing in for `generateReportCommentary`'s output.
+
+Sends through the real `lib/reports/mailer.ts` and the real rotating
+templates in `lib/reports/email-templates.ts` (§6) — the point is to see
+production rendering, not an approximation of it — with `to` hardcoded to
+`shengul@shengulai.com` instead of running recipient resolution (§6). Never
+calls or modifies `generateReport()`; it composes the same lower-level
+building blocks standalone, matching how `test-fake-email.ts` calls
+`buildSystemPrompt`/`buildPrompt`/`generateJson` directly rather than going
+through the real pipeline orchestrator.
 
 ---
 
