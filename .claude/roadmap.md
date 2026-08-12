@@ -4689,3 +4689,72 @@ full-width strip, and a mail section rendering full `EmailMessage` bodies
 
 **Verified:** `pnpm typecheck && pnpm lint && pnpm test` (202 files, 2206
 tests, all passing, including `messages.test.ts` key-parity).
+
+---
+
+## Uniforms Fashion School Emails — Irrelevant Hooks Root Cause + Fix — 2026-08-12
+
+**Trigger:** operator flagged the last 4 generated school-lead emails
+(Uniforms Fashion, "Okullar" campaign) as low quality despite the 0038
+formal-intro fixes landing the day before.
+
+**Root cause investigation** (pulled the actual 8 most-recent generated
+emails + their dossiers straight from Supabase, not just re-reading the
+prompt):
+- Several "hooks" were grammatically connected but logically irrelevant to
+  uniforms — a Pre-KG tuition discount, a Group Head of Finance's 2023
+  departure, a TEDx event — because nothing in the pipeline ever judges a
+  dossier fact for relevance to what the client actually sells.
+  `DOSSIER_KIND_PRIORITY` (`write.ts`) and the "prefer operational change
+  over reputational" tiebreaker (`FIXED_GUARDRAILS`, added 2026-08-11) both
+  rank by kind/recency only — a fact can satisfy both and still have zero
+  bearing on apparel procurement.
+  - Traced deeper: `research/agent.ts`'s gather prompts
+    (`companyGatherPrompt`/`personGatherPrompt`) told the agent only the
+    *target* company's name — never who the research was *for* or what
+    that client sells. The agent had no way to prefer a uniforms-relevant
+    fact over an unrelated one, because it didn't know uniforms were the
+    business.
+  - Two emails also invented a claim beyond the dossier ("you may be
+    reviewing vendor contracts," "remains essential") — a direct violation
+    of the existing "never add a claim... that invents something the
+    dossier does not say" guardrail, and one isolated a bare firmographic
+    fact into its own flat sentence, the exact pattern the 0038 migration
+    was meant to have fixed. Both point at partial instruction compliance
+    at `thinkingLevel: 'low'` against a very long combined prompt
+    (`FIXED_GUARDRAILS` + a style's `voice_instructions` is ~900 words of
+    hard rules).
+
+**Fixes:**
+- [x] `write.ts`: `thinkingLevel` for the email-writer call reverted
+      `'low'` → `'medium'` (was dropped 2026-08-10 for cost/latency and
+      likely contributed to the isolated-fact regression holding
+      inconsistently). `scripts/test-fake-email.ts` updated to match — it
+      explicitly claims to mirror `write.ts`'s real call.
+- [x] New `SellerContext` type (`research/agent.ts`): `{ name, companyInfo,
+      valueProp }` — who the research is for and what they sell, threaded
+      through `RunResearchInput` (`pipeline/research.ts`) →
+      `runResearchAgent` → both gather prompts. `COMPANY_GATHER_SYSTEM` /
+      `PERSON_GATHER_SYSTEM` gained a "Who you're researching for" section
+      instructing the agent to weigh a fact's relevance to the seller's
+      offering, not just its recency/newsworthiness; the per-call prompt
+      now states the seller's name, value prop, and company info (omits
+      itself entirely when the client row/value prop is missing, so
+      research never blocks on it).
+- [x] `api/pipeline/research/route.ts`: now fetches the client row
+      (`getClientById`) and passes `{ name, company_info }` plus the
+      campaign's `value_prop` as `seller` into `runResearchForCase` —
+      previously the route never loaded the client row at all.
+
+**Not changed this pass:** extraction (`EXTRACT_SYSTEM`) still has no
+seller context — the ask was specifically about who the agent does
+*search* for, and the gather step is where notes get written in the first
+place; defense-in-depth at extraction is a candidate follow-up if
+irrelevant hooks still surface after this.
+
+**Verified:** `pnpm typecheck` clean; full `vitest run` — 202 files, 2211
+tests, all passing (including new coverage: seller-context-in-prompt /
+seller-context-omitted-when-empty in `agent.test.ts`, seller-passthrough in
+`research.test.ts`, client-fetched-and-passed / missing-client-degrades in
+`route.test.ts`, and the `write.test.ts` thinking-level assertion flipped
+to `'medium'`). `eslint` clean on every touched file.

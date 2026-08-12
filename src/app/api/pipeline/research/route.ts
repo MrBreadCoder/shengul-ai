@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getCaseById, updateCaseStatus } from '@/lib/db/cases'
 import { listActiveLeadsForCase } from '@/lib/db/leads'
 import { getCampaignForCase } from '@/lib/db/campaigns'
+import { getClientById } from '@/lib/db/clients'
 import { runResearchForCase } from '@/lib/pipeline/research'
 import { brightdataResearch } from '@/lib/research/brightdata'
 import { isAppError } from '@/lib/errors/app-error'
@@ -44,6 +45,11 @@ export async function POST(request: Request) {
     // Every active lead on a case shares one company, so any lead's `raw`
     // carries the same Apollo org match — the first lead is enough.
     const companyFirmographics = leads[0] ? parseCompanyFirmographicsFromRaw(leads[0].raw) : null
+    // Missing client row never blocks research — same "degrade, don't
+    // fail" stance write.ts takes for the same lookup — the agent just gets
+    // less to filter against (sellerContextLine omits itself when every
+    // field is null).
+    const client = await getClientById(admin, kase.client_id)
     const summary = await runResearchForCase(
       admin,
       { research: brightdataResearch },
@@ -54,6 +60,11 @@ export async function POST(request: Request) {
         companyDomain: kase.company_domain,
         companyFirmographics,
         leads: leads.map((l) => ({ fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url })),
+        seller: {
+          name: client?.name ?? null,
+          companyInfo: client?.company_info ?? null,
+          valueProp: campaign.value_prop,
+        },
       },
     )
     return NextResponse.json({ ok: true, summary })

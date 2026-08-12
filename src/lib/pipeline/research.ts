@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import type { WebResearch, ResearchLead } from '@/lib/research/provider'
-import { runResearchAgent, type ResearchAgentRole, type AgentDossierEntry } from '@/lib/research/agent'
+import { runResearchAgent, type ResearchAgentRole, type AgentDossierEntry, type SellerContext } from '@/lib/research/agent'
 import { insertKnowledge, type KnowledgeInsert } from '@/lib/db/case-knowledge'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
@@ -21,6 +21,11 @@ export interface RunResearchInput {
   // the company research agent as an unverified claim to check, not a fact.
   companyFirmographics: CompanyFirmographics | null
   leads: ResearchLead[]
+  // Who the research is for and what they sell — passed straight through to
+  // every agent call so it can judge fact relevance instead of just ranking
+  // "newsiest." See SellerContext's own comment for why this regressed
+  // dossiers before it existed.
+  seller: SellerContext
 }
 
 export interface ResearchSummary {
@@ -100,7 +105,7 @@ export async function runResearchForCase(
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
 
   const results = await Promise.allSettled(
-    roles.map((role) => runResearchAgent(context, deps, { role })),
+    roles.map((role) => runResearchAgent(context, deps, { role, seller: input.seller })),
   )
 
   const entries: AgentDossierEntry[] = []

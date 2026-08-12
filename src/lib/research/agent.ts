@@ -38,6 +38,24 @@ export type ResearchAgentRole =
     }
   | { kind: 'person'; lead: ResearchLead; companyName: string; companyDomain: string | null }
 
+// Who the agent is researching *for* — the client running the campaign, not
+// the subject being researched (that's ResearchAgentRole). Named `seller*`
+// rather than `client*`/`company*` so it can never be confused with the
+// research subject's own `companyName` field above. Without this the agent
+// has no way to judge whether a fact it finds (a tuition discount, a
+// personnel departure, a conference talk) has any bearing on what's being
+// sold — it just ranks "newsiest" over "sells-relevant", which is how
+// dossiers ended up citing facts with zero connection to the client's
+// product as if they were personalization hooks (see .claude/roadmap.md
+// 2026-08-12). All three fields are optional because a client can be
+// missing `company_info` or a campaign's `value_prop` can theoretically be
+// empty — the agent still researches, just with less to filter against.
+export interface SellerContext {
+  name: string | null
+  companyInfo: string | null
+  valueProp: string | null
+}
+
 const entrySchema = z.object({
   kind: z.enum(['company', 'person', 'news', 'pain_point']),
   content: z.string().min(1),
@@ -62,6 +80,9 @@ This is Apollo's confirmed org match — trusted background, not something you n
 ## Grounding discipline
 Before writing a fact down, trace it to the specific search result or scraped page that stated it. If you cannot point to that source, leave the fact out — do not guess, round, extrapolate, or fill a gap with something plausible. A shorter, fully-sourced set of notes beats a longer one with invented details.
 
+## Who you're researching for
+You'll be told, below, who you're researching this company on behalf of and what that seller sells. Use it to judge relevance: a fact only belongs in your notes as a personalization hook if it plausibly bears on whether this target company would want that seller's offering — an operational change, expansion, or event that touches the actual thing being sold. A fact can be true, recent, and "newsworthy" and still be irrelevant to this outreach (an unrelated tuition discount, an executive's award, a conference appearance with no bearing on the product) — note those only as plain background, never as your headline finding, and don't let them crowd out a smaller but genuinely relevant fact.
+
 ## When to stop
 Stop once you have enough for a genuinely useful, differentiated profile — not everything you could theoretically find. Keep notes concise, and record the exact URL each fact came from next to the fact.`
 
@@ -78,6 +99,9 @@ This is Apollo's own match for this person — scrape it first as your starting 
 
 ## Grounding discipline
 Before writing a fact down, trace it to the specific search result or scraped page that stated it. If you cannot point to that source, leave the fact out. Treat numeric or biographical claims from data-broker profile pages (RocketReach, ZoomInfo, and similar) as unverified unless a primary source corroborates them — carry that uncertainty into the note rather than presenting the claim as confirmed.
+
+## Who you're researching for
+You'll be told, below, who you're researching this person on behalf of and what that seller sells. Use it to judge relevance: the goal is a fact about this person's own activity that plausibly connects to whether their organization would want the seller's offering — not just any public detail about them. A genuinely personal fact with no bearing on that (an unrelated hobby, an award for something unconnected to the seller's product) is weaker than it looks; prefer a smaller but relevant fact over a bigger but unrelated one.
 
 ## When to stop
 Stop once you have one or two genuinely sourced personalization hooks — not every fact you can find about this person. Keep notes concise, and record the exact URL each fact came from next to the fact.`
@@ -107,38 +131,55 @@ function formatFirmographicsLine(f: CompanyFirmographics): string | null {
   return parts.length > 0 ? parts.join('; ') : null
 }
 
-function companyGatherPrompt(role: Extract<ResearchAgentRole, { kind: 'company' }>): string {
+// Shared by both gather prompts — same section, same wording, so relevance
+// judgment doesn't drift between the company and person research paths.
+// Omits itself entirely when the seller has told us nothing at all (every
+// field null), rather than emitting an empty "You are researching on
+// behalf of:" line.
+function sellerContextLine(seller: SellerContext): string | null {
+  if (!seller.name && !seller.companyInfo && !seller.valueProp) return null
+  const parts = [`You are researching this subject on behalf of ${seller.name ?? 'our client'}.`]
+  if (seller.valueProp) parts.push(`What they sell: ${seller.valueProp}.`)
+  if (seller.companyInfo) parts.push(`About them: ${seller.companyInfo}`)
+  return parts.join(' ')
+}
+
+function companyGatherPrompt(role: Extract<ResearchAgentRole, { kind: 'company' }>, seller: SellerContext): string {
   const subject = `Company: ${role.companyName}${role.companyDomain ? ` (${role.companyDomain})` : ''}`
   const firmographicsLine = role.firmographics ? formatFirmographicsLine(role.firmographics) : null
   const applyContext = firmographicsLine
     ? `Apollo's own match for this company (background context — use it to focus your research): ${firmographicsLine}.`
     : null
   const instruction = 'Research this subject using the search and scrape tools, then write your research notes.'
-  return [subject, applyContext, instruction].filter((line): line is string => line !== null).join('\n\n')
+  return [subject, sellerContextLine(seller), applyContext, instruction]
+    .filter((line): line is string => line !== null)
+    .join('\n\n')
 }
 
-function personGatherPrompt(role: Extract<ResearchAgentRole, { kind: 'person' }>): string {
+function personGatherPrompt(role: Extract<ResearchAgentRole, { kind: 'person' }>, seller: SellerContext): string {
   const subject = `Person: ${role.lead.fullName}${role.lead.title ? `, ${role.lead.title}` : ''} at ${role.companyName}`
   const knownProfile = role.lead.linkedinUrl
     ? `Known LinkedIn profile from Apollo: ${role.lead.linkedinUrl} — start here.`
     : null
   const instruction = 'Research this subject using the search and scrape tools, then write your research notes.'
-  return [subject, knownProfile, instruction].filter((line): line is string => line !== null).join('\n\n')
+  return [subject, sellerContextLine(seller), knownProfile, instruction]
+    .filter((line): line is string => line !== null)
+    .join('\n\n')
 }
 
-function gatherPrompt(role: ResearchAgentRole): string {
-  return role.kind === 'company' ? companyGatherPrompt(role) : personGatherPrompt(role)
+function gatherPrompt(role: ResearchAgentRole, seller: SellerContext): string {
+  return role.kind === 'company' ? companyGatherPrompt(role, seller) : personGatherPrompt(role, seller)
 }
 
 export async function runResearchAgent(
   context: LlmCallContext,
   deps: { research: WebResearch },
-  args: { role: ResearchAgentRole },
+  args: { role: ResearchAgentRole; seller: SellerContext },
 ): Promise<AgentDossierEntry[]> {
-  const { role } = args
+  const { role, seller } = args
   const notes = await generateWithTools(context, {
     instructions: role.kind === 'company' ? COMPANY_GATHER_SYSTEM : PERSON_GATHER_SYSTEM,
-    prompt: gatherPrompt(role),
+    prompt: gatherPrompt(role, seller),
     tools: buildResearchTools(deps, context),
     maxSteps: GATHER_STEPS,
     maxOutputTokens: GATHER_MAX_OUTPUT_TOKENS,

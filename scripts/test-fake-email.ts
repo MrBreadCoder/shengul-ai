@@ -290,7 +290,7 @@ async function main(): Promise<void> {
       modelId: deps.EMAIL_WRITER_MODEL_ID,
       // Matches write.ts's real processLead() thinking level exactly, so this
       // output stays representative of what the live pipeline actually generates.
-      thinkingLevel: 'low',
+      thinkingLevel: 'medium',
     },
   )
 

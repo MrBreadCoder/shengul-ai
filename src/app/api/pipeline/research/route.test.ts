@@ -5,6 +5,7 @@ const getCaseByIdMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
 const listActiveLeadsMock = vi.fn()
 const getCampaignForCaseMock = vi.fn()
+const getClientByIdMock = vi.fn()
 const runResearchMock = vi.fn()
 
 vi.mock('@/lib/qstash/verify', () => ({ verifyQstashSignature: (...a: unknown[]) => verifyMock(...a) }))
@@ -15,6 +16,7 @@ vi.mock('@/lib/db/cases', () => ({
 }))
 vi.mock('@/lib/db/leads', () => ({ listActiveLeadsForCase: (...a: unknown[]) => listActiveLeadsMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
+vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/pipeline/research', () => ({ runResearchForCase: (...a: unknown[]) => runResearchMock(...a) }))
 vi.mock('@/lib/research/brightdata', () => ({ brightdataResearch: { search: vi.fn() } }))
 const logErrorMock = vi.fn()
@@ -32,6 +34,7 @@ beforeEach(() => {
   verifyMock.mockReset().mockResolvedValue(JSON.stringify({ caseId: CASE_ID }))
   getCaseByIdMock.mockReset(); updateCaseStatusMock.mockReset()
   listActiveLeadsMock.mockReset(); getCampaignForCaseMock.mockReset(); runResearchMock.mockReset()
+  getClientByIdMock.mockReset().mockResolvedValue({ id: 'c1', name: 'Acme Seller', company_info: 'Sells widgets.' })
   logErrorMock.mockReset()
 })
 
@@ -46,6 +49,37 @@ describe('POST /api/pipeline/research', () => {
     expect(res.status).toBe(200)
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'researching')
     expect(runResearchMock).toHaveBeenCalled()
+  })
+
+  it('should fetch the client and pass its info as seller context to research', async () => {
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com' })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: 'Custom widgets', status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    runResearchMock.mockResolvedValue({ caseId: CASE_ID, knowledgeCount: 0 })
+    await POST(req({ caseId: CASE_ID }))
+    expect(getClientByIdMock).toHaveBeenCalledWith(expect.anything(), 'c1')
+    expect(runResearchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        seller: { name: 'Acme Seller', companyInfo: 'Sells widgets.', valueProp: 'Custom widgets' },
+      }),
+    )
+  })
+
+  it('should still run research with degraded seller context when the client row is missing', async () => {
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com' })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: null, status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    getClientByIdMock.mockResolvedValue(null)
+    runResearchMock.mockResolvedValue({ caseId: CASE_ID, knowledgeCount: 0 })
+    const res = await POST(req({ caseId: CASE_ID }))
+    expect(res.status).toBe(200)
+    expect(runResearchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ seller: { name: null, companyInfo: null, valueProp: null } }),
+    )
   })
 
   it('should skip when the case is not new', async () => {

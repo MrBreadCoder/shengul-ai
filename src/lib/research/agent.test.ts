@@ -12,6 +12,7 @@ import { runResearchAgent } from './agent'
 
 const context = { clientId: 'c1', caseId: 'case1', actor: 'research_agent' }
 const research = { search: vi.fn(), scrape: vi.fn() }
+const seller = { name: 'Acme Seller', companyInfo: 'Acme Seller makes widgets.', valueProp: 'Custom widgets for factories' }
 
 beforeEach(() => { generateWithToolsMock.mockReset(); generateJsonMock.mockReset() })
 
@@ -22,6 +23,7 @@ describe('runResearchAgent', () => {
       entries: [{ kind: 'company', content: 'Builds widgets', sourceUrl: 'https://acme.com', citation: 'site' }],
     })
     const entries = await runResearchAgent(context, { research }, {
+      seller,
       role: { kind: 'company', companyName: 'Acme', companyDomain: 'acme.com', firmographics: null },
     })
     expect(entries).toEqual([
@@ -36,6 +38,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     expect(generateWithToolsMock).toHaveBeenCalledWith(
@@ -48,6 +51,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('Jane Doe is CTO, spoke at a conference.')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: {
         kind: 'person',
         lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null },
@@ -64,6 +68,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     expect(generateJsonMock).toHaveBeenCalledWith(
@@ -76,6 +81,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('nothing notable')
     generateJsonMock.mockResolvedValue({ entries: [] })
     const entries = await runResearchAgent(context, { research }, {
+      seller,
       role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     expect(entries).toEqual([])
@@ -85,6 +91,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: {
         kind: 'company',
         companyName: 'Acme',
@@ -104,6 +111,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
     })
     const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
@@ -114,6 +122,7 @@ describe('runResearchAgent', () => {
     generateWithToolsMock.mockResolvedValue('notes')
     generateJsonMock.mockResolvedValue({ entries: [] })
     await runResearchAgent(context, { research }, {
+      seller,
       role: {
         kind: 'person',
         lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: 'https://linkedin.com/in/janedoe' },
@@ -124,5 +133,29 @@ describe('runResearchAgent', () => {
     const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
     expect(gatherPrompt).toContain('https://linkedin.com/in/janedoe')
     expect(gatherPrompt).toContain('start here')
+  })
+
+  it('should tell the agent who it is researching for and what they sell', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      seller,
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
+    })
+    const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
+    expect(gatherPrompt).toContain('Acme Seller')
+    expect(gatherPrompt).toContain('Custom widgets for factories')
+    expect(gatherPrompt).toContain('Acme Seller makes widgets.')
+  })
+
+  it('should omit the seller-context section when the seller has told us nothing', async () => {
+    generateWithToolsMock.mockResolvedValue('notes')
+    generateJsonMock.mockResolvedValue({ entries: [] })
+    await runResearchAgent(context, { research }, {
+      seller: { name: null, companyInfo: null, valueProp: null },
+      role: { kind: 'company', companyName: 'Acme', companyDomain: null, firmographics: null },
+    })
+    const gatherPrompt = generateWithToolsMock.mock.calls[0]?.[1].prompt as string
+    expect(gatherPrompt).not.toContain('researching this subject on behalf of')
   })
 })

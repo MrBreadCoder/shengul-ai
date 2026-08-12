@@ -22,6 +22,7 @@ const input = {
   clientId: 'c1', caseId: 'case1', companyName: 'Acme', companyDomain: 'acme.com',
   companyFirmographics: null,
   leads: [{ fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null }],
+  seller: { name: 'Seller Co', companyInfo: 'Makes widgets.', valueProp: 'Custom widgets' },
 }
 
 beforeEach(() => {
@@ -57,6 +58,19 @@ describe('runResearchForCase', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ role: expect.objectContaining({ kind: 'company' }) }),
+    )
+  })
+
+  it('should pass the seller context through to the research agent', async () => {
+    runResearchAgentMock.mockResolvedValueOnce([{ kind: 'company', content: 'x', sourceUrl: null, citation: null }])
+    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(runResearchAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ seller: input.seller }),
     )
   })
 

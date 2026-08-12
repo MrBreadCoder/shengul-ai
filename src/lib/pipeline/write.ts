@@ -195,11 +195,17 @@ async function processLead(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
-    // Dropped from 'medium' to 'low' (2026-08-10) — cost/latency trade-off.
-    // MAX_OUTPUT_TOKENS keeps its 2,600 headroom regardless: draftSchema has
-    // no null branch, so every call still owes a full subject + body even at
-    // 'low' (see the 2026-08-08 "No object generated" truncation bug).
-    thinkingLevel: 'low',
+    // Raised back 'low' -> 'medium' (2026-08-12): the 2026-08-10 cost/latency
+    // cut regressed email quality — FIXED_GUARDRAILS + a style's
+    // voice_instructions is a long, dense rulebook (isolated-fact avoidance,
+    // no-overclaim, relevance, tone), and 'low' thinking wasn't reliably
+    // holding all of it under real dossiers (see .claude/roadmap.md
+    // 2026-08-12). MAX_OUTPUT_TOKENS keeps its 2,600 headroom regardless:
+    // draftSchema has no null branch, so every call still owes a full
+    // subject + body even at 'low' (see the 2026-08-08 "No object
+    // generated" truncation bug) — that headroom reasoning is unaffected by
+    // the thinking-level choice.
+    thinkingLevel: 'medium',
   })
 
   // Deterministic — never left to the model's discretion. Appended here,
