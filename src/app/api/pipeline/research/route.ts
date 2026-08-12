@@ -9,12 +9,20 @@ import { getClientById } from '@/lib/db/clients'
 import { runResearchForCase } from '@/lib/pipeline/research'
 import { brightdataResearch } from '@/lib/research/brightdata'
 import { isAppError } from '@/lib/errors/app-error'
+import { isModelOverloadedError } from '@/lib/llm/client'
+import { handleModelOverload } from '@/lib/pipeline/overload-retry'
 import { logError } from '@/lib/events/log-event'
 import { parseCompanyFirmographicsFromRaw } from '@/lib/apollo/format-company-summary'
 
 export const runtime = 'nodejs'
 
-const bodySchema = z.object({ caseId: z.string().uuid() })
+const bodySchema = z.object({
+  caseId: z.string().uuid(),
+  // Absent on the first attempt (fanout/direct-trigger publishes never set
+  // it) — only present when this delivery is itself an overload long-retry
+  // scheduled by handleModelOverload below.
+  retryCount: z.number().int().min(0).optional(),
+})
 
 export async function POST(request: Request) {
   // Captured as the handler progresses so the catch block can attribute the
@@ -50,24 +58,44 @@ export async function POST(request: Request) {
     // less to filter against (sellerContextLine omits itself when every
     // field is null).
     const client = await getClientById(admin, kase.client_id)
-    const summary = await runResearchForCase(
-      admin,
-      { research: brightdataResearch },
-      {
-        clientId: kase.client_id,
-        caseId,
-        companyName: kase.company_name,
-        companyDomain: kase.company_domain,
-        companyFirmographics,
-        leads: leads.map((l) => ({ fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url })),
-        seller: {
-          name: client?.name ?? null,
-          companyInfo: client?.company_info ?? null,
-          valueProp: campaign.value_prop,
+
+    try {
+      const summary = await runResearchForCase(
+        admin,
+        { research: brightdataResearch },
+        {
+          clientId: kase.client_id,
+          caseId: parsedBody.caseId,
+          companyName: kase.company_name,
+          companyDomain: kase.company_domain,
+          companyFirmographics,
+          leads: leads.map((l) => ({ fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url })),
+          seller: {
+            name: client?.name ?? null,
+            companyInfo: client?.company_info ?? null,
+            valueProp: campaign.value_prop,
+          },
         },
-      },
-    )
-    return NextResponse.json({ ok: true, summary })
+      )
+      return NextResponse.json({ ok: true, summary })
+    } catch (researchError) {
+      // A Gemini overload gets a long, delayed retry instead of the normal
+      // failure path — see overload-retry.ts. Every other failure falls
+      // through to the outer catch unchanged (case stays 'researching' for
+      // stuck-sweep to eventually recover).
+      if (!isModelOverloadedError(researchError)) throw researchError
+      const outcome = await handleModelOverload({
+        path: '/api/pipeline/research',
+        caseId: parsedBody.caseId,
+        clientId,
+        actor: 'system',
+        eventPrefix: 'pipeline.research',
+        retryCount: parsedBody.retryCount ?? 0,
+        error: researchError,
+        revert: () => updateCaseStatus(admin, parsedBody.caseId, 'new'),
+      })
+      return NextResponse.json({ ok: true, overload: outcome })
+    }
   } catch (error) {
     if (isAppError(error) && error.code === 'UNAUTHORIZED') {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })

@@ -165,6 +165,16 @@ describe('sendManualEmail — first touch', () => {
     await sendManualEmail(form())
     expect(updateCaseStatus).not.toHaveBeenCalled()
   })
+
+  it('should still advance to contacted when the automated write pipeline has the case claimed as writing', async () => {
+    // Regression test: 'writing' (roadmap 2026-08-12) is a pre-contact
+    // status too — a manual first touch landing while the pipeline's own
+    // write attempt is in flight should still mark the case contacted,
+    // same as 'new'/'researching'/'ready'.
+    getCaseById.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'writing' })
+    await sendManualEmail(form())
+    expect(updateCaseStatus).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'contacted')
+  })
 })
 
 describe('sendManualEmail — interjection', () => {

@@ -5037,3 +5037,170 @@ implemented end-to-end. Remaining before the first real cron tick:
 `pnpm schedule-reports-weekly-cron` / `pnpm schedule-reports-monthly-cron`
 against that environment (needs `QSTASH_TOKEN`) — see the plan's
 "Post-implementation" section.
+
+## Pipeline latency: event-driven stage chaining — 2026-08-12
+
+**Trigger:** Shengul reported the live pipeline feels very slow — discover
+runs, then ~5 minutes later research runs, then ~5 minutes later write
+runs — making manual testing painful and drawing client complaints about
+turnaround time.
+
+**Root cause investigation:** `research-fanout` and `write-fanout`
+(`/api/pipeline/research-fanout`, `/api/pipeline/write-fanout`) are pure
+polling scans — `listCasesByStatus(supabase, 'new'|'ready', 200)` — run on
+independent `*/5 * * * *` QStash crons (`scripts/schedule-research-cron.ts`,
+`scripts/schedule-write-cron.ts`). Nothing in `group-lead.ts` (case reaches
+`new`) or `research.ts` (case reaches `ready`) ever notified the next
+stage directly — a case sat idle until the *next* cron tick noticed its
+status, up to ~5 minutes per hand-off (avg ~2.5 min). Chained across
+`new`→`ready`→`contacted`, that's up to ~10 minutes of pure idle polling
+on top of real processing time, matching exactly what was reported.
+`discover-fanout`'s own 5-minute tick is unrelated — it's a deliberate
+per-campaign daily-quota gate (`next_discover_at`), not part of this gap.
+
+**Pattern check:** the codebase already solves this correctly in two other
+places — `followup.ts`'s `scheduleFirstFollowup` enqueues the next
+follow-up step immediately after the DB write instead of polling, and
+`research.ts` already calls `enqueueCrmSync` (a best-effort `publishJson`
+wrapped in try/catch) right after marking a case `ready`. The fix mirrors
+that exact, already-proven pattern rather than introducing a new one.
+
+**Fix:**
+- [x] `group-lead.ts` (`groupVerifiedLead`): the instant a case is sitting
+      at `status === 'new'`, immediately `publishJson('/api/pipeline/research',
+      { caseId })`. Guarded on `'new'` so a later contact grouped into an
+      already-progressed case never re-triggers research. Publish failure
+      is caught and logged via `logWarn` (`pipeline.research_trigger_failed`)
+      — never thrown, so a QStash hiccup can't turn a successful discovery
+      run into a failure.
+- [x] `research.ts` (`runResearchForCase`): the instant a case is marked
+      `ready`, immediately `publishJson('/api/pipeline/write', { caseId })`,
+      same best-effort try/catch → `logWarn` (`pipeline.write_trigger_failed`).
+- [x] Both `research/route.ts` and `write/route.ts` already claim-guard on
+      `status !== 'new'/'ready'` before doing any work, so it's safe for the
+      new direct trigger and the periodic fanout to race on the same case —
+      whichever arrives first claims it, the second no-ops.
+- [x] `research-fanout`/`write-fanout` crons left unchanged at `*/5 * * * *`
+      — they're now a safety net (same role as `stuck-sweep`) for a failed
+      publish, not the primary trigger, so nothing regresses if a publish
+      is ever dropped.
+
+**Effect:** end-to-end stage-to-stage latency drops from "up to ~5 min of
+idle polling per hand-off" to "processing time + a sub-second QStash publish
+round trip" — seconds instead of minutes, for both live client campaigns
+and manual testing.
+
+**Verified:** `pnpm typecheck` clean; `pnpm lint` clean on all four touched
+files; full `vitest run` — 215 files, 2298 tests, all passing (6 new: 3 in
+`group-lead.test.ts` covering trigger-fires-on-new / no-trigger-when-not-new
+/ publish-failure-is-swallowed, 3 mirrored in `research.test.ts`).
+
+## False 'contacted' status on write failure + Gemini overload long-retry — 2026-08-12
+
+**Trigger:** Shengul reported two live issues: (1) when a pipeline error
+happens, a case can show `contacted` (or read as researched) even though no
+email actually went out / no research completed; (2) Gemini has started
+returning `503 UNAVAILABLE — high demand` this week, and asked whether the
+"only 2 retries" behavior could back off 5 minutes and retry again instead
+of failing outright.
+
+**Root cause investigation:**
+- `write/route.ts` claimed the case as `'contacted'` — its own terminal,
+  "done" status — *before* calling `runWriteForCase`. `research/route.ts`
+  does this correctly (claims the distinct in-progress `'researching'`,
+  only `runResearchForCase` sets the terminal `'ready'`, and only on real
+  success), but write had no equivalent in-progress status: `'contacted'`
+  was doing double duty as both "claimed, in progress" and "done". Any
+  failure mid-write (a Gemini error being the most common trigger this
+  week) left the case permanently reading `'contacted'` with zero emails
+  sent. `find_stuck_cases()` (0006) already knew this was ambiguous — its
+  own comment says so — and only self-heals it after a 30-minute cutoff +
+  up to a 15-minute sweep-tick lag, which is what was actually being
+  observed as "false status." Traced every path in `research.ts` for an
+  equivalent false-`'ready'` bug and found none — a failed research run
+  correctly stays at `'researching'`, never `'ready'`; what reads as
+  "says researched" is a case stuck at `'researching'` on the same
+  30-45-minute recovery clock, not a second version of the write bug.
+- Checked the Vercel AI SDK docs directly (not memory, via context7):
+  `generateObject`/`generateText` default to `maxRetries: 2` — confirming
+  Shengul's "I think we retry only 2 times" — all within seconds
+  (SDK-internal backoff), not configured anywhere in this codebase. Once
+  those 2 are exhausted, `llm/client.ts` immediately wrapped and rethrew —
+  zero application-level retry existed. The failure propagated straight to
+  the route, 500'd, and left the case claimed (compounding the bug above).
+  The only recovery was `stuck-sweep`'s 30+ minute cutoff — not 5 minutes,
+  and during a sustained Gemini "high demand" window that's the *actual*
+  cadence today: fast-fail in seconds, then silence for ~30-45 min, repeat.
+
+**Fixes:**
+- [x] Migration `0040_case_status_writing.sql` — `case_status` gains
+      `'writing'` (`after 'ready'`), a genuine in-progress claim mirroring
+      `'researching'`. Migration `0041_stuck_sweep_writing_status.sql` —
+      `find_stuck_cases()` gets a pure age-based `'writing'` branch
+      (mirrors `'researching'`'s branch); the old `'contacted'`-with-no-
+      step-0-email branch is kept as a backstop for cases already stranded
+      there from before this shipped, not removed. `src/types/database.ts`
+      updated to match.
+- [x] `write/route.ts` now claims `'writing'` instead of `'contacted'`;
+      `write.ts`'s own `updateCaseStatus(..., 'contacted')` at the end of
+      the leads loop is unchanged and is now the only place that ever sets
+      it. `stuck-sweep/route.ts`'s `requeueTarget` resets a stranded
+      `'writing'` case back to `'ready'`, same as it already did for
+      `'contacted'`.
+- [x] `PRE_CONTACT_STATUSES` (`cases/[id]/send-actions.ts`, manual
+      first-touch send) gained `'writing'` — a manual send landing while
+      the pipeline's own write attempt is in flight should still advance
+      the case to `'contacted'`, same as `'new'`/`'researching'`/`'ready'`.
+- [x] `src/lib/ui/status.ts` (`CASE_STATUS`), `src/app/globals.css`
+      (`--status-writing` in both light/dark themes, `--color-status-writing`
+      bridge var), and `src/lib/seed/generate.ts` (`CASE_PLANS` +
+      `CASE_STATUS_ORDER`) all updated for the new enum member — `tsc`'s
+      `Record<CaseStatus, ...>` exhaustiveness check caught every one of
+      these as compile errors, which is exactly how they were found.
+- [x] `llm/client.ts`: new `toLlmAppError` helper (replacing 4 duplicated
+      catch-block tails) preserves the AI SDK's `APICallError.statusCode`/
+      `.isRetryable` onto the thrown `AppError`'s context instead of
+      flattening it to a message string. New exported
+      `isModelOverloadedError(error)` — true for a 503/429 statusCode or
+      `isRetryable === true`, false for everything else (bad schema, auth,
+      invalid request — failures worth failing fast on, not retrying).
+- [x] New `src/lib/pipeline/overload-retry.ts` — `handleModelOverload()`:
+      reverts the route's in-progress claim, then schedules a delayed
+      QStash redelivery of the *same case to the same route* 5 minutes
+      later via `publishJsonWithDelay` (the same primitive `followup.ts`
+      already uses for its 3/7/14-day cadence — a serverless route can't
+      just `sleep(5 min)` in-process), incrementing a `retryCount` carried
+      in the message body. Capped at `MAX_OVERLOAD_RETRIES = 5` (~25 more
+      minutes of runway on top of the SDK's own fast retries) — past the
+      cap it gives up and leaves the case claimed for `stuck-sweep`'s
+      slower cadence, so a sustained outage decays to a slower retry
+      rhythm instead of hammering Gemini every 5 minutes forever. Never
+      throws — a revert or reschedule failure is logged and absorbed, not
+      allowed to mask the original error or crash the route.
+- [x] `research/route.ts` and `write/route.ts`: the call to
+      `runResearchForCase`/`runWriteForCase` is now wrapped in its own
+      try/catch. `isModelOverloadedError` true → `handleModelOverload`
+      (revert to `'new'`/`'ready'` respectively, long-retry) → `200` with
+      `{ overload: outcome }`, no `route_failed` log. Anything else →
+      rethrown to the existing outer catch, unchanged (`500`,
+      `route_failed` logged, case stays claimed for `stuck-sweep`). Both
+      route body schemas gained an optional `retryCount` field (absent on
+      a normal fanout/direct-trigger delivery; only present on an
+      overload-redelivered one).
+
+**Verified:** Confirmed the AI SDK's `maxRetries: 2` default via the
+official docs (context7 `/websites/ai-sdk_dev`), not assumed from memory.
+`pnpm typecheck` clean; `pnpm lint` clean on every touched file; full
+`vitest run` — 216 files, 2324 tests, all passing (26 new: `client.test.ts`
+overload-detection coverage, new `overload-retry.test.ts`, route-level
+overload-handling + `'writing'`-claim regression tests in
+`research/route.test.ts` / `write/route.test.ts`, a `'writing'` branch test
+in `stuck-sweep/route.test.ts`, and a `PRE_CONTACT_STATUSES` regression
+test in `send-actions.test.ts`). Migrations `0040`/`0041` are **unverified
+against a real Postgres** — Docker is unavailable in this sandbox, same
+caveat as every prior migration added from this environment — SQL was
+hand-checked against `0006`'s and `0011`'s already-applied, identically-
+shaped precedents (`ALTER TYPE ... ADD VALUE`, the `find_stuck_cases()`
+`UNION ALL` structure) but `supabase db push`/`migration up` needs to run
+for real before the first Gemini-overload case actually exercises this
+path in production.

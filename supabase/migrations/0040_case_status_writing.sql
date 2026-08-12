@@ -1,0 +1,18 @@
+-- Adds a real in-progress claim status for the write stage, mirroring
+-- 'researching' for the research stage. Root cause (roadmap 2026-08-12,
+-- "False 'contacted' status on write failure"): write/route.ts claimed
+-- 'contacted' BEFORE calling runWriteForCase, so any failure mid-write
+-- (most commonly a Gemini overload) left the case permanently reading
+-- 'contacted' with zero emails sent — 'contacted' was doing double duty as
+-- both "claimed, in progress" and "done", unlike research's 'researching'
+-- (claim) vs 'ready' (done) split. This value fixes that ambiguity at the
+-- source; write/route.ts and stuck-sweep/route.ts are updated in the next
+-- migration + application code to actually use it.
+--
+-- ALTER TYPE ... ADD VALUE is permitted inside a transaction on PG12+ so
+-- long as the new value is not *used* in the same transaction (see 0011's
+-- identical note) — nothing here references it, so this is safe under
+-- `supabase db push`. Placed with `after 'ready'` so the enum's natural
+-- ordering still reads as the real pipeline sequence: new -> researching ->
+-- ready -> writing -> contacted -> ...
+alter type case_status add value if not exists 'writing' after 'ready';

@@ -1202,6 +1202,7 @@ export interface Database {
         | 'new'
         | 'researching'
         | 'ready'
+        | 'writing'
         | 'contacted'
         | 'in_conversation'
         | 'hot_handoff'

@@ -15,11 +15,16 @@ const STUCK_THRESHOLD_MINUTES = 30
 const SWEEP_LIMIT = 100
 
 // Re-queuing is safe under the existing claims: 'researching' → 'new' re-runs
-// research (idempotent knowledge upserts); 'contacted' → 'ready' re-runs write,
-// where claimOutboundEmail dedupes already-sent leads so only un-emailed leads
-// get picked up — no double-send.
+// research (idempotent knowledge upserts); 'writing'/'contacted' → 'ready'
+// re-run write, where claimOutboundEmail dedupes already-sent leads so only
+// un-emailed leads get picked up — no double-send. 'writing' (added 0040) is
+// the normal in-progress write claim going forward; 'contacted' is kept only
+// as a backstop for cases stranded there from before that migration shipped
+// — see find_stuck_cases()'s own comment for why it needs the extra
+// no-step-0-email check that 'writing' doesn't.
 function requeueTarget(status: string): { resetTo: 'new' | 'ready'; path: string } | null {
   if (status === 'researching') return { resetTo: 'new', path: '/api/pipeline/research' }
+  if (status === 'writing') return { resetTo: 'ready', path: '/api/pipeline/write' }
   if (status === 'contacted') return { resetTo: 'ready', path: '/api/pipeline/write' }
   return null
 }

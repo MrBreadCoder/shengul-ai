@@ -1,8 +1,8 @@
-import { generateObject, generateText as sdkGenerateText, embedMany, isStepCount, type ToolSet } from 'ai'
+import { generateObject, generateText as sdkGenerateText, embedMany, isStepCount, APICallError, type ToolSet } from 'ai'
 import { createGoogle, type GoogleLanguageModelOptions } from '@ai-sdk/google'
 import type { z } from 'zod'
 import { env } from '@/lib/env'
-import { AppError } from '@/lib/errors/app-error'
+import { AppError, isAppError } from '@/lib/errors/app-error'
 import { logEventSafe, logError } from '@/lib/events/log-event'
 
 const MODEL_ID = 'gemini-3-flash-preview'
@@ -139,6 +139,38 @@ async function logLlmFailure(
   })
 }
 
+// Wraps a caught LLM-call failure as an AppError, preserving the underlying
+// APICallError's statusCode/isRetryable (when the SDK gave us one) onto the
+// AppError's context instead of flattening it to a message string — that's
+// what lets isModelOverloadedError below tell "Gemini is overloaded, worth a
+// long retry" apart from every other failure without callers having to know
+// anything about the AI SDK's own error shape. Idempotent on an
+// already-AppError cause (e.g. EXTERNAL_TIMEOUT from withTimeout) so a call
+// site can never double-wrap.
+function toLlmAppError(cause: unknown, message: string, actor: string): AppError {
+  if (cause instanceof AppError) return cause
+  const apiError = APICallError.isInstance(cause) ? cause : undefined
+  return new AppError('EXTERNAL_ERROR', message, {
+    actor,
+    cause: cause instanceof Error ? cause.message : String(cause),
+    statusCode: apiError?.statusCode,
+    isRetryable: apiError?.isRetryable,
+  })
+}
+
+// True for a Gemini failure worth a long, delayed retry (503 overloaded, 429
+// rate-limited, or anything else the AI SDK itself already flagged
+// isRetryable) rather than a permanent one (bad schema, auth, invalid
+// request) that will only ever fail again. Used by
+// src/lib/pipeline/overload-retry.ts — see that file for the actual
+// long-retry scheduling, since a serverless route can't just sleep 5
+// minutes in-process.
+export function isModelOverloadedError(error: unknown): boolean {
+  if (!isAppError(error) || error.code !== 'EXTERNAL_ERROR') return false
+  const context = error.context as { statusCode?: unknown; isRetryable?: unknown }
+  return context.isRetryable === true || context.statusCode === 503 || context.statusCode === 429
+}
+
 // Races `work(signal)` against a timeout and always clears the timer, so a fast
 // success never leaves a dangling setTimeout holding the event loop open. On
 // timeout the controller is aborted so the underlying SDK call actually stops
@@ -230,11 +262,7 @@ export async function generateJson<T>(
     return result.object
   } catch (cause) {
     await logLlmFailure(context, resolvedModelId, 'generateObject', cause, Date.now() - startedAt)
-    if (cause instanceof AppError) throw cause
-    throw new AppError('EXTERNAL_ERROR', 'LLM generateObject failed', {
-      actor: context.actor,
-      cause: cause instanceof Error ? cause.message : String(cause),
-    })
+    throw toLlmAppError(cause, 'LLM generateObject failed', context.actor)
   }
 }
 
@@ -272,11 +300,7 @@ export async function generateText(
     return result.text
   } catch (cause) {
     await logLlmFailure(context, resolvedModelId, 'generateText', cause, Date.now() - startedAt)
-    if (cause instanceof AppError) throw cause
-    throw new AppError('EXTERNAL_ERROR', 'LLM generateText failed', {
-      actor: context.actor,
-      cause: cause instanceof Error ? cause.message : String(cause),
-    })
+    throw toLlmAppError(cause, 'LLM generateText failed', context.actor)
   }
 }
 
@@ -317,11 +341,7 @@ export async function generateWithTools(
     return result.text
   } catch (cause) {
     await logLlmFailure(context, MODEL_ID, 'generateWithTools', cause, Date.now() - startedAt)
-    if (cause instanceof AppError) throw cause
-    throw new AppError('EXTERNAL_ERROR', 'LLM tool loop failed', {
-      actor: context.actor,
-      cause: cause instanceof Error ? cause.message : String(cause),
-    })
+    throw toLlmAppError(cause, 'LLM tool loop failed', context.actor)
   }
 }
 
@@ -356,10 +376,6 @@ export async function embedTexts(context: LlmCallContext, args: EmbedTextsArgs):
     return result.embeddings
   } catch (cause) {
     await logLlmFailure(context, MODEL_ID, 'embedMany', cause, Date.now() - startedAt)
-    if (cause instanceof AppError) throw cause
-    throw new AppError('EXTERNAL_ERROR', 'LLM embedMany failed', {
-      actor: context.actor,
-      cause: cause instanceof Error ? cause.message : String(cause),
-    })
+    throw toLlmAppError(cause, 'LLM embedMany failed', context.actor)
   }
 }

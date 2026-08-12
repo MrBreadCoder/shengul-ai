@@ -52,6 +52,17 @@ describe('POST /api/pipeline/stuck-sweep', () => {
     expect(body.requeuedCaseIds).toEqual(['case2'])
   })
 
+  it('should reset a writing case to ready and re-queue it to write', async () => {
+    listStuckCasesMock.mockResolvedValue([{ id: 'case3', status: 'writing' }])
+
+    const res = await POST(req())
+    const body = await res.json()
+
+    expect(updateCaseStatusMock).toHaveBeenCalledWith({}, 'case3', 'ready')
+    expect(publishJsonMock).toHaveBeenCalledWith('/api/pipeline/write', { caseId: 'case3' })
+    expect(body.requeuedCaseIds).toEqual(['case3'])
+  })
+
   it('should record a case as failed and keep going when its re-queue throws', async () => {
     listStuckCasesMock.mockResolvedValue([
       { id: 'case1', status: 'researching' },

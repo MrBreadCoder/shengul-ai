@@ -6,6 +6,7 @@ import { updateLeadCase } from '@/lib/db/leads'
 import { insertCompanyKnowledgeIfMissing } from '@/lib/db/case-knowledge'
 import { formatCompanySummary, parseCompanyFirmographicsFromRaw } from '@/lib/apollo/format-company-summary'
 import { logEvent, logWarn } from '@/lib/events/log-event'
+import { publishJson } from '@/lib/qstash/client'
 
 export function computeCompanyKey(domain: string | null, companyName: string | null): string {
   if (domain) return domain.toLowerCase().trim()
@@ -78,5 +79,32 @@ export async function groupVerifiedLead(
     // Audit logging is best-effort — it must not turn an already-completed
     // grouping (case created, lead attached) into a rejected operation.
   }
+
+  // Trigger research immediately instead of waiting for the next
+  // research-fanout tick (up to 5 minutes away — previously every hand-off
+  // in the pipeline stacked one of these waits, so discover->research->write
+  // could take up to ~10 minutes of pure idle polling). Only fires the
+  // instant a case is sitting at 'new': a case that already moved past
+  // research (or is dead) must not be re-queued just because a later
+  // contact at the same company was grouped into it here.
+  // research/route.ts's own `status !== 'new'` claim-guard makes this safe
+  // to race against research-fanout's periodic sweep, which stays in place
+  // unchanged as the fallback for a failed publish below.
+  if (kase.status === 'new') {
+    try {
+      await publishJson('/api/pipeline/research', { caseId: kase.id })
+    } catch (error) {
+      await logWarn({
+        clientId: lead.clientId,
+        caseId: kase.id,
+        actor: 'system',
+        type: 'pipeline.research_trigger_failed',
+        source: 'pipeline',
+        error,
+        payload: { leadId: lead.id },
+      })
+    }
+  }
+
   return kase.id
 }

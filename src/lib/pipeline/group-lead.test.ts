@@ -5,10 +5,12 @@ const mockUpdateLeadCase = vi.hoisted(() => vi.fn())
 const mockLogEvent = vi.hoisted(() => vi.fn())
 const mockLogWarn = vi.hoisted(() => vi.fn())
 const mockInsertCompanyKnowledgeIfMissing = vi.hoisted(() => vi.fn())
+const mockPublishJson = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/db/cases', () => ({ findOrCreateCase: mockFindOrCreateCase }))
 vi.mock('@/lib/db/leads', () => ({ updateLeadCase: mockUpdateLeadCase }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: mockLogEvent, logWarn: mockLogWarn }))
 vi.mock('@/lib/db/case-knowledge', () => ({ insertCompanyKnowledgeIfMissing: mockInsertCompanyKnowledgeIfMissing }))
+vi.mock('@/lib/qstash/client', () => ({ publishJson: mockPublishJson }))
 
 import { computeCompanyKey, groupVerifiedLead } from './group-lead'
 
@@ -29,6 +31,7 @@ describe('groupVerifiedLead', () => {
     mockLogEvent.mockReset()
     mockLogWarn.mockReset()
     mockInsertCompanyKnowledgeIfMissing.mockReset()
+    mockPublishJson.mockReset()
   })
 
   it('should find-or-create a case keyed by domain, attach the lead, log the event, and return the case id', async () => {
@@ -134,6 +137,48 @@ describe('groupVerifiedLead', () => {
     expect(caseId).toBe('case6')
     expect(mockLogWarn).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 'client1', caseId: 'case6', type: 'pipeline.company_knowledge_failed',
+    }))
+  })
+
+  it('should trigger research immediately when the grouped case is new', async () => {
+    mockFindOrCreateCase.mockResolvedValue({ id: 'case8', status: 'new' })
+    mockUpdateLeadCase.mockResolvedValue(undefined)
+    mockLogEvent.mockResolvedValue(undefined)
+    mockPublishJson.mockResolvedValue('msg1')
+
+    const caseId = await groupVerifiedLead({} as never, {
+      id: 'lead8', clientId: 'client1', campaignId: 'camp1', companyName: 'Acme Inc.', companyDomain: 'acme.com', raw: null,
+    })
+
+    expect(caseId).toBe('case8')
+    expect(mockPublishJson).toHaveBeenCalledWith('/api/pipeline/research', { caseId: 'case8' })
+  })
+
+  it('should not trigger research when the case already moved past new (e.g. a second contact joining an already-researched company)', async () => {
+    mockFindOrCreateCase.mockResolvedValue({ id: 'case9', status: 'contacted' })
+    mockUpdateLeadCase.mockResolvedValue(undefined)
+    mockLogEvent.mockResolvedValue(undefined)
+
+    await groupVerifiedLead({} as never, {
+      id: 'lead9', clientId: 'client1', campaignId: 'camp1', companyName: 'Acme Inc.', companyDomain: 'acme.com', raw: null,
+    })
+
+    expect(mockPublishJson).not.toHaveBeenCalled()
+  })
+
+  it('should still return the case id and log a warning when the research-trigger publish fails', async () => {
+    mockFindOrCreateCase.mockResolvedValue({ id: 'case10', status: 'new' })
+    mockUpdateLeadCase.mockResolvedValue(undefined)
+    mockLogEvent.mockResolvedValue(undefined)
+    mockPublishJson.mockRejectedValue(new Error('qstash unreachable'))
+
+    const caseId = await groupVerifiedLead({} as never, {
+      id: 'lead10', clientId: 'client1', campaignId: 'camp1', companyName: 'Acme Inc.', companyDomain: 'acme.com', raw: null,
+    })
+
+    expect(caseId).toBe('case10')
+    expect(mockLogWarn).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client1', caseId: 'case10', type: 'pipeline.research_trigger_failed',
     }))
   })
 })

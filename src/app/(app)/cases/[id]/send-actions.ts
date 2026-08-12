@@ -34,8 +34,11 @@ import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS } from '@/lib/validation/email-limits
 
 // Statuses a manual first touch advances to 'contacted'. A case already past
 // this point keeps whatever the pipeline gave it — a manual email is not a
-// reason to walk a 'replied' case backwards.
-const PRE_CONTACT_STATUSES: readonly string[] = ['new', 'researching', 'ready']
+// reason to walk a 'replied' case backwards. 'writing' included: it means
+// the automated write pipeline has this case claimed and may be mid-send —
+// a human's manual first touch is just as much "this case has now been
+// contacted" as the automated one would have produced.
+const PRE_CONTACT_STATUSES: readonly string[] = ['new', 'researching', 'ready', 'writing']
 
 const sendSchema = z.object({
   caseId: z.string().uuid(),

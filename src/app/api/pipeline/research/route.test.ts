@@ -21,6 +21,10 @@ vi.mock('@/lib/pipeline/research', () => ({ runResearchForCase: (...a: unknown[]
 vi.mock('@/lib/research/brightdata', () => ({ brightdataResearch: { search: vi.fn() } }))
 const logErrorMock = vi.fn()
 vi.mock('@/lib/events/log-event', () => ({ logError: (...a: unknown[]) => logErrorMock(...a) }))
+const isModelOverloadedErrorMock = vi.fn()
+vi.mock('@/lib/llm/client', () => ({ isModelOverloadedError: (...a: unknown[]) => isModelOverloadedErrorMock(...a) }))
+const handleModelOverloadMock = vi.fn()
+vi.mock('@/lib/pipeline/overload-retry', () => ({ handleModelOverload: (...a: unknown[]) => handleModelOverloadMock(...a) }))
 
 import { POST } from './route'
 
@@ -36,6 +40,8 @@ beforeEach(() => {
   listActiveLeadsMock.mockReset(); getCampaignForCaseMock.mockReset(); runResearchMock.mockReset()
   getClientByIdMock.mockReset().mockResolvedValue({ id: 'c1', name: 'Acme Seller', company_info: 'Sells widgets.' })
   logErrorMock.mockReset()
+  isModelOverloadedErrorMock.mockReset()
+  handleModelOverloadMock.mockReset()
 })
 
 describe('POST /api/pipeline/research', () => {
@@ -137,5 +143,69 @@ describe('research route error attribution', () => {
 
     expect(res.status).toBe(401)
     expect(logErrorMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('research route model-overload handling', () => {
+  it('should schedule a long retry and return 200 (not 500) when the pipeline throws a model-overloaded error', async () => {
+    const overloadError = new Error('503 overloaded')
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com',
+    })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: 'v', status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    runResearchMock.mockRejectedValue(overloadError)
+    isModelOverloadedErrorMock.mockReturnValue(true)
+    handleModelOverloadMock.mockResolvedValue({ scheduled: true, nextRetryCount: 1 })
+
+    const res = await POST(req({ caseId: CASE_ID }))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.overload).toEqual({ scheduled: true, nextRetryCount: 1 })
+    expect(logErrorMock).not.toHaveBeenCalled()
+    expect(handleModelOverloadMock).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/api/pipeline/research',
+      caseId: CASE_ID,
+      clientId: 'c1',
+      actor: 'system',
+      eventPrefix: 'pipeline.research',
+      retryCount: 0,
+      error: overloadError,
+    }))
+  })
+
+  it('should pass a revert callback that resets the case back to new', async () => {
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com',
+    })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: 'v', status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    runResearchMock.mockRejectedValue(new Error('overloaded'))
+    isModelOverloadedErrorMock.mockReturnValue(true)
+    handleModelOverloadMock.mockResolvedValue({ scheduled: false })
+
+    await POST(req({ caseId: CASE_ID }))
+
+    const passedRevert = handleModelOverloadMock.mock.calls[0]?.[0]?.revert as () => Promise<void>
+    updateCaseStatusMock.mockClear()
+    await passedRevert()
+    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'new')
+  })
+
+  it('should pass the retryCount from the request body through to handleModelOverload', async () => {
+    verifyMock.mockResolvedValue(JSON.stringify({ caseId: CASE_ID, retryCount: 2 }))
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com',
+    })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: 'v', status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    runResearchMock.mockRejectedValue(new Error('overloaded'))
+    isModelOverloadedErrorMock.mockReturnValue(true)
+    handleModelOverloadMock.mockResolvedValue({ scheduled: true, nextRetryCount: 3 })
+
+    await POST(req({ caseId: CASE_ID, retryCount: 2 }))
+
+    expect(handleModelOverloadMock).toHaveBeenCalledWith(expect.objectContaining({ retryCount: 2 }))
   })
 })

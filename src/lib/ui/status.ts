@@ -22,6 +22,7 @@ export const CASE_STATUS: Record<CaseStatus, StatusMeta> = {
   new: { label: 'New', color: 'var(--status-new)' },
   researching: { label: 'Researching', color: 'var(--status-researching)' },
   ready: { label: 'Ready', color: 'var(--status-ready)' },
+  writing: { label: 'Writing', color: 'var(--status-writing)' },
   contacted: { label: 'Contacted', color: 'var(--status-contacted)' },
   in_conversation: { label: 'In conversation', color: 'var(--status-in-conversation)' },
   hot_handoff: { label: 'Hot handoff', color: 'var(--status-hot-handoff)' },

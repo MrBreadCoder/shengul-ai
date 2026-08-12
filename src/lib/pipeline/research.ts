@@ -5,7 +5,8 @@ import { runResearchAgent, type ResearchAgentRole, type AgentDossierEntry, type 
 import { insertKnowledge, type KnowledgeInsert } from '@/lib/db/case-knowledge'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
-import { logEventSafe } from '@/lib/events/log-event'
+import { logEventSafe, logWarn } from '@/lib/events/log-event'
+import { publishJson } from '@/lib/qstash/client'
 import { type LlmCallContext } from '@/lib/llm/client'
 import { isAppError } from '@/lib/errors/app-error'
 import type { CompanyFirmographics } from '@/lib/apollo/format-company-summary'
@@ -136,6 +137,27 @@ export async function runResearchForCase(
   const inserted = await insertKnowledge(supabase, toRows(input, entries))
   await updateCaseStatus(supabase, input.caseId, 'ready')
   await enqueueCrmSync(input.caseId, 'qualified')
+
+  // Trigger the writer immediately instead of waiting for the next
+  // write-fanout tick (up to 5 minutes away) — same reasoning as the
+  // research trigger in group-lead.ts. write/route.ts's own
+  // `status !== 'ready'` claim-guard makes this safe to race against
+  // write-fanout's periodic sweep, which stays in place unchanged as the
+  // fallback for a failed publish below.
+  try {
+    await publishJson('/api/pipeline/write', { caseId: input.caseId })
+  } catch (error) {
+    await logWarn({
+      clientId: input.clientId,
+      caseId: input.caseId,
+      actor: ACTOR,
+      type: 'pipeline.write_trigger_failed',
+      source: 'pipeline',
+      error,
+      payload: { caseId: input.caseId },
+    })
+  }
+
   await logEventSafe({
     clientId: input.clientId,
     caseId: input.caseId,

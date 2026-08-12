@@ -4,7 +4,9 @@ const runResearchAgentMock = vi.fn()
 const insertKnowledgeMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
 const logEventMock = vi.fn()
+const logWarnMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
+const publishJsonMock = vi.fn()
 
 vi.mock('@/lib/research/agent', () => ({ runResearchAgent: (...a: unknown[]) => runResearchAgentMock(...a) }))
 vi.mock('@/lib/db/case-knowledge', () => ({ insertKnowledge: (...a: unknown[]) => insertKnowledgeMock(...a) }))
@@ -12,8 +14,10 @@ vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => update
 vi.mock('@/lib/events/log-event', () => ({
   logEvent: (...a: unknown[]) => logEventMock(...a),
   logEventSafe: (...a: unknown[]) => logEventMock(...a),
+  logWarn: (...a: unknown[]) => logWarnMock(...a),
 }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
+vi.mock('@/lib/qstash/client', () => ({ publishJson: (...a: unknown[]) => publishJsonMock(...a) }))
 
 import { runResearchForCase } from './research'
 
@@ -29,6 +33,7 @@ beforeEach(() => {
   runResearchAgentMock.mockReset(); insertKnowledgeMock.mockReset()
   updateCaseStatusMock.mockReset(); logEventMock.mockReset()
   enqueueCrmSyncMock.mockReset()
+  logWarnMock.mockReset(); publishJsonMock.mockReset()
 })
 
 describe('runResearchForCase', () => {
@@ -124,5 +129,38 @@ describe('runResearchForCase', () => {
     await runResearchForCase({} as never, { research }, input)
 
     expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('should trigger the writer immediately once the case is marked ready', async () => {
+    runResearchAgentMock
+      .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: null, citation: null }])
+    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
+    publishJsonMock.mockResolvedValue('msg1')
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(publishJsonMock).toHaveBeenCalledWith('/api/pipeline/write', { caseId: 'case1' })
+  })
+
+  it('should not trigger the writer when the case never reaches ready', async () => {
+    runResearchAgentMock.mockRejectedValueOnce(new Error('down'))
+
+    await runResearchForCase({} as never, { research }, input)
+
+    expect(publishJsonMock).not.toHaveBeenCalled()
+  })
+
+  it('should still return the result and log a warning when the write-trigger publish fails', async () => {
+    runResearchAgentMock
+      .mockResolvedValueOnce([{ kind: 'company', content: 'Builds widgets', sourceUrl: null, citation: null }])
+    insertKnowledgeMock.mockResolvedValue([{ id: 'k1' }])
+    publishJsonMock.mockRejectedValue(new Error('qstash unreachable'))
+
+    const result = await runResearchForCase({} as never, { research }, input)
+
+    expect(result).toEqual({ caseId: 'case1', knowledgeCount: 1 })
+    expect(logWarnMock).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'c1', caseId: 'case1', type: 'pipeline.write_trigger_failed',
+    }))
   })
 })

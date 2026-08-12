@@ -6,11 +6,33 @@ const generateObjectMock = vi.fn()
 const generateTextMock = vi.fn()
 const embedManyMock = vi.fn()
 
+// Minimal stand-in for the AI SDK's real APICallError: enough to exercise
+// client.ts's `APICallError.isInstance(cause)` branch and carry
+// statusCode/isRetryable through to the wrapped AppError. vi.hoisted so it's
+// safely usable both inside the vi.mock('ai', ...) factory below and later
+// in test bodies to construct instances.
+const MockAPICallError = vi.hoisted(() => {
+  class MockAPICallError extends Error {
+    statusCode?: number
+    isRetryable: boolean
+    constructor(opts: { message: string; statusCode?: number; isRetryable?: boolean }) {
+      super(opts.message)
+      this.statusCode = opts.statusCode
+      this.isRetryable = opts.isRetryable ?? false
+    }
+    static isInstance(error: unknown): error is InstanceType<typeof MockAPICallError> {
+      return error instanceof MockAPICallError
+    }
+  }
+  return MockAPICallError
+})
+
 vi.mock('ai', () => ({
   generateObject: (...args: unknown[]) => generateObjectMock(...args),
   generateText: (...args: unknown[]) => generateTextMock(...args),
   isStepCount: (count: number) => ({ isStepCount: count }),
   embedMany: (...args: unknown[]) => embedManyMock(...args),
+  APICallError: MockAPICallError,
 }))
 vi.mock('@ai-sdk/google', () => ({
   createGoogle: () => {
@@ -27,7 +49,7 @@ vi.mock('@/lib/events/log-event', () => ({
   logError: (...a: unknown[]) => logErrorMock(...a),
 }))
 
-import { generateJson, generateText, generateWithTools, embedTexts } from './client'
+import { generateJson, generateText, generateWithTools, embedTexts, isModelOverloadedError } from './client'
 
 const ctx = { clientId: 'client1', caseId: 'case1', actor: 'research_agent' }
 
@@ -354,5 +376,66 @@ describe('embedTexts', () => {
     embedManyMock.mockRejectedValue(new Error('quota exceeded'))
     await expect(embedTexts(ctx, { values: ['a'], taskType: 'RETRIEVAL_DOCUMENT' }))
       .rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('overload detection', () => {
+  it('should preserve statusCode and isRetryable from an APICallError onto the thrown AppError context', async () => {
+    generateObjectMock.mockRejectedValue(
+      new MockAPICallError({ message: '503 Service Unavailable', statusCode: 503, isRetryable: true }),
+    )
+    const schema = z.object({ title: z.string() })
+    const error = await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100 })
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(AppError)
+    expect((error as AppError).context).toMatchObject({ statusCode: 503, isRetryable: true })
+  })
+
+  it('should leave statusCode/isRetryable undefined when the cause is not an APICallError', async () => {
+    generateTextMock.mockRejectedValue(new Error('plain network blip'))
+    const error = await generateText(ctx, { instructions: 's', prompt: 'p', maxOutputTokens: 50 })
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(AppError)
+    expect((error as AppError).context.statusCode).toBeUndefined()
+    expect((error as AppError).context.isRetryable).toBeUndefined()
+  })
+
+  it('should not double-wrap an already-AppError cause (e.g. EXTERNAL_TIMEOUT), so its own context is untouched', async () => {
+    generateObjectMock.mockImplementation(
+      (args: { abortSignal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          args.abortSignal.addEventListener('abort', () => reject(new Error('aborted')))
+        }),
+    )
+    const schema = z.object({ title: z.string() })
+    const error = await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100, timeoutMs: 5 })
+      .catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'EXTERNAL_TIMEOUT' })
+  })
+
+  it('isModelOverloadedError should return true for a 503 statusCode', () => {
+    expect(isModelOverloadedError(new AppError('EXTERNAL_ERROR', 'x', { statusCode: 503 }))).toBe(true)
+  })
+
+  it('isModelOverloadedError should return true for a 429 statusCode', () => {
+    expect(isModelOverloadedError(new AppError('EXTERNAL_ERROR', 'x', { statusCode: 429 }))).toBe(true)
+  })
+
+  it('isModelOverloadedError should return true when isRetryable is true regardless of statusCode', () => {
+    expect(isModelOverloadedError(new AppError('EXTERNAL_ERROR', 'x', { statusCode: 500, isRetryable: true }))).toBe(true)
+  })
+
+  it('isModelOverloadedError should return false for a non-retryable EXTERNAL_ERROR', () => {
+    expect(isModelOverloadedError(new AppError('EXTERNAL_ERROR', 'x', { statusCode: 400 }))).toBe(false)
+  })
+
+  it('isModelOverloadedError should return false for a different AppError code', () => {
+    expect(isModelOverloadedError(new AppError('EXTERNAL_TIMEOUT', 'x', { statusCode: 503 }))).toBe(false)
+  })
+
+  it('isModelOverloadedError should return false for a non-AppError value', () => {
+    expect(isModelOverloadedError(new Error('plain'))).toBe(false)
+    expect(isModelOverloadedError('not an error')).toBe(false)
+    expect(isModelOverloadedError(null)).toBe(false)
   })
 })

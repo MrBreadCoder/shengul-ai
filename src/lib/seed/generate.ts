@@ -103,6 +103,10 @@ const CASE_PLANS: Readonly<Record<CaseStatus, CasePlan>> = {
   new: { count: 14, daysAgo: [0, 2], knowledge: 'none', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
   researching: { count: 6, daysAgo: [0, 3], knowledge: 'partial', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
   ready: { count: 12, daysAgo: [1, 6], knowledge: 'full', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
+  // Like 'researching', a real 'writing' row is normally short-lived (the
+  // write loop finishes in seconds) — a small count here just demonstrates
+  // the pipeline mid-flight, same reasoning as 'researching' above.
+  writing: { count: 4, daysAgo: [0, 2], knowledge: 'full', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
   contacted: { count: 52, daysAgo: [3, 45], knowledge: 'full', hasEmails: true, replyIntent: null, replyProbability: 0, sequenceState: 'active' },
   in_conversation: { count: 26, daysAgo: [6, 50], knowledge: 'full', hasEmails: true, replyIntent: 'interested', replyProbability: 1, sequenceState: 'completed' },
   hot_handoff: { count: 11, daysAgo: [8, 52], knowledge: 'full', hasEmails: true, replyIntent: 'price', replyProbability: 1, sequenceState: 'completed' },
@@ -113,7 +117,7 @@ const CASE_PLANS: Readonly<Record<CaseStatus, CasePlan>> = {
 }
 
 const CASE_STATUS_ORDER: readonly CaseStatus[] = [
-  'new', 'researching', 'ready', 'contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead',
+  'new', 'researching', 'ready', 'writing', 'contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead',
 ]
 
 /** Leads per case: most companies yield 2-3 usable contacts. */
