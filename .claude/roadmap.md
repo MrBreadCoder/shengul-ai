@@ -4758,3 +4758,50 @@ seller-context-omitted-when-empty in `agent.test.ts`, seller-passthrough in
 `research.test.ts`, client-fetched-and-passed / missing-client-degrades in
 `route.test.ts`, and the `write.test.ts` thinking-level assertion flipped
 to `'medium'`). `eslint` clean on every touched file.
+
+## Uniforms Fashion — Per-Client Mailreach API Key — 2026-08-12
+
+**Why:** Uniforms Fashion's operator asked to use their own Mailreach
+account/API key for warmup instead of the shared platform-level one. Every
+other client keeps using the existing global key.
+
+**Design:** `docs/superpowers/specs/2026-08-12-uniforms-fashion-mailreach-api-key-design.md`.
+Env-var-based override (operator's explicit choice over a DB column + UI) —
+new optional `MAILREACH_API_KEY_UNIFORMS_FASHION`, resolved per client id in
+a new `src/lib/mailreach/client-api-keys.ts::resolveMailreachApiKey`. Falls
+back to `MAILREACH_API_KEY` for every other client, and for Uniforms Fashion
+itself until the override var is actually set.
+
+**Changes:**
+- [x] `env.ts`: `MAILREACH_API_KEY_UNIFORMS_FASHION` added, optional.
+- [x] `mailreach/client-api-keys.ts` (new): `resolveMailreachApiKey(clientId)`
+      — hardcoded single if/else for the one override, with a comment that a
+      second per-client key should become a real DB column instead of a
+      second branch here.
+- [x] `mailreach/client.ts`: `authHeaders`, `connectSmtpAccount`,
+      `completeOAuthConnect`, `disconnectAccount`, `getAccountStats` now take
+      an explicit `apiKey` param instead of reading `env.MAILREACH_API_KEY`
+      directly. `buildOAuthAuthorizeUrl` unchanged — it never sent an API key
+      (browser hits Mailreach's OAuth consent screen directly; the key only
+      matters at the callback exchange).
+- [x] `mailreach/enrollment.ts`: internals resolve the key from
+      `mailbox.client_id` (or the in-scope `clientId` for the two bulk
+      functions) and pass it into the updated `client.ts` calls. Exported
+      signatures unchanged, so the connect/disconnect/callback routes and
+      `mailreach-actions.ts` needed zero changes.
+- [x] `pipeline/mailreach-sync.ts` (reputation-stats cron sweep): resolves
+      the key per mailbox from `mailbox.client_id` before calling
+      `getAccountStats` — previously called with only the global key
+      regardless of which client's mailbox it was.
+- [x] `.env.example` documented the new optional var.
+
+**Rollout:** ships inert — `MAILREACH_API_KEY_UNIFORMS_FASHION` unset means
+identical behavior to before. Operator adds it to the deployment env once
+the friend hands over their Mailreach API key; no further code change or
+redeploy-triggering step needed.
+
+**Verified:** `pnpm typecheck` clean; full `vitest run` — 203 files, 2221
+tests, all passing (including new `client-api-keys.test.ts`, updated
+`client.test.ts` / `enrollment.test.ts` / `mailreach-sync.test.ts` /
+`env.test.ts` coverage for the resolved-key threading). `eslint` clean on
+every touched file.

@@ -1,11 +1,13 @@
 import { z } from 'zod'
-import { env } from '@/lib/env'
 import { fetchJson } from '@/lib/http/fetch-json'
 
 const BASE_URL = 'https://api.mailreach.co/api/v1'
 
-function authHeaders(): Record<string, string> {
-  return { 'Content-Type': 'application/json', 'X-Api-Key': `Bearer ${env.MAILREACH_API_KEY}` }
+// apiKey is resolved per-client by the caller (see
+// src/lib/mailreach/client-api-keys.ts) — this module has no knowledge of
+// clients and must never fall back to a default key itself.
+function authHeaders(apiKey: string): Record<string, string> {
+  return { 'Content-Type': 'application/json', 'X-Api-Key': `Bearer ${apiKey}` }
 }
 
 function toMailreachProvider(provider: 'gmail' | 'outlook'): 'google' | 'outlook' {
@@ -32,12 +34,12 @@ export interface SmtpConnectInput {
 // deliberately permissive in case Mailreach ever changes the wire type.
 const imapAuthResponseSchema = z.object({ id: z.union([z.string(), z.number()]) }).passthrough()
 
-export async function connectSmtpAccount(input: SmtpConnectInput): Promise<{ accountId: string }> {
+export async function connectSmtpAccount(input: SmtpConnectInput, apiKey: string): Promise<{ accountId: string }> {
   const res = await fetchJson(
     `${BASE_URL}/imap_auth`,
     {
       method: 'POST',
-      headers: authHeaders(),
+      headers: authHeaders(apiKey),
       body: JSON.stringify({
         email: input.emailAddress,
         first_name: input.firstName,
@@ -75,12 +77,15 @@ export function buildOAuthAuthorizeUrl(params: { provider: 'gmail' | 'outlook'; 
 
 const oauthCompleteResponseSchema = z.object({ account_id: z.string() }).passthrough()
 
-export async function completeOAuthConnect(params: { code: string; provider: 'gmail' | 'outlook' }): Promise<{ accountId: string }> {
+export async function completeOAuthConnect(
+  params: { code: string; provider: 'gmail' | 'outlook' },
+  apiKey: string,
+): Promise<{ accountId: string }> {
   const res = await fetchJson(
     `${BASE_URL}/connect-account/oauth/callback`,
     {
       method: 'POST',
-      headers: authHeaders(),
+      headers: authHeaders(apiKey),
       body: JSON.stringify({ code: params.code, provider: toMailreachProvider(params.provider) }),
     },
     oauthCompleteResponseSchema,
@@ -88,16 +93,16 @@ export async function completeOAuthConnect(params: { code: string; provider: 'gm
   return { accountId: res.account_id }
 }
 
-export async function disconnectAccount(accountId: string): Promise<void> {
-  await fetchJson(`${BASE_URL}/accounts/${accountId}`, { method: 'DELETE', headers: authHeaders() }, z.unknown())
+export async function disconnectAccount(accountId: string, apiKey: string): Promise<void> {
+  await fetchJson(`${BASE_URL}/accounts/${accountId}`, { method: 'DELETE', headers: authHeaders(apiKey) }, z.unknown())
 }
 
 const accountStatsResponseSchema = z.object({ reputation_score: z.number().nullable().optional() }).passthrough()
 
-export async function getAccountStats(accountId: string): Promise<{ reputationScore: number | null }> {
+export async function getAccountStats(accountId: string, apiKey: string): Promise<{ reputationScore: number | null }> {
   const res = await fetchJson(
     `${BASE_URL}/accounts/${accountId}/stats`,
-    { method: 'GET', headers: authHeaders() },
+    { method: 'GET', headers: authHeaders(apiKey) },
     accountStatsResponseSchema,
   )
   return { reputationScore: res.reputation_score ?? null }

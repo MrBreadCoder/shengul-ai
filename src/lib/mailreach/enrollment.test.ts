@@ -8,12 +8,16 @@ const updateMailboxMailreachDisconnected = vi.fn()
 const clearMailboxMailreachConnection = vi.fn()
 const listMailboxesForClient = vi.fn()
 const logEventSafe = vi.fn()
+const resolveMailreachApiKey = vi.fn((_clientId: string) => 'resolved-key')
 
 vi.mock('./client', () => ({
   connectSmtpAccount: (...args: unknown[]) => connectSmtpAccount(...args),
   disconnectAccount: (...args: unknown[]) => disconnectAccount(...args),
   completeOAuthConnect: (...args: unknown[]) => completeOAuthConnect(...args),
   buildOAuthAuthorizeUrl: (params: unknown) => `https://api.mailreach.co/api/v1/connect-account/oauth?stub=${JSON.stringify(params)}`,
+}))
+vi.mock('./client-api-keys', () => ({
+  resolveMailreachApiKey: (...args: unknown[]) => resolveMailreachApiKey(...(args as [string])),
 }))
 vi.mock('@/lib/db/mailboxes', () => ({
   updateMailboxMailreachConnected: (...args: unknown[]) => updateMailboxMailreachConnected(...args),
@@ -97,6 +101,7 @@ describe('connectSmtpMailbox', () => {
     await connectSmtpMailbox({} as never, smtpMailbox({ first_name: 'Jordan', last_name: 'Lee' }), now)
     expect(connectSmtpAccount).toHaveBeenCalledWith(
       expect.objectContaining({ firstName: 'Jordan', lastName: 'Lee' }),
+      'resolved-key',
     )
   })
 
@@ -105,7 +110,14 @@ describe('connectSmtpMailbox', () => {
     await connectSmtpMailbox({} as never, smtpMailbox({ email_address: 'ops@client.com' }), now)
     expect(connectSmtpAccount).toHaveBeenCalledWith(
       expect.objectContaining({ firstName: 'ops', lastName: 'ops' }),
+      'resolved-key',
     )
+  })
+
+  it('should resolve the api key for the mailbox\'s own client', async () => {
+    connectSmtpAccount.mockResolvedValue({ accountId: 'acc_1' })
+    await connectSmtpMailbox({} as never, smtpMailbox({ client_id: 'client-xyz' }), now)
+    expect(resolveMailreachApiKey).toHaveBeenCalledWith('client-xyz')
   })
 })
 
@@ -114,7 +126,7 @@ describe('completeOAuthConnectForMailbox', () => {
     completeOAuthConnect.mockResolvedValue({ accountId: 'acc_3' })
     const mailbox = smtpMailbox({ provider: 'gmail' })
     await completeOAuthConnectForMailbox({} as never, mailbox, 'auth-code', now)
-    expect(completeOAuthConnect).toHaveBeenCalledWith({ code: 'auth-code', provider: 'gmail' })
+    expect(completeOAuthConnect).toHaveBeenCalledWith({ code: 'auth-code', provider: 'gmail' }, 'resolved-key')
     expect(updateMailboxMailreachConnected).toHaveBeenCalledWith({}, 'm1', expect.objectContaining({ mailreach_enabled: true }))
   })
 
@@ -126,7 +138,7 @@ describe('completeOAuthConnectForMailbox', () => {
 describe('disconnectMailbox', () => {
   it('should disconnect the remote account when one is set', async () => {
     await disconnectMailbox({} as never, smtpMailbox({ mailreach_account_id: 'acc_1' }))
-    expect(disconnectAccount).toHaveBeenCalledWith('acc_1')
+    expect(disconnectAccount).toHaveBeenCalledWith('acc_1', 'resolved-key')
     expect(updateMailboxMailreachDisconnected).toHaveBeenCalledWith({}, 'm1')
   })
 
@@ -156,6 +168,9 @@ describe('bulkDisconnectForClient', () => {
     disconnectAccount.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('vendor down'))
     const result = await bulkDisconnectForClient({} as never, 'c1')
     expect(result).toEqual({ attempted: 2, succeeded: 1, failed: 1 })
+    expect(resolveMailreachApiKey).toHaveBeenCalledWith('c1')
+    expect(disconnectAccount).toHaveBeenCalledWith('acc_1', 'resolved-key')
+    expect(disconnectAccount).toHaveBeenCalledWith('acc_2', 'resolved-key')
   })
 })
 

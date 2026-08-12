@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockFetchJson = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/http/fetch-json', () => ({ fetchJson: mockFetchJson }))
-vi.mock('@/lib/env', () => ({ env: { MAILREACH_API_KEY: 'test-mailreach-key' } }))
 
 import { connectSmtpAccount, buildOAuthAuthorizeUrl, completeOAuthConnect, disconnectAccount, getAccountStats } from './client'
 
@@ -25,7 +24,7 @@ describe('connectSmtpAccount', () => {
 
   it('should POST to /v1/imap_auth with the real field names and return the account id', async () => {
     mockFetchJson.mockResolvedValueOnce({ id: 1234 })
-    const result = await connectSmtpAccount(smtpInput)
+    const result = await connectSmtpAccount(smtpInput, 'test-mailreach-key')
     expect(result).toEqual({ accountId: '1234' })
     const [url, options] = mockFetchJson.mock.calls[0]!
     expect(url).toBe('https://api.mailreach.co/api/v1/imap_auth')
@@ -51,8 +50,15 @@ describe('connectSmtpAccount', () => {
 
   it('should coerce a string id in the response to the returned accountId unchanged', async () => {
     mockFetchJson.mockResolvedValueOnce({ id: 'already-a-string' })
-    const result = await connectSmtpAccount(smtpInput)
+    const result = await connectSmtpAccount(smtpInput, 'test-mailreach-key')
     expect(result).toEqual({ accountId: 'already-a-string' })
+  })
+
+  it('should send whichever apiKey the caller resolved, not a hardcoded one', async () => {
+    mockFetchJson.mockResolvedValueOnce({ id: 1234 })
+    await connectSmtpAccount(smtpInput, 'uniforms-fashion-key')
+    const [, options] = mockFetchJson.mock.calls[0]!
+    expect(options.headers['X-Api-Key']).toBe('Bearer uniforms-fashion-key')
   })
 })
 
@@ -72,9 +78,10 @@ describe('completeOAuthConnect', () => {
 
   it('should exchange the code and return the account id', async () => {
     mockFetchJson.mockResolvedValueOnce({ account_id: 'acc_456' })
-    const result = await completeOAuthConnect({ code: 'auth-code', provider: 'outlook' })
+    const result = await completeOAuthConnect({ code: 'auth-code', provider: 'outlook' }, 'test-mailreach-key')
     expect(result).toEqual({ accountId: 'acc_456' })
     const [, options] = mockFetchJson.mock.calls[0]!
+    expect(options.headers['X-Api-Key']).toBe('Bearer test-mailreach-key')
     const body = JSON.parse(options.body as string)
     expect(body.code).toBe('auth-code')
     expect(body.provider).toBe('outlook')
@@ -84,12 +91,13 @@ describe('completeOAuthConnect', () => {
 describe('disconnectAccount', () => {
   beforeEach(() => mockFetchJson.mockReset())
 
-  it('should DELETE the account by id', async () => {
+  it('should DELETE the account by id using the given apiKey', async () => {
     mockFetchJson.mockResolvedValueOnce(undefined)
-    await disconnectAccount('acc_123')
+    await disconnectAccount('acc_123', 'test-mailreach-key')
     const [url, options] = mockFetchJson.mock.calls[0]!
     expect(url).toBe('https://api.mailreach.co/api/v1/accounts/acc_123')
     expect(options.method).toBe('DELETE')
+    expect(options.headers['X-Api-Key']).toBe('Bearer test-mailreach-key')
   })
 })
 
@@ -98,13 +106,20 @@ describe('getAccountStats', () => {
 
   it('should return the reputation score', async () => {
     mockFetchJson.mockResolvedValueOnce({ reputation_score: 94 })
-    const result = await getAccountStats('acc_123')
+    const result = await getAccountStats('acc_123', 'test-mailreach-key')
     expect(result).toEqual({ reputationScore: 94 })
   })
 
   it('should return null when the score is absent', async () => {
     mockFetchJson.mockResolvedValueOnce({})
-    const result = await getAccountStats('acc_123')
+    const result = await getAccountStats('acc_123', 'test-mailreach-key')
     expect(result).toEqual({ reputationScore: null })
+  })
+
+  it('should send the given apiKey in the request header', async () => {
+    mockFetchJson.mockResolvedValueOnce({ reputation_score: 50 })
+    await getAccountStats('acc_123', 'uniforms-fashion-key')
+    const [, options] = mockFetchJson.mock.calls[0]!
+    expect(options.headers['X-Api-Key']).toBe('Bearer uniforms-fashion-key')
   })
 })

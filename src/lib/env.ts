@@ -39,6 +39,11 @@ const envSchema = publicEnvSchema.extend({
   APOLLO_API_KEY: nonEmpty,
   EMAILABLE_API_KEY: nonEmpty,
   MAILREACH_API_KEY: nonEmpty,
+  // Per-client override: Uniforms Fashion uses their own Mailreach account
+  // instead of the shared platform-level one above. Optional — every other
+  // client, plus local/CI, keeps resolving to MAILREACH_API_KEY. See
+  // src/lib/mailreach/client-api-keys.ts for the resolution logic.
+  MAILREACH_API_KEY_UNIFORMS_FASHION: z.string().min(1).optional(),
   HUBSPOT_OAUTH_CLIENT_ID: nonEmpty,
   HUBSPOT_OAUTH_CLIENT_SECRET: nonEmpty,
   PIPEDRIVE_OAUTH_CLIENT_ID: nonEmpty,

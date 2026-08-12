@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/mailboxes'
 import { parseMailboxTokens } from '@/lib/mailbox/tokens'
 import { logEventSafe } from '@/lib/events/log-event'
+import { resolveMailreachApiKey } from './client-api-keys'
 import {
   connectSmtpAccount,
   disconnectAccount,
@@ -53,19 +54,22 @@ export async function connectSmtpMailbox(
     throw new AppError('INVARIANT_VIOLATION', 'SMTP mailbox has non-smtp credentials', { mailboxId: mailbox.id })
   }
   const { firstName, lastName } = legacyNameFallback(mailbox)
-  const { accountId } = await connectSmtpAccount({
-    emailAddress: credentials.emailAddress,
-    firstName,
-    lastName,
-    username: credentials.username,
-    password: credentials.password,
-    smtpHost: credentials.smtpHost,
-    smtpPort: credentials.smtpPort,
-    smtpSecure: credentials.smtpSecure,
-    imapHost: credentials.imapHost,
-    imapPort: credentials.imapPort,
-    imapSecure: credentials.imapSecure,
-  })
+  const { accountId } = await connectSmtpAccount(
+    {
+      emailAddress: credentials.emailAddress,
+      firstName,
+      lastName,
+      username: credentials.username,
+      password: credentials.password,
+      smtpHost: credentials.smtpHost,
+      smtpPort: credentials.smtpPort,
+      smtpSecure: credentials.smtpSecure,
+      imapHost: credentials.imapHost,
+      imapPort: credentials.imapPort,
+      imapSecure: credentials.imapSecure,
+    },
+    resolveMailreachApiKey(mailbox.client_id),
+  )
   await updateMailboxMailreachConnected(supabase, mailbox.id, {
     mailreach_account_id: accountId,
     mailreach_status: 'connected',
@@ -89,7 +93,10 @@ export async function completeOAuthConnectForMailbox(
       mailboxId: mailbox.id, provider: mailbox.provider,
     })
   }
-  const { accountId } = await completeOAuthConnect({ code, provider: mailbox.provider })
+  const { accountId } = await completeOAuthConnect(
+    { code, provider: mailbox.provider },
+    resolveMailreachApiKey(mailbox.client_id),
+  )
   await updateMailboxMailreachConnected(supabase, mailbox.id, {
     mailreach_account_id: accountId,
     mailreach_status: 'connected',
@@ -105,7 +112,7 @@ export async function completeOAuthConnectForMailbox(
 export async function disconnectMailbox(supabase: SupabaseClient<Database>, mailbox: MailboxRow): Promise<void> {
   if (mailbox.mailreach_account_id) {
     try {
-      await disconnectAccount(mailbox.mailreach_account_id)
+      await disconnectAccount(mailbox.mailreach_account_id, resolveMailreachApiKey(mailbox.client_id))
     } catch (error) {
       await logEventSafe({
         clientId: mailbox.client_id, actor: 'mailreach_disconnect', type: 'mailbox.mailreach_disconnect_failed',
@@ -131,11 +138,12 @@ export async function bulkDisconnectForClient(
   clientId: string,
 ): Promise<BulkResult> {
   const targets = (await listMailboxesForClient(supabase, clientId)).filter((m) => m.mailreach_status === 'connected')
+  const apiKey = resolveMailreachApiKey(clientId)
   let succeeded = 0
   let failed = 0
   for (const mailbox of targets) {
     try {
-      if (mailbox.mailreach_account_id) await disconnectAccount(mailbox.mailreach_account_id)
+      if (mailbox.mailreach_account_id) await disconnectAccount(mailbox.mailreach_account_id, apiKey)
       await clearMailboxMailreachConnection(supabase, mailbox.id)
       succeeded += 1
     } catch (error) {

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { listMailreachConnectedMailboxes, updateMailboxMailreachStats } from '@/lib/db/mailboxes'
 import { getAccountStats } from '@/lib/mailreach/client'
+import { resolveMailreachApiKey } from '@/lib/mailreach/client-api-keys'
 import { logEventSafe } from '@/lib/events/log-event'
 
 export interface MailreachSyncSummary {
@@ -27,7 +28,7 @@ export async function runMailreachStatsSync(
     mailboxes.map(async (mailbox): Promise<boolean> => {
       if (!mailbox.mailreach_account_id) return true
       try {
-        const stats = await getAccountStats(mailbox.mailreach_account_id)
+        const stats = await getAccountStats(mailbox.mailreach_account_id, resolveMailreachApiKey(mailbox.client_id))
         await updateMailboxMailreachStats(supabase, mailbox.id, {
           reputationScore: stats.reputationScore,
           syncedAt: now.toISOString(),

@@ -3,12 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const listMailreachConnectedMailboxes = vi.fn()
 const updateMailboxMailreachStats = vi.fn()
 const getAccountStats = vi.fn()
+const resolveMailreachApiKey = vi.fn((clientId: string) => `key-for-${clientId}`)
 
 vi.mock('@/lib/db/mailboxes', () => ({
   listMailreachConnectedMailboxes: (...args: unknown[]) => listMailreachConnectedMailboxes(...args),
   updateMailboxMailreachStats: (...args: unknown[]) => updateMailboxMailreachStats(...args),
 }))
 vi.mock('@/lib/mailreach/client', () => ({ getAccountStats: (...args: unknown[]) => getAccountStats(...args) }))
+vi.mock('@/lib/mailreach/client-api-keys', () => ({
+  resolveMailreachApiKey: (...args: unknown[]) => resolveMailreachApiKey(...(args as [string])),
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: () => Promise.resolve() }))
 
 import { runMailreachStatsSync } from './mailreach-sync'
@@ -30,6 +34,21 @@ describe('runMailreachStatsSync', () => {
     expect(result).toEqual({ evaluated: 2, failed: 0 })
     expect(updateMailboxMailreachStats).toHaveBeenCalledWith({}, 'm1', { reputationScore: 90, syncedAt: now.toISOString() })
     expect(updateMailboxMailreachStats).toHaveBeenCalledWith({}, 'm2', { reputationScore: 90, syncedAt: now.toISOString() })
+    expect(getAccountStats).toHaveBeenCalledWith('acc_1', 'key-for-c1')
+    expect(getAccountStats).toHaveBeenCalledWith('acc_2', 'key-for-c1')
+  })
+
+  it('should resolve each mailbox\'s api key from its own client id', async () => {
+    listMailreachConnectedMailboxes.mockResolvedValue([
+      { id: 'm1', client_id: 'c1', mailreach_account_id: 'acc_1' },
+      { id: 'm2', client_id: 'c2', mailreach_account_id: 'acc_2' },
+    ])
+    getAccountStats.mockResolvedValue({ reputationScore: 90 })
+
+    await runMailreachStatsSync({} as never, { now })
+
+    expect(getAccountStats).toHaveBeenCalledWith('acc_1', 'key-for-c1')
+    expect(getAccountStats).toHaveBeenCalledWith('acc_2', 'key-for-c2')
   })
 
   it('should count a per-mailbox failure without stopping the sweep', async () => {

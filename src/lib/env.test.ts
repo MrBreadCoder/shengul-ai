@@ -58,6 +58,16 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...complete, MAILBOX_ENCRYPTION_KEY: 'too-short' })).toThrowError(/MAILBOX_ENCRYPTION_KEY/)
   })
 
+  it('should leave MAILREACH_API_KEY_UNIFORMS_FASHION undefined when unset', () => {
+    const env = loadEnv(complete)
+    expect(env.MAILREACH_API_KEY_UNIFORMS_FASHION).toBeUndefined()
+  })
+
+  it('should accept MAILREACH_API_KEY_UNIFORMS_FASHION when set', () => {
+    const env = loadEnv({ ...complete, MAILREACH_API_KEY_UNIFORMS_FASHION: 'uniforms-fashion-key' })
+    expect(env.MAILREACH_API_KEY_UNIFORMS_FASHION).toBe('uniforms-fashion-key')
+  })
+
   it('should refuse to initialise when imported into a client bundle', async () => {
     vi.stubGlobal('window', {})
     vi.resetModules()
