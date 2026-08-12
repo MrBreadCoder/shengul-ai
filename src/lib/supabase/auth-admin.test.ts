@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { banAuthUsers, unbanAuthUsers, deleteAuthUsers, deleteAuthUser, getAuthUserEmail } from './auth-admin'
+import { banAuthUsers, unbanAuthUsers, deleteAuthUsers, deleteAuthUser, getAuthUserEmail, getAuthUserEmails } from './auth-admin'
 import { AppError } from '@/lib/errors/app-error'
 
 function mockAdmin(
@@ -105,5 +105,40 @@ describe('getAuthUserEmail', () => {
       Promise.resolve({ data: null, error: { status: 500, message: 'boom' } }),
     )
     await expect(getAuthUserEmail(admin, 'u1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+function adminWith(getUserById: (id: string) => Promise<{ data: { user: { email: string | null } | null }; error: unknown }>) {
+  return { auth: { admin: { getUserById } } } as never
+}
+
+describe('getAuthUserEmails', () => {
+  it('should resolve every id when all succeed', async () => {
+    const admin = adminWith((id) => Promise.resolve({ data: { user: { email: `${id}@x.com` } }, error: null }))
+    const result = await getAuthUserEmails(admin, ['u1', 'u2'])
+    expect(result).toEqual(
+      expect.arrayContaining([{ userId: 'u1', email: 'u1@x.com' }, { userId: 'u2', email: 'u2@x.com' }]),
+    )
+  })
+
+  it('should drop an id whose lookup errors, keeping the rest', async () => {
+    const admin = adminWith((id) =>
+      id === 'bad'
+        ? Promise.resolve({ data: { user: null }, error: { message: 'not found' } })
+        : Promise.resolve({ data: { user: { email: `${id}@x.com` } }, error: null }),
+    )
+    const result = await getAuthUserEmails(admin, ['bad', 'u2'])
+    expect(result).toEqual([{ userId: 'u2', email: 'u2@x.com' }])
+  })
+
+  it('should drop an id whose auth user has no email', async () => {
+    const admin = adminWith(() => Promise.resolve({ data: { user: { email: null } }, error: null }))
+    const result = await getAuthUserEmails(admin, ['u1'])
+    expect(result).toEqual([])
+  })
+
+  it('should return an empty array for an empty input', async () => {
+    const admin = adminWith(() => Promise.resolve({ data: { user: { email: 'x@x.com' } }, error: null }))
+    expect(await getAuthUserEmails(admin, [])).toEqual([])
   })
 })

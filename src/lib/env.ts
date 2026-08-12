@@ -48,6 +48,17 @@ const envSchema = publicEnvSchema.extend({
   HUBSPOT_OAUTH_CLIENT_SECRET: nonEmpty,
   PIPEDRIVE_OAUTH_CLIENT_ID: nonEmpty,
   PIPEDRIVE_OAUTH_CLIENT_SECRET: nonEmpty,
+  // Reports — SMTP credentials for the personal weekly/monthly report
+  // emails, sent from Shengul directly. Fully separate from the per-mailbox
+  // outreach system (mailboxes table) — this is one fixed sender identity,
+  // not a rotating pool.
+  REPORTS_SMTP_HOST: nonEmpty,
+  REPORTS_SMTP_PORT: z.coerce.number().int().positive(),
+  REPORTS_SMTP_SECURE: z.enum(['true', 'false']).transform((v) => v === 'true'),
+  REPORTS_SMTP_USERNAME: nonEmpty,
+  REPORTS_SMTP_PASSWORD: nonEmpty,
+  REPORTS_FROM_EMAIL: z.string().email(),
+  REPORTS_FROM_NAME: nonEmpty,
 })
 
 export type Env = z.infer<typeof envSchema>

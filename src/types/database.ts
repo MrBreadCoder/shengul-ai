@@ -962,6 +962,92 @@ export interface Database {
           },
         ]
       }
+      reports: {
+        Row: {
+          id: string
+          client_id: string
+          type: Database['public']['Enums']['report_type']
+          period_start: string
+          period_end: string
+          metrics: Json
+          ai_headline: string
+          ai_summary: string
+          ai_highlights: string[]
+          status: Database['public']['Enums']['report_status']
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          type: Database['public']['Enums']['report_type']
+          period_start: string
+          period_end: string
+          metrics?: Json
+          ai_headline?: string
+          ai_summary?: string
+          ai_highlights?: string[]
+          status?: Database['public']['Enums']['report_status']
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['reports']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'reports_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      report_deliveries: {
+        Row: {
+          id: string
+          client_id: string
+          report_id: string
+          app_user_id: string | null
+          email: string
+          status: Database['public']['Enums']['report_delivery_status']
+          error: string | null
+          sent_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          report_id: string
+          app_user_id?: string | null
+          email: string
+          status: Database['public']['Enums']['report_delivery_status']
+          error?: string | null
+          sent_at?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['report_deliveries']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'report_deliveries_client_id_fkey'
+            columns: ['client_id']
+            isOneToOne: false
+            referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'report_deliveries_report_id_fkey'
+            columns: ['report_id']
+            isOneToOne: false
+            referencedRelation: 'reports'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'report_deliveries_app_user_id_fkey'
+            columns: ['app_user_id']
+            isOneToOne: false
+            referencedRelation: 'app_users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -1132,6 +1218,9 @@ export interface Database {
       warmup_profile: 'standard' | 'slow' | 'none'
       mailreach_status: 'disconnected' | 'pending' | 'connected' | 'error'
       suppression_reason: 'replied' | 'bounced' | 'manual' | 'price_handoff'
+      report_type: 'weekly' | 'monthly'
+      report_status: 'generating' | 'ready' | 'send_failed' | 'sent'
+      report_delivery_status: 'sent' | 'failed'
       author_kind: 'agent' | 'human'
       knowledge_source_type: 'website_page' | 'pdf' | 'file' | 'resource'
       knowledge_source_status: 'pending' | 'ready' | 'failed'

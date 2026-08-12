@@ -77,3 +77,32 @@ export async function deleteAuthUsers(admin: SupabaseClient<Database>, userIds: 
     throw new AppError('EXTERNAL_ERROR', 'Failed to delete an auth user', { cause: failed.error.message })
   }
 }
+
+export interface AuthUserEmail {
+  userId: string
+  email: string
+}
+
+/**
+ * Resolves emails for a batch of auth user ids — best-effort, unlike
+ * deleteAuthUsers's all-or-nothing semantics. An id that errors (banned,
+ * deleted) or has no email is silently dropped rather than failing the
+ * whole batch: report recipient resolution must not let one broken account
+ * block delivery to a client's other dashboard users.
+ */
+export async function getAuthUserEmails(
+  admin: SupabaseClient<Database>,
+  userIds: string[],
+): Promise<AuthUserEmail[]> {
+  const results = await Promise.allSettled(
+    userIds.map(async (userId): Promise<AuthUserEmail | null> => {
+      const { data, error } = await admin.auth.admin.getUserById(userId)
+      if (error || !data.user?.email) return null
+      return { userId, email: data.user.email }
+    }),
+  )
+  return results
+    .filter((result): result is PromiseFulfilledResult<AuthUserEmail | null> => result.status === 'fulfilled')
+    .map((result) => result.value)
+    .filter((value): value is AuthUserEmail => value !== null)
+}

@@ -21,6 +21,8 @@ import {
   updateClientDefaultLocale,
   updateClientSchedule,
   resolveMailboxClientId,
+  listActiveClients,
+  listClientRoleAppUsersForClient,
 } from './clients'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -472,5 +474,39 @@ describe('updateClientSchedule', () => {
         default_discover_time: '06:00',
       }),
     ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listActiveClients', () => {
+  it('should return only active clients ordered by name', async () => {
+    const rows = [{ id: 'c1', name: 'Acme' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: rows, error: null }) }) }) }),
+    } as never
+    expect(await listActiveClients(supabase)).toEqual(rows)
+  })
+
+  it('should throw DB_ERROR on query failure', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }),
+    } as never
+    await expect(listActiveClients(supabase)).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listClientRoleAppUsersForClient', () => {
+  it('should return only that client\'s client-role app_users rows', async () => {
+    const rows = [{ id: 'u1', role: 'client', client_id: 'c1' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }) }),
+    } as never
+    expect(await listClientRoleAppUsersForClient(supabase, 'c1')).toEqual(rows)
+  })
+
+  it('should throw DB_ERROR on query failure', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }),
+    } as never
+    await expect(listClientRoleAppUsersForClient(supabase, 'c1')).rejects.toBeInstanceOf(AppError)
   })
 })

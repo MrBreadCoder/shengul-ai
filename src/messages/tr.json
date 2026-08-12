@@ -24,6 +24,7 @@
     "mail": "E-posta",
     "knowledge": "Bilgi Bankası",
     "analytics": "Analitik",
+    "reports": "Raporlar",
     "clients": "Müşteriler",
     "campaigns": "Kampanyalar",
     "settings": "Ayarlar",
@@ -950,6 +951,26 @@
       "ariaLabel": "{title}: {days} gün içinde {total}, günlük en yüksek {max}",
       "peakLabel": "{days} gün içinde günlük en yüksek {max}"
     }
+  },
+  "reports": {
+    "pageTitle": "Raporlar",
+    "description": "Otomatik olarak oluşturulan haftalık ve aylık performans raporları.",
+    "errorTitle": "Raporlara ulaşılamıyor",
+    "errorDescription": "Raporlarınız yüklenemedi. Hiçbir şey etkilenmedi.",
+    "emptyTitle": "Henüz rapor yok",
+    "emptyDescription": "İlk haftalık raporunuz oluşturulduğunda burada görünecek.",
+    "typeWeekly": "Haftalık",
+    "typeMonthly": "Aylık",
+    "tile": {
+      "leadsFound": "Bulunan kişi",
+      "emailsSent": "Gönderilen e-posta",
+      "replies": "Yanıtlar"
+    },
+    "aiSummaryLabel": "Performans özeti",
+    "activityTrend": "Etkinlik eğilimi",
+    "activityTrendEmpty": "Bu dönem için henüz veri yok.",
+    "weeklyRecap": "Haftalık özet",
+    "weeklyRecapStat": "{count} kişi bulundu"
   },
   "auth": {
     "brand": "Shengul AI",

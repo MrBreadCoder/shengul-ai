@@ -17,10 +17,10 @@ export const LEGAL_ENTITY_DBA = 'Exportpoint'
 /** The product operated by the entity above, and the subject of these documents. */
 export const PRODUCT_NAME = 'Shengul AI'
 
-export const CONTACT_EMAIL = 'support@foundersideai.com'
+export const CONTACT_EMAIL = 'shengul@shengulai.com'
 
 /** From-address for service notices, including notice of changes to these terms. */
-export const NOTICE_EMAIL = 'no-reply@foundersideai.com'
+export const NOTICE_EMAIL = 'shengul@shengulai.com'
 
 export const CONTACT_PHONE = '(+1)+19292141601'
 
@@ -31,7 +31,7 @@ export const CONTACT_ADDRESS_LINES: readonly string[] = [
   'United States',
 ]
 
-export const SITE_HOME_URL = 'http://www.foundersideai.com'
+export const SITE_HOME_URL = 'http://www.shengulai.com'
 
 /** Single-line postal address, for use inside a sentence. */
 export const CONTACT_ADDRESS_INLINE = CONTACT_ADDRESS_LINES.slice(1).join(', ')

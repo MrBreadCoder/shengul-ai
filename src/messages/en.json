@@ -24,6 +24,7 @@
     "mail": "Mail",
     "knowledge": "Knowledge",
     "analytics": "Analytics",
+    "reports": "Reports",
     "clients": "Clients",
     "campaigns": "Campaigns",
     "settings": "Settings",
@@ -950,6 +951,26 @@
       "ariaLabel": "{title}: {total} over {days} days, peak {max} per day",
       "peakLabel": "Peak {max}/day over {days} days"
     }
+  },
+  "reports": {
+    "pageTitle": "Reports",
+    "description": "Weekly and monthly performance reports, generated automatically.",
+    "errorTitle": "Reports unavailable",
+    "errorDescription": "Your reports could not be loaded. Nothing was affected.",
+    "emptyTitle": "No reports yet",
+    "emptyDescription": "Your first weekly report will appear here after it generates.",
+    "typeWeekly": "Weekly",
+    "typeMonthly": "Monthly",
+    "tile": {
+      "leadsFound": "Leads found",
+      "emailsSent": "Emails sent",
+      "replies": "Replies"
+    },
+    "aiSummaryLabel": "Performance summary",
+    "activityTrend": "Activity trend",
+    "activityTrendEmpty": "No data for this period yet.",
+    "weeklyRecap": "Weekly recap",
+    "weeklyRecapStat": "{count} leads found"
   },
   "auth": {
     "brand": "Shengul AI",

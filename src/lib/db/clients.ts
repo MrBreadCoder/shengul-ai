@@ -52,6 +52,37 @@ export async function listClientRoleAppUsers(
   return data ?? []
 }
 
+// Only the caller's own client_id — used by the reports fanout to load the
+// weekly/monthly recipient list for one client at a time (admin client, no
+// session). Distinct from listClientRoleAppUsers, which loads every
+// client-role user across every client for the operator admin page.
+export async function listClientRoleAppUsersForClient(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+): Promise<AppUserRow[]> {
+  const { data, error } = await supabase
+    .from('app_users')
+    .select('*')
+    .eq('role', 'client')
+    .eq('client_id', clientId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list client app_users for client', { clientId, cause: error.message })
+  }
+  return data ?? []
+}
+
+// Clients eligible for the weekly/monthly reports fanout — paused/archived
+// clients are skipped (spec §1).
+export async function listActiveClients(supabase: SupabaseClient<Database>): Promise<ClientOption[]> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('status', 'active')
+    .order('name')
+  if (error) throw new AppError('DB_ERROR', 'Failed to list active clients', { cause: error.message })
+  return data ?? []
+}
+
 export async function insertAppUser(
   supabase: SupabaseClient<Database>,
   row: AppUserInsert,

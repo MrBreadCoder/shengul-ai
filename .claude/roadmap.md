@@ -862,10 +862,11 @@ document that does not exist. Plus `linkify`, `format-date` and `public-paths` s
 `/login`, sitemap lists all 8 URLs, cross-document links and the contact block render.
 
 **Not done — needs a human:** the legal positions (legitimate-interests basis, arbitration
-clause, liability cap, SCC elections) need counsel review before they are relied on. Open
-question flagged to the operator: the documents still identify the site as
-`foundersideai.com`, because the contact addresses are on that domain and contact details
-were out of scope — confirm whether that is still the operating domain for Shengul AI.
+clause, liability cap, SCC elections) need counsel review before they are relied on.
+
+**Update (2026-08-12):** operator confirmed `foundersideai.com` is no longer the operating
+domain. `src/lib/legal/contact.ts` now uses `shengul@shengulai.com` for `CONTACT_EMAIL` and
+`NOTICE_EMAIL`, and `http://www.shengulai.com` for `SITE_HOME_URL`.
 
 ---
 
@@ -4805,3 +4806,234 @@ tests, all passing (including new `client-api-keys.test.ts`, updated
 `client.test.ts` / `enrollment.test.ts` / `mailreach-sync.test.ts` /
 `env.test.ts` coverage for the resolved-key threading). `eslint` clean on
 every touched file.
+
+## Reports (weekly + monthly) — Tasks 1-6 — 2026-08-12
+
+**Why:** Ship the data layer underpinning weekly/monthly client performance
+reports — see `docs/superpowers/specs/2026-08-12-reports-design.md` and
+`docs/superpowers/plans/2026-08-12-reports.md`. This pass covers plan Tasks
+1-6 (migration/types through recipient-email plumbing's DB/auth layer);
+Tasks 7+ (metrics builder, AI commentary, mailer, orchestrator, routes,
+cron scripts, UI pages) are not yet started.
+
+**Changes:**
+- [x] Task 1 — `supabase/migrations/0039_reports.sql`: `reports` +
+      `report_deliveries` tables, `report_type`/`report_status`/
+      `report_delivery_status` enums, RLS policies matching
+      `0018_client_resources.sql`'s `is_operator() or client_id =
+      current_client_id()` shape. Hand-added matching types to
+      `src/types/database.ts` (`Tables.reports`, `Tables.report_deliveries`,
+      three new `Enums` entries). **Not applied** to a live Postgres — no
+      local Supabase/Docker available in this environment (same situation as
+      `0010_event_logging.sql`, per this file's 2026-07 entries); relying on
+      `pnpm typecheck` plus close comparison against `0018`'s proven RLS
+      pattern for confidence. Must be applied before Task 12's routes can
+      work end-to-end.
+- [x] Task 2 — `src/types/reports.ts`: `reportMetricsSnapshotSchema` +
+      `ReportMetricsSnapshot` type, composing `OverviewMetrics`/`DailyMetric`
+      from `types/analytics.ts`, with an optional `weeklyBreakdown` for
+      monthly reports.
+- [x] Task 3 — `src/lib/reports/period.ts`: `getWeeklyPeriod`/
+      `getMonthlyPeriod` — UTC-day-aligned 7-day window and full-calendar-month
+      math, `Date.UTC`'s native negative-month rollback handles Dec→Jan
+      wraparound with no special-casing.
+- [x] Task 4 — `src/lib/db/reports.ts`: CRUD layer — `upsertReport` (upsert
+      on `(client_id, type, period_start)`, partial-field-safe), `getReportById`,
+      `listReportsForClient` (ready/sent only), `listWeeklyReportsInRange`,
+      `getPreviousReport`, `countPriorReportsForClient`,
+      `insertReportDelivery`.
+- [x] Task 5 — `src/lib/db/clients.ts`: added `listClientRoleAppUsersForClient`
+      (single-client scoped, distinct from the existing all-clients
+      `listClientRoleAppUsers`) and `listActiveClients`.
+- [x] Task 6 — `src/lib/supabase/auth-admin.ts`: added `getAuthUserEmails`
+      batch resolver — `Promise.allSettled` over `getUserById`, best-effort
+      (drops any id that errors or has no email rather than failing the
+      whole batch), distinct from `deleteAuthUsers`'s all-or-nothing
+      semantics. Appended to the existing `auth-admin.test.ts` rather than
+      overwriting it.
+- Fixed one test fixture bug found while implementing: the plan's Task 2
+  test used a non-RFC-compliant literal UUID
+  (`11111111-1111-1111-1111-111111111111`, invalid v4 variant bits) that
+  this repo's zod v4 `.uuid()` correctly rejects — same validator used
+  throughout the codebase (`inbox/actions.ts`, `cases/[id]/actions.ts`,
+  etc.) against real `gen_random_uuid()` values. Fixed the fixture, not the
+  schema.
+
+**Verified:** `pnpm typecheck` clean; full `vitest run` — 206 files, 2255
+tests, all passing (96 of them new/changed across
+`types/reports.test.ts`, `lib/reports/period.test.ts`,
+`lib/db/reports.test.ts`, `lib/db/clients.test.ts` additions, and
+`lib/supabase/auth-admin.test.ts` additions). Migration not yet applied
+against a live database (see Task 1 note above) — apply and re-verify RLS
+before Task 7+ routes depend on it end-to-end.
+
+## Reports (weekly + monthly) — Tasks 7-14 — 2026-08-12
+
+**Why:** Continuation of the reports feature — see `docs/superpowers/specs/2026-08-12-reports-design.md`
+and `docs/superpowers/plans/2026-08-12-reports.md`. This pass covers Tasks
+7-14: the metrics builder, AI commentary + fallback, the standalone SMTP
+mailer, the 7 rotating email templates, the `generateReport()`
+orchestrator, the 3 pipeline routes, the 2 cron registration scripts, and
+the real SVG report chart. Tasks 15-18 (nav/i18n/list page, detail page,
+the fake-report preview script, final roadmap pass) are not yet started.
+
+**Changes:**
+- [x] Task 7 — `src/lib/reports/metrics.ts`: `buildReportMetrics()` — calls
+      the existing `getOverviewMetrics`/`getDailyMetrics` RPCs scoped to the
+      client with no campaign filter (account-level aggregate only, spec
+      §3); for `type: 'monthly'` also assembles `weeklyBreakdown` by copying
+      each already-frozen weekly report's stored `overview` snapshot rather
+      than recomputing, so a monthly report always agrees exactly with the
+      weekly reports it recaps.
+- [x] Task 8 — `REPORTS_SMTP_*`/`REPORTS_FROM_EMAIL`/`REPORTS_FROM_NAME` env
+      vars (`env.ts`, `.env.example`, `vitest.config.ts`'s test-env stub) +
+      `src/lib/reports/mailer.ts`: `sendReportEmail()` — its own minimal
+      nodemailer transport (not the mailbox module's IMAP-carrying
+      `SmtpCredentials`), BCC'd to `REPORTS_FROM_EMAIL` on every send,
+      reusing `assertNoHeaderInjection`/`toMailAppError`/`withMailDeadline`
+      from the mailbox module as provider-agnostic utilities only.
+- [x] Task 9 — `src/lib/reports/email-templates.ts`: 7 rotating templates
+      (`pickTemplate(priorCount % 7)`, `renderTemplate()`), company-name
+      greeting only (no per-person name field exists), static
+      `FEEDBACK_CALL_URL` constant, every interpolated field guarded by
+      `assertNoHeaderInjection`.
+- [x] Task 10 — `src/lib/reports/commentary.ts`: `generateReportCommentary()`
+      on `generateJson()`/`thinkingLevel: 'low'`, grounded in the current +
+      previous period's real numbers (never a fresh RPC — the prior
+      period's already-stored snapshot); `buildFallbackCommentary()` for
+      when the AI call fails — deterministic, always 2 highlights so the
+      fallback shape stays valid against `reportCommentarySchema`'s 2-4
+      minimum even though it's never re-validated through it.
+- [x] Task 11 — `src/lib/reports/generate.ts`: `generateReport()` — the full
+      orchestrator matching spec §2's numbered generation flow exactly
+      (upsert generating → metrics → commentary-with-fallback → upsert
+      ready → resolve recipients → per-recipient send with its own
+      try/catch and `report_deliveries` row → upsert sent/send_failed).
+- [x] Task 12 — 3 new pipeline routes:
+      `/api/pipeline/reports-weekly-fanout`, `/api/pipeline/reports-monthly-fanout`
+      (both mirror `discover-fanout`'s per-client publish-failure isolation
+      exactly), `/api/pipeline/reports-generate` (QStash-signed, Zod-validated
+      body, maps `NOT_FOUND`/`UNAUTHORIZED` to 404/401, everything else to a
+      logged 500).
+- [x] Task 13 — `scripts/schedule-reports-weekly-cron.ts` (`0 8 * * 1`) and
+      `scripts/schedule-reports-monthly-cron.ts` (`0 8 1 * *`) — one-off
+      `scheduleCron()` registration scripts, matching every existing
+      `schedule-*-cron.ts` exactly, including that repo convention's lack of
+      a `package.json` alias (confirmed no existing one has one before
+      following that pattern here too).
+- [x] Task 14 — `src/components/report-chart.tsx`: hand-built SVG line
+      chart, no library. Invoked the `dataviz` skill per the plan's
+      instruction before writing it, which changed the plan's own draft in
+      one material way: the draft reused the case-*status* palette
+      (`--status-ready`/`--status-contacted`/`--status-won`) as arbitrary
+      series colors, which the skill's color-formula flags as a reserved-
+      token violation (status colors carry pipeline-state meaning and must
+      never double as "series 4" for an unrelated metric). Added a proper
+      3-slot categorical palette instead — `--chart-1/2/3` in
+      `globals.css`, light+dark, taken from the skill's own pre-validated
+      reference palette (slots 1-3, documented as clearing the all-pairs
+      CVD/contrast gates in both modes) and re-confirmed with
+      `validate_palette.js` rather than trusting the doc alone. Also added,
+      beyond the plan's static-only draft, per the skill's "hover is part
+      of the deliverable, not an upgrade" rule: a pointer+keyboard
+      crosshair/tooltip layer (client component), 2px round-cap lines,
+      ≥8px end-dot markers with a 2px surface ring computed from the same
+      `xFor`/`yFor` as the paths (no separate/driftable transform), and
+      line-key legend swatches instead of boxes. `buildChartGeometry()`
+      stays pure and exported for testing, now also returning `points`
+      (per-index, all-series values, for the tooltip) and `seriesEndPoints`
+      (marker positions) alongside the original `gridLines`/`paths`/`xLabels`.
+- Fixed two more test-fixture bugs found while implementing, same class as
+  the Task 2 UUID issue from the prior pass: `lib/reports/metrics.test.ts`
+  and `lib/reports/generate.test.ts`'s plan-provided mocks used partial
+  `OverviewMetrics` objects (e.g. `{ leadsDiscovered: 3 }`) fed into code
+  paths that *really* run `reportMetricsSnapshotSchema.parse()` (unmocked)
+  — a partial object fails that parse's 13-required-field check. Filled in
+  full valid overview fixtures instead of trimming the assertions.
+  `src/lib/env.test.ts`'s own hand-built `complete` env fixture (separate
+  from `vitest.config.ts`'s global stub, already updated in the prior pass)
+  needed the 7 new `REPORTS_SMTP_*`/`REPORTS_FROM_*` keys added or every
+  `loadEnv(complete)` test failed on the newly-required vars.
+
+**Verified:** `pnpm typecheck` clean; `pnpm lint` clean (0 errors, only
+pre-existing unused-destructure warnings elsewhere in the repo); full
+`vitest run` — 215 files, 2292 tests, all passing. Migration from Task 1
+still not applied against a live Postgres (unchanged from the prior
+entry) — the mocked unit tests here don't exercise real RLS or the real
+upsert-on-conflict behavior either.
+
+## Reports (weekly + monthly) — Tasks 15-18, feature complete — 2026-08-12
+
+**Why:** Final pass of the reports feature — see
+`docs/superpowers/specs/2026-08-12-reports-design.md` and
+`docs/superpowers/plans/2026-08-12-reports.md`. This completes the plan:
+the client-facing `/reports` list + `/reports/[id]` detail pages, nav +
+full i18n (en/tr), the `test-fake-report.ts` preview script, and this
+final verification pass. **All 18 tasks in the plan are now implemented.**
+
+**Changes:**
+- [x] Task 15 — Nav: `'reports'` added to `NavItem['labelKey']`,
+      `ClipboardText` icon, new `PRIMARY_NAV` entry after `/analytics`,
+      `clientOnly: true` (`src/components/shell/nav.tsx`). i18n: `nav.reports`
+      key + full `reports` namespace (10 keys, 3 nested under `tile`) added to
+      both `en.json` and `tr.json` — client-facing, so fully translated per
+      this repo's rule (operator-only pages are not). New
+      `src/app/(app)/reports/page.tsx` — `requireUser()` + operator→`/crm`
+      redirect matching `/home`'s pattern exactly, `listReportsForClient`
+      (Task 4), `EmptyState` for a brand-new client, type badge + period +
+      generated-date row list. `loading.tsx`/`error.tsx` alongside, matching
+      every other route's shape.
+- [x] Task 16 — `src/app/(app)/reports/[id]/page.tsx`: `getReportById`
+      (RLS-scoped, 404s via `notFound()` for another client's report or a
+      still-`'generating'`/`'send_failed'` row), stat tiles, AI-commentary
+      callout block, the real `ReportChart` (Task 14), and — monthly only —
+      the weekly-recap table linking to each individual weekly report.
+      `loading.tsx`/`error.tsx` alongside.
+- [x] Task 17 — `scripts/test-fake-report.ts` (+ `pnpm test-fake-report`
+      alias in `package.json`, precedented by `test-fake-email`'s own
+      alias): synthetic weekly (4 backdated + 1 current) and monthly
+      reports written through the real `upsertReport()`, emailed through
+      the real mailer + real rotating templates to one hardcoded address,
+      no AI call, no real recipient resolution — matching spec §10 exactly.
+      Fixed one more spec-vs-`tsc` mismatch found while implementing: the
+      plan's own code comment claimed "TypeScript narrows a `const` binding
+      across a closure defined later in the same scope" for a
+      nullable-then-checked `client` read as `client.name` inside a nested
+      `async function emailPreview(...)` — real `tsc --noEmit` disagreed
+      (`'client' is possibly 'null'`, TS18047). Pulled `clientName` out as
+      its own `const` right after the null check instead of relying on
+      cross-closure narrowing that doesn't actually hold.
+- [x] Task 18 — Full verification pass (below) and this roadmap entry.
+
+**`pnpm test-fake-report` — ran end-to-end successfully (update: this
+superseded the same-day note below).** First attempt failed correctly at
+env validation (`CONFIG_ERROR`) because `REPORTS_SMTP_*`/`REPORTS_FROM_*`
+weren't in `.env.local` yet. Shengul added the 7 real SMTP vars to
+`.env.local` directly; re-ran and it completed cleanly: printed 6 report
+rows (5 backdated/silent weekly + 1 current weekly + 1 monthly, exactly
+the shape §10 specifies), 2 preview emails sent to
+`shengul@shengulai.com`. This also answered the open question about
+migration `0039_reports.sql`: contrary to the note below, it turns out
+**it is applied** on the hosted Supabase project — the `reports`/
+`report_deliveries` tables already exist there (local Docker/Supabase
+being unavailable in this sandbox only ever blocked the `migration up
+--local` verification path, not the hosted project's actual state).
+Re-ran the script a second time and got back the identical 6 UUIDs,
+confirming `upsertReport`'s `(client_id, type, period_start)`
+upsert-on-conflict semantics hold — no duplicate rows on a re-run.
+Not confirmed from this session (needs Shengul's own inbox/browser):
+the emails' actual from-address/BCC rendering, and clicking through to
+the report pages to see the real charts and weekly-recap links render.
+
+**Verified:** `pnpm typecheck` clean; `pnpm lint` clean (0 errors, same 9
+pre-existing warnings as every prior entry, none newly introduced); full
+`vitest run` — 215 files, 2292 tests, all passing (no new test files in
+this pass — Tasks 15-17 are pages/a script with no automated tests,
+matching this repo's established precedent: thin Server Component pages
+composing already-tested `lib` functions, and a manually-run smoke script
+like `test-fake-email.ts`); `pnpm test-fake-report` run twice against the
+real hosted project, both clean, as detailed above. The feature is
+implemented end-to-end. Remaining before the first real cron tick:
+`pnpm schedule-reports-weekly-cron` / `pnpm schedule-reports-monthly-cron`
+against that environment (needs `QSTASH_TOKEN`) — see the plan's
+"Post-implementation" section.

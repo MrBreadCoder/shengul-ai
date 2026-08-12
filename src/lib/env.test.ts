@@ -25,6 +25,13 @@ const complete: Record<string, string> = {
   HUBSPOT_OAUTH_CLIENT_SECRET: 'hs-secret',
   PIPEDRIVE_OAUTH_CLIENT_ID: 'pd-id',
   PIPEDRIVE_OAUTH_CLIENT_SECRET: 'pd-secret',
+  REPORTS_SMTP_HOST: 'smtp.shengulai.com',
+  REPORTS_SMTP_PORT: '587',
+  REPORTS_SMTP_SECURE: 'false',
+  REPORTS_SMTP_USERNAME: 'shengul@shengulai.com',
+  REPORTS_SMTP_PASSWORD: 'app-password',
+  REPORTS_FROM_EMAIL: 'shengul@shengulai.com',
+  REPORTS_FROM_NAME: 'Shengul Yavuz',
 }
 
 describe('loadEnv', () => {

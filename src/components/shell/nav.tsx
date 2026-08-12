@@ -6,6 +6,7 @@ import type { ComponentType } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   ChartLineUp,
+  ClipboardText,
   Envelope,
   Gear,
   House,
@@ -27,6 +28,7 @@ interface NavItem {
     | 'mail'
     | 'knowledge'
     | 'analytics'
+    | 'reports'
     | 'clients'
     | 'campaigns'
     | 'settings'
@@ -44,6 +46,7 @@ const PRIMARY_NAV: readonly NavItem[] = [
   { href: '/mail', labelKey: 'mail', icon: Envelope },
   { href: '/knowledge', labelKey: 'knowledge', icon: Stack },
   { href: '/analytics', labelKey: 'analytics', icon: ChartLineUp },
+  { href: '/reports', labelKey: 'reports', icon: ClipboardText, clientOnly: true },
 ]
 
 const SECONDARY_NAV: readonly NavItem[] = [
