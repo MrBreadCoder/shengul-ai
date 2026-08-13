@@ -16,7 +16,7 @@ export const emailableResultSchema = z.object({
   state: z.string(),
   email: z.string(),
   reason: z.string().optional(),
-  score: z.number().optional(),
+  score: z.number().nullable().optional(),
   domain: z.string().optional(),
   user: z.string().optional(),
   accept_all: z.boolean().nullable().optional(),

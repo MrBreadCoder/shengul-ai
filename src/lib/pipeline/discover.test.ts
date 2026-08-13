@@ -578,6 +578,56 @@ describe('runDiscoveryForCampaign', () => {
     expect(summary.depthCandidates).toBe(1)
     expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p2' })])
   })
+
+  it('should skip a breadth candidate whose organization name matches Apollo\'s confidential-org placeholder, without ever calling bulk_match', async () => {
+    mockSearchPeople
+      .mockResolvedValueOnce({
+        totalEntries: 2,
+        candidates: [
+          { ...candidate('p1', 'p1.com'), organizationName: 'Private Airline Based in UAE', organizationDomain: null },
+          candidate('p2', 'p2.com'),
+        ],
+      })
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified')),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, contactsPerCompany: 2, icp },
+    )
+
+    expect(summary.breadthCandidates).toBe(1)
+    // p1 (the redacted org) never reaches bulk_match at all — no Apollo enrich
+    // credit and no Emailable credit are ever spent on it.
+    expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p2' })])
+  })
+
+  it('should drop a depth target company whose organization name matches the confidential-org placeholder, before calling bulk_match', async () => {
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockSearchPeople
+      .mockResolvedValueOnce({
+        totalEntries: 1,
+        candidates: [{ ...candidate('p5', 'acme.com'), organizationName: 'Confidential Company Based in UAE' }],
+      }) // round 1 depth: dropped by the placeholder-name check, target dropped immediately
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
+    mockInsertLeads.mockResolvedValue([])
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, contactsPerCompany: 2, icp },
+    )
+
+    expect(summary.depthCandidates).toBe(0)
+    expect(mockBulkMatchPeople).not.toHaveBeenCalled()
+  })
 })
 
 describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
@@ -940,6 +990,114 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
     expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
     expect(summary.excludedPostEnrich).toBe(1)
     expect(summary.verified).toBe(0)
+  })
+
+  it('should park a lead whose enriched company name matches the confidential-org placeholder, without calling Emailable', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationName: 'Private Airline Based in UAE' })),
+    )
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp },
+    )
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled()
+    expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+    const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
+    expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
+    expect(summary.redactedOrgSkipped).toBe(1)
+    expect(summary.verified).toBe(0)
+  })
+
+  it('should log a pipeline.discover.redacted_org_skipped event for a placeholder-name company', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationName: 'Private Airline Based in UAE' })),
+    )
+
+    await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp })
+
+    expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client1',
+      type: 'pipeline.discover.redacted_org_skipped',
+      source: 'pipeline',
+      payload: expect.objectContaining({ campaignId: 'camp1', leadSourceId: 'p1' }),
+    }))
+  })
+
+  it('should park a lead whose company has 2 or more blank firmographic fields (domain/city/state/country/founded year), even with a normal-looking name', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({
+        ...enriched(d.id, 'verified'),
+        organizationName: 'Royal Jet',
+        organizationDomain: null,
+        organizationCity: null,
+        organizationState: null,
+        organizationCountry: null,
+        organizationFoundedYear: 1985,
+      })),
+    )
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp },
+    )
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled()
+    const rows = mockInsertLeads.mock.calls[0]?.[1] as Record<string, unknown>[]
+    expect(rows[0]).toMatchObject({ email_status: 'verified', status: 'parked' })
+    expect(summary.redactedOrgSkipped).toBe(1)
+  })
+
+  it('should still activate a lead with a real name and at most 1 blank firmographic field', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({
+        ...enriched(d.id, 'verified'),
+        organizationName: 'Royal Jet',
+        organizationDomain: 'royaljetgroup.com',
+        organizationCity: 'Abu Dhabi',
+        organizationState: null,
+        organizationCountry: 'UAE',
+        organizationFoundedYear: 1985,
+      })),
+    )
+    mockVerifyEmail.mockResolvedValue(verification('deliverable'))
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp },
+    )
+
+    expect(mockVerifyEmail).toHaveBeenCalledTimes(1)
+    expect(summary.redactedOrgSkipped).toBe(0)
+    expect(summary.verified).toBe(1)
+  })
+
+  it('should not double-count a lead that is both post-enrich excluded and a redacted org', async () => {
+    singleCandidateRun()
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => ({
+        ...enriched(d.id, 'verified'),
+        organizationIndustry: 'Staffing & Recruiting',
+        organizationName: 'Private Airline Based in UAE',
+      })),
+    )
+    const icpWithExclude: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
+
+    const summary = await runDiscoveryForCampaign(
+      {} as never,
+      { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp: icpWithExclude },
+    )
+
+    // Post-enrich exclude-keyword runs first and already parks the row, so
+    // the redacted-org check (scoped to not-yet-skipped rows) never re-checks it.
+    expect(summary.excludedPostEnrich).toBe(1)
+    expect(summary.redactedOrgSkipped).toBe(0)
   })
 
   it('should not double-count a lead that is both suppressed and post-enrich excluded', async () => {

@@ -73,6 +73,15 @@ describe('verifyEmail', () => {
     expect(result.state).toBe('risky')
   })
 
+  it('should parse a response where score comes back null instead of omitted', async () => {
+    stubFetch(JSON.stringify({ ...deliverable, score: null }), 200)
+
+    const result = await verifyEmail('jo@acme.com')
+
+    expect(result.state).toBe('deliverable')
+    expect(result.score).toBeNull()
+  })
+
   it.each([400, 401, 402, 403, 404, 429, 500, 503])(
     'should throw EXTERNAL_ERROR when the vendor responds %i',
     async (status) => {

@@ -4,6 +4,7 @@ import { searchPeople, bulkMatchPeople } from '@/lib/apollo/client'
 import { buildPeopleSearchParams } from '@/lib/apollo/build-search-params'
 import { mapApolloEmailStatus } from '@/lib/apollo/map-email-status'
 import { matchesExcludedKeywords } from '@/lib/apollo/exclude-keywords'
+import { isRedactedOrgName, hasTooManyBlankCompanyFields } from '@/lib/apollo/redacted-org'
 import type { ApolloIcpFilters, ApolloSearchCandidate } from '@/lib/apollo/types'
 import { getKnownSourceIds, insertLeads, getVerifiedLeadCompanies, type LeadInsert, type LeadRow } from '@/lib/db/leads'
 import { getSuppressions } from '@/lib/db/suppressions'
@@ -71,6 +72,12 @@ export interface DiscoverySummary {
   suppressedSkipped: number
   /** Apollo-verified leads parked without an Emailable call: matched an exclude keyword post-enrich. */
   excludedPostEnrich: number
+  /** Apollo-verified leads parked without an Emailable call: Apollo's org name matched its
+   * confidential-org redaction template, or 2+ of domain/city/state/country/founded-year came
+   * back blank — see src/lib/apollo/redacted-org.ts. Pre-enrich candidates dropped by the same
+   * name check (before any credit spend) are silently skipped, like the pre-enrich exclude-keyword
+   * filter, and are not counted here — this counter is post-enrich only. */
+  redactedOrgSkipped: number
   /** Rows evaluated against the AI relevance filter (cache hits included). */
   aiChecked: number
   /** Rows parked because the AI relevance filter rejected their company. */
@@ -180,6 +187,12 @@ async function runBreadthSearch(
     for (const candidate of candidates) {
       if (picks.length >= quota) break
       if (matchesExcludedKeywords(candidate, icp.excludeKeywords)) continue
+      // Zero-cost rejection: organizationName is the only company signal a
+      // pre-enrich search candidate carries, and Apollo's own search call is
+      // free — this drops confidential-org placeholders before Apollo's
+      // enrich call (bulk_match) and before any credit, Apollo or Emailable,
+      // is ever spent. See src/lib/apollo/redacted-org.ts.
+      if (isRedactedOrgName(candidate.organizationName)) continue
       if (known.has(candidate.apolloId)) continue
       if (picks.some((f) => f.apolloId === candidate.apolloId)) continue
       const companyKey = computeCompanyKey(candidate.organizationDomain, candidate.organizationName)
@@ -260,6 +273,13 @@ async function runDepthSearch(
       // same domain will ever pass either — drop the target now instead of
       // re-querying this company on every remaining page.
       if (matchesExcludedKeywords({ title: null, organizationName: candidate.organizationName }, icp.excludeKeywords)) {
+        remainingTargets.delete(companyKey)
+        continue
+      }
+      // Same zero-cost, company-level reasoning as runBreadthSearch above —
+      // a redacted placeholder name disqualifies the whole company, not just
+      // this one candidate, so it comes off the target list entirely.
+      if (isRedactedOrgName(candidate.organizationName)) {
         remainingTargets.delete(companyKey)
         continue
       }
@@ -393,6 +413,7 @@ interface EnrichResult {
   emailableFailedOpen: number
   suppressedSkipped: number
   excludedPostEnrich: number
+  redactedOrgSkipped: number
   aiChecked: number
   aiRejected: number
   aiFailedOpen: number
@@ -416,7 +437,10 @@ function isVerifiableRow(row: LeadInsert, skipVerification: Set<string>): boolea
 // failed discovery run.
 async function logDiscoveryFilterEvent(
   campaign: CampaignForDiscovery,
-  type: 'pipeline.discover.suppressed_skipped' | 'pipeline.discover.excluded_post_enrich',
+  type:
+    | 'pipeline.discover.suppressed_skipped'
+    | 'pipeline.discover.excluded_post_enrich'
+    | 'pipeline.discover.redacted_org_skipped',
   leadSourceId: string,
   companyKey: string,
 ): Promise<void> {
@@ -492,6 +516,7 @@ async function enrichCandidates(
   let emailableFailedOpen = 0
   let suppressedSkipped = 0
   let excludedPostEnrich = 0
+  let redactedOrgSkipped = 0
   let aiChecked = 0
   let aiRejected = 0
   let aiFailedOpen = 0
@@ -577,6 +602,34 @@ async function enrichCandidates(
         await logDiscoveryFilterEvent(
           campaign,
           'pipeline.discover.excluded_post_enrich',
+          person.apolloId,
+          computeCompanyKey(companyDomain, companyName),
+        )
+      }
+
+      // Post-enrich privacy-redaction backstop: re-checks the org name (in
+      // case enrich resolved a different name than the search candidate
+      // carried) and, now that firmographics exist, checks for the
+      // data-sparsity fingerprint the same redaction leaves even under a
+      // name that doesn't match the template. Scoped to rows the check above
+      // hasn't already parked, so a row matching both filters is counted and
+      // logged once — see src/lib/apollo/redacted-org.ts.
+      if (
+        !skipVerification.has(person.apolloId) &&
+        (isRedactedOrgName(companyName) ||
+          hasTooManyBlankCompanyFields({
+            companyDomain,
+            city: person.organizationCity,
+            state: person.organizationState,
+            country: person.organizationCountry,
+            foundedYear: person.organizationFoundedYear,
+          }))
+      ) {
+        skipVerification.add(person.apolloId)
+        redactedOrgSkipped += 1
+        await logDiscoveryFilterEvent(
+          campaign,
+          'pipeline.discover.redacted_org_skipped',
           person.apolloId,
           computeCompanyKey(companyDomain, companyName),
         )
@@ -711,6 +764,7 @@ async function enrichCandidates(
     emailableFailedOpen,
     suppressedSkipped,
     excludedPostEnrich,
+    redactedOrgSkipped,
     aiChecked,
     aiRejected,
     aiFailedOpen,
@@ -762,6 +816,7 @@ export async function runDiscoveryForCampaign(
     let emailableFailedOpen = 0
     let suppressedSkipped = 0
     let excludedPostEnrich = 0
+    let redactedOrgSkipped = 0
     let aiChecked = 0
     let aiRejected = 0
     let aiFailedOpen = 0
@@ -781,6 +836,7 @@ export async function runDiscoveryForCampaign(
       emailableFailedOpen += result.emailableFailedOpen
       suppressedSkipped += result.suppressedSkipped
       excludedPostEnrich += result.excludedPostEnrich
+      redactedOrgSkipped += result.redactedOrgSkipped
       aiChecked += result.aiChecked
       aiRejected += result.aiRejected
       aiFailedOpen += result.aiFailedOpen
@@ -910,6 +966,7 @@ export async function runDiscoveryForCampaign(
       emailableFailedOpen,
       suppressedSkipped,
       excludedPostEnrich,
+      redactedOrgSkipped,
       aiChecked,
       aiRejected,
       aiFailedOpen,

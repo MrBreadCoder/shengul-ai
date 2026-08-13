@@ -5640,3 +5640,81 @@ pass — worth doing before the next deploy.
 unconditional `'contacted'` write described above. Any client on
 `human_approve` will keep seeing analytics report cases as contacted the
 moment a draft is written, before a human ever approves or sends it.
+
+---
+
+## Emailable `score: null` schema bug + Apollo confidential-org filtering — 2026-08-13
+
+**Trigger:** investigated a lead named literally "Private Airline Based in UAE"
+(`leads.id c0c6aad2-…`, client Ali Alali / Royal Jet) — traced two separate
+issues from it, one bug fix and one new filter.
+
+**Bug fix — Emailable `score: null` crashed schema validation:**
+- Root cause: `emailableResultSchema` (`src/lib/emailable/types.ts`) typed
+  `score: z.number().optional()`, but Emailable sometimes returns
+  `"score": null` explicitly rather than omitting the key — `.optional()`
+  alone only tolerates `undefined`, not `null`. Zod's `safeParse` failure hit
+  `mapEmailableVerdict`'s fail-open branch, so the lead kept Apollo's
+  original verdict instead of getting a real Emailable re-check.
+  `leads.email_verification.error` on 4 rows read
+  `"Unexpected response shape (score: Invalid input: expected number, received null)"`.
+- Verified scope before fixing: queried every historical verification
+  failure in the DB (4 of 72 total) — all 4 are this exact shape, no other
+  field. Fix: `score: z.number().nullable().optional()`. TDD'd — RED test
+  added to `client.test.ts` reproducing the exact prod error, confirmed it
+  failed for the right reason, then GREEN.
+
+**New filter — Apollo confidential-org redaction (`src/lib/apollo/redacted-org.ts`):**
+Apollo withholds real identity for orgs it treats as confidential (private
+aviation, family offices, defense/gov, some PE portfolios), substituting a
+templated placeholder name like "Private Airline Based in UAE" /
+"Confidential Company Based in Riyadh" and leaving
+domain/city/state/country/founded_year null. Two checks, run at two
+different pipeline stages because the data exists at different points:
+- `isRedactedOrgName` — regex on the templated name text
+  (`^(private|confidential|government)\b.*\bbased in\b`, case-insensitive).
+  This is the only company signal a **pre-enrich** Apollo search candidate
+  carries, so it's wired into `runBreadthSearch`/`runDepthSearch`
+  (`src/lib/pipeline/discover.ts`) — a match is dropped before Apollo's
+  enrich call (`bulk_match`), i.e. before *any* credit (Apollo or Emailable)
+  is spent. Depth-phase match drops the whole company target, matching the
+  existing exclude-keyword company-level-drop behavior.
+- `hasTooManyBlankCompanyFields` — true when 2+ of
+  {domain, city, state, country, founded_year} are blank. These fields only
+  exist **post-enrich** (`bulk_match`'s org object), so this runs inside
+  `enrichCandidates`, in the same slot as the existing post-enrich
+  exclude-keyword check, before `verifyBatch`/Emailable — backstop for a
+  redaction that didn't match the name template. Re-checks
+  `isRedactedOrgName` on the resolved post-enrich name too. Guarded on
+  `!skipVerification.has(id)` so a lead matching both this and the
+  exclude-keyword check is counted/logged once, not twice.
+- New `DiscoverySummary.redactedOrgSkipped` counter (post-enrich only — the
+  pre-enrich name-match drops are silent/uncounted, same convention as the
+  existing pre-enrich exclude-keyword filter) + `pipeline.discover.redacted_org_skipped`
+  event type.
+
+**Credit-spend timing, told straight (asked explicitly):** the name check is
+genuinely free — it runs before Apollo's `bulk_match` call exists in the
+flow at all. The blank-fields check cannot be: city/state/country/founded_year
+don't exist until after `bulk_match` runs, so by the time that check fires,
+Apollo's enrich credit for that specific person may already be spent (if
+Apollo revealed a verified email for them) — it still reliably blocks the
+Emailable credit, which is the more scarce resource. In practice this residual
+gap is small: our own investigated case (and presumably most fully-redacted
+orgs) has `organizationDomain: null` from search already, so the free
+name-pattern check catches it pre-enrich before bulk_match is ever called.
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
+full `vitest run` — 219 files, 2417 tests, all passing (new coverage:
+`redacted-org.test.ts` — 12 tests, unit-TDD'd; `discover.test.ts` — 7 new
+tests for pre-enrich breadth/depth drops and post-enrich blank-field/name
+backstop/double-count behavior, confirmed RED (`git stash` the wiring,
+re-run, 7 failures) then GREEN before committing; `client.test.ts` — 1 new
+test for the `score: null` shape).
+
+**Not addressed this session:** no UI surfaces `redactedOrgSkipped` yet
+(matches `suppressedSkipped`/`excludedPostEnrich`/`aiRejected`, none of
+which have dedicated UI either — all fall through to the generic Logs
+feed). The `2` blank-field threshold is an operator judgment call, not
+derived from data beyond the one investigated case — worth revisiting with
+a larger sample if it starts rejecting real, sparsely-documented companies.
