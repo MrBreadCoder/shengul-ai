@@ -10,8 +10,12 @@
 /**
  * Matched exactly. `startsWith('/')` would make the entire app public.
  * `/tr` is the Turkish mirror of `/` — see the landing i18n design doc.
+ * `/api/locale` is the footer language switcher's target — same trust level
+ * as the page itself (anonymous, unauthenticated), so it must not be gated
+ * behind a session or clicking "Türkçe"/"English" would 307 to `/login`
+ * instead of switching the language.
  */
-const EXACT_PUBLIC_PATHS: readonly string[] = ['/', '/legal', '/tr']
+const EXACT_PUBLIC_PATHS: readonly string[] = ['/', '/legal', '/tr', '/api/locale']
 
 /**
  * Matched as prefixes.

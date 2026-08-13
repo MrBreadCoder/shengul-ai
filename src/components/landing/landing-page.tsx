@@ -4,6 +4,7 @@ import { buildLandingJsonLd, type FaqEntry } from '@/lib/seo/json-ld'
 import { CONTENT_PUBLISHED_AT, CONTENT_UPDATED_AT, SITE_SUMMARY, SITE_SUMMARY_TR } from '@/lib/seo/site'
 import { SITE_URL } from '@/lib/seo/site-url'
 import type { AppLocale } from '@/types/i18n'
+import { BookMeetingButton } from './book-meeting-button'
 import { Capabilities } from './capabilities'
 import { ClosingCta } from './closing-cta'
 import { NAV_LINKS } from './constants'
@@ -58,7 +59,11 @@ export async function LandingPage({ locale }: { locale: AppLocale }): Promise<Re
     <div className="landing min-h-[100dvh] bg-[var(--l-bg)] text-[var(--l-text)] antialiased">
       <JsonLd data={jsonLd} />
       <MarketingWebMcpTools />
-      <SiteNav copy={navCopy} locale={locale} />
+      <SiteNav
+        copy={navCopy}
+        bookMeetingButtonDesktop={<BookMeetingButton locale={locale} className="hidden md:inline-flex" />}
+        bookMeetingButtonMobile={<BookMeetingButton locale={locale} size="lg" />}
+      />
       <main>
         <Hero locale={locale} />
         <Outcomes locale={locale} />

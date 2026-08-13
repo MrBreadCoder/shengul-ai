@@ -4,8 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
-import type { AppLocale } from '@/types/i18n'
-import { BookMeetingButton } from './book-meeting-button'
 import { LANDING_EASE } from './constants'
 
 export interface SiteNavLink {
@@ -23,7 +21,18 @@ export interface SiteNavCopy {
 
 interface SiteNavProps {
   readonly copy: SiteNavCopy
-  readonly locale: AppLocale
+  /**
+   * Pre-rendered by the server parent (`landing-page.tsx`), not imported and
+   * rendered here directly: `BookMeetingButton` is an async Server Component
+   * that calls `getTranslations`, and next-intl's server-only runtime cannot
+   * run in a Client Component. Importing its module into this `'use client'`
+   * file — even just to render it — pulls that call into the client bundle
+   * and throws "`getTranslations` is not supported in Client Components" at
+   * render time. Receiving it as an opaque `ReactNode` prop is the supported
+   * way to compose a Server Component inside a Client Component.
+   */
+  readonly bookMeetingButtonDesktop: React.ReactNode
+  readonly bookMeetingButtonMobile: React.ReactNode
 }
 
 /**
@@ -36,7 +45,11 @@ interface SiteNavProps {
  * on the marketing page, and resolving server-side keeps next-intl's message
  * catalog (and its client runtime) out of the browser bundle entirely.
  */
-export function SiteNav({ copy, locale }: SiteNavProps): React.ReactElement {
+export function SiteNav({
+  copy,
+  bookMeetingButtonDesktop,
+  bookMeetingButtonMobile,
+}: SiteNavProps): React.ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const prefersReducedMotion = useReducedMotion()
 
@@ -92,7 +105,7 @@ export function SiteNav({ copy, locale }: SiteNavProps): React.ReactElement {
           >
             {copy.signIn}
           </Link>
-          <BookMeetingButton locale={locale} className="hidden md:inline-flex" />
+          {bookMeetingButtonDesktop}
 
           <button
             type="button"
@@ -151,7 +164,7 @@ export function SiteNav({ copy, locale }: SiteNavProps): React.ReactElement {
                 transition={{ duration: 0.55, delay: 0.18, ease: LANDING_EASE }}
                 className="mt-4 flex flex-col items-start gap-5"
               >
-                <BookMeetingButton locale={locale} size="lg" />
+                {bookMeetingButtonMobile}
                 <Link href="/login" onClick={closeMenu} className="text-sm text-[var(--l-muted)]">
                   {copy.signIn}
                 </Link>

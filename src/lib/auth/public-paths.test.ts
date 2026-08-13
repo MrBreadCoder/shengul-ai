@@ -11,6 +11,13 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/tr')).toBe(true)
   })
 
+  // Gating this behind a session would 307 the footer language switcher to
+  // /login instead of switching the language — an anonymous visitor clicking
+  // "Türkçe" has no session by definition.
+  it('should allow the language switcher route', () => {
+    expect(isPublicPath('/api/locale')).toBe(true)
+  })
+
   it('should allow the sign-in form and the auth callback', () => {
     expect(isPublicPath('/login')).toBe(true)
     expect(isPublicPath('/auth/callback')).toBe(true)
