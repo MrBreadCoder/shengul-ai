@@ -252,7 +252,11 @@ export interface RecentLeadForClient {
 
 // RLS-scoped: pass a session-bound server client so a client role only sees
 // its own leads. Used by /home's "Latest leads found" widget — newest first,
-// capped by the caller.
+// capped by the caller. Filters on `status`, not `email_status` — same
+// reasoning as getVerifiedLeadCompanies above: a row Apollo marked
+// 'verified' but that we later parked (AI-rejected, suppressed, excluded,
+// or redacted-org) must never be shown to the client as a found lead, even
+// though its email_status pill would still read "Verified".
 export async function listRecentLeadsForClient(
   supabase: SupabaseClient<Database>,
   { limit }: { limit: number },
@@ -260,6 +264,7 @@ export async function listRecentLeadsForClient(
   const { data, error } = await supabase
     .from('leads')
     .select('id, full_name, title, company_name, company_domain, status, email_status, case_id, created_at')
+    .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(limit)
   if (error) {

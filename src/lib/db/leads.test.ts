@@ -422,8 +422,10 @@ function mockRecentLeads(result: { data: unknown; error: unknown }) {
   return {
     from: () => ({
       select: () => ({
-        order: () => ({
-          limit: () => Promise.resolve(result),
+        eq: () => ({
+          order: () => ({
+            limit: () => Promise.resolve(result),
+          }),
         }),
       }),
     }),
@@ -473,5 +475,27 @@ describe('listRecentLeadsForClient', () => {
   it('should throw DB_ERROR when the query errors', async () => {
     const supabase = mockRecentLeads({ data: null, error: { message: 'boom' } })
     await expect(listRecentLeadsForClient(supabase, { limit: 5 })).rejects.toBeInstanceOf(AppError)
+  })
+
+  it('should filter on status=active so a parked-but-Apollo-verified row is excluded', async () => {
+    const eqCalls: [string, string][] = []
+    const localSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: (column: string, value: string) => {
+            eqCalls.push([column, value])
+            return {
+              order: () => ({
+                limit: () => Promise.resolve({ data: [], error: null }),
+              }),
+            }
+          },
+        }),
+      }),
+    } as never
+
+    await listRecentLeadsForClient(localSupabase, { limit: 5 })
+
+    expect(eqCalls).toContainEqual(['status', 'active'])
   })
 })
