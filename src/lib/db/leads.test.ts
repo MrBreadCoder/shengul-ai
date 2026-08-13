@@ -110,21 +110,32 @@ describe('updateLeadCase', () => {
 })
 
 describe('getVerifiedLeadCompanies', () => {
-  it('should return mapped company refs for verified leads', async () => {
+  it('should return mapped company refs with case status for verified leads', async () => {
     const supabase = mockSupabase({
       verifiedCompaniesResult: {
         data: [
-          { company_domain: 'acme.com', company_name: 'Acme' },
-          { company_domain: null, company_name: 'Beta' },
+          { company_domain: 'acme.com', company_name: 'Acme', case: { status: 'new' } },
+          { company_domain: null, company_name: 'Beta', case: { status: 'contacted' } },
         ],
         error: null,
       },
     })
     const result = await getVerifiedLeadCompanies(supabase, 'camp1')
     expect(result).toEqual([
-      { companyDomain: 'acme.com', companyName: 'Acme' },
-      { companyDomain: null, companyName: 'Beta' },
+      { companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' },
+      { companyDomain: null, companyName: 'Beta', caseStatus: 'contacted' },
     ])
+  })
+
+  it('should map a lead whose case failed to group yet to a null case status', async () => {
+    const supabase = mockSupabase({
+      verifiedCompaniesResult: {
+        data: [{ company_domain: 'acme.com', company_name: 'Acme', case: null }],
+        error: null,
+      },
+    })
+    const result = await getVerifiedLeadCompanies(supabase, 'camp1')
+    expect(result).toEqual([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: null }])
   })
 
   it('should return an empty array when there are no verified leads', async () => {

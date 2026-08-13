@@ -5718,3 +5718,226 @@ which have dedicated UI either — all fall through to the generic Logs
 feed). The `2` blank-field threshold is an operator judgment call, not
 derived from data beyond the one investigated case — worth revisiting with
 a larger sample if it starts rejecting real, sparsely-documented companies.
+
+## Investigated: "Ryanair dedup not working" — confirmed not a bug — 2026-08-13
+
+**Trigger:** operator report — an old Ryanair case (created 2026-08-09) got
+a second lead 5 days later and it looked like dedup had failed.
+
+**Investigation (queried prod DB directly, not just code):** `cases` table
+has exactly one Ryanair row (`1deacb72-…`, campaign `dee813ad-…`,
+`company_key = 'ryanair.com'`). Both leads — Ryan Pierce (08-09) and
+Dominik Szczerbinski (08-13) — carry that same `case_id`. The
+`(campaign_id, company_key)` unique index (0004) and `findOrCreateCase`
+(`src/lib/db/cases.ts`) worked exactly as designed: the second lead was
+merged into the existing case, not given a new one. `events` confirms two
+`pipeline.lead_grouped` rows against the identical `caseId`.
+
+**What actually happened (traced via `events`, not guessed):** the case had
+already reached `status = 'contacted'` from the first lead's write pass
+(08-09, drafted — this client is `human_approve`, so nothing was ever
+auto-sent). `groupVerifiedLead` (`src/lib/pipeline/group-lead.ts`)
+deliberately does not re-trigger the pipeline for a case past `'new'` (see
+its own comment), so the new lead sat attached-but-unprocessed. ~30-40 min
+later `stuck-sweep`'s `find_stuck_cases()` (0006/0041) picked the case up —
+its `'contacted'` branch matches `status='contacted' AND updated_at <
+cutoff AND exists an active verified lead with no step-0 outbound email`,
+which Dominik satisfied — reset it to `'ready'`, and `/api/pipeline/write`
+ran again. `runWriteForCase` loops every active lead in the case:
+Ryan Pierce's `claimOutboundEmail` hit the existing (lead, step 0, outbound)
+row and was skipped (no duplicate/resend), Dominik got a fresh first-touch
+draft. Final event: `pipeline.write.completed` `{sent:0, drafted:1,
+leadCount:2}` — exactly the expected shape.
+
+**Conclusion:** working as designed. The only real gap is latency, not
+correctness — a new contact discovered at an already-contacted company
+rides the 30-minute stuck-sweep cutoff instead of firing immediately,
+because group-lead.ts intentionally won't re-enter a case that already left
+`'new'`. Separately noted (not fixed, not asked for): Ryan Pierce's 08-09
+first-touch draft is still sitting unapproved 5 days later — a
+`human_approve` operator-workflow gap, unrelated to dedup.
+
+**No code changed** — investigation only, reported findings to operator.
+
+## Discovery depth-phase fixes: freshness cap + guaranteed breadth quota — 2026-08-13
+
+**Trigger:** follow-up to the Ryanair investigation above. Operator's actual
+ask, refined over the conversation: (1) a company's case shouldn't gain a new
+contact once it's no longer fresh (already contacted/further along), and (2)
+even while multi-threading is legitimately topping up older companies, it
+must never fully crowd out finding brand-new companies on quota-constrained
+campaigns (Ryanair's campaign: `daily_target: 2`, 2 companies already parked
+at 1/2 — the entire day's quota was going to depth, every day, indefinitely).
+
+**Fix 1 — freshness cap (`src/lib/db/leads.ts`, `src/lib/pipeline/discover.ts`):**
+`getVerifiedLeadCompanies` now embeds each lead's case status
+(`case:cases(status)`, left join — null when `case_id` is null, a rare
+isolated `groupVerifiedLead` failure) via `LeadCompanyRef.caseStatus`. The
+depth phase's `targetDomains` filter gained a 4th condition —
+`freshCompanyKeys.has(key)`, true only when `caseStatus === 'new'` — so a
+company already past `'new'` (researching/ready/writing/contacted/...) is
+never retargeted for a second contact, no matter how long it sits below
+`contactsPerCompany`. `freshCompanyKeys` also gets every company this run's
+own breadth phase just opened (no case exists for it yet at that point —
+grouping only runs after the whole round loop finishes — so it's
+unambiguously fresh and stays a valid depth target for a later round of the
+same run, unchanged from today's behavior).
+
+**Fix 2 — guaranteed breadth quota (`src/lib/pipeline/discover.ts`):** the
+round loop used to hand depth the *entire* remaining shortfall every round,
+uncapped — on a campaign where the depth backlog (companies from earlier
+days still below target) is ≥ `daily_target`, breadth got zero, forever.
+`breadthReserve = ceil(quota / contactsPerCompany)`, computed once from the
+full daily quota (not re-derived from each round's shrinking shortfall), and
+depth is capped at `shortfall - max(0, breadthReserve - breadthVerifiedSoFar)`
+each round. The cumulative-tracking design matters: the first version tried
+re-deriving the reserve from each round's own shortfall and broke an
+existing regression test (a 2-company, exactly-enough backlog got throttled
+to 1/round instead of finishing both in one round, since a tiny tail
+shortfall always rounds fully to breadth) — tracking `breadthVerifiedSoFar`
+against a reserve fixed at run start means depth reverts to its old
+effectively-unlimited priority the moment breadth's cumulative share is
+actually banked, so a backlog that exactly matches `contactsPerCompany`
+still clears in one round. `contactsPerCompany: 1` reserves the whole quota
+for breadth, matching the field's existing "1 disables depth entirely" contract.
+
+**Verified:** TDD throughout — RED confirmed for all 4 new tests before
+implementing (`leads.test.ts`: caseStatus mapping + null-case row;
+`discover.test.ts`: freshness-cap regression + breadth-starvation
+regression), then GREEN. Had to update 7 pre-existing `discover.test.ts`
+fixtures (`mockGetVerifiedLeadCompanies` call sites) to add `caseStatus:
+'new'` — without it every existing depth-targeting test would have silently
+started excluding its own fixture company once the freshness filter landed.
+Manually hand-traced the full round-by-round call sequence against every
+affected existing test before touching implementation code, specifically to
+catch the tail-rounding regression above before it ever went RED/GREEN.
+`tsc --noEmit` clean; `eslint` clean on every touched file; full `vitest
+run` — 219 files, 2421 tests, all passing (4 new: 2 in `leads.test.ts`, 2 in
+`discover.test.ts`).
+
+**Not addressed this session:** no DB migration needed (pure query/logic
+change, `cases` FK already existed). Ryanair's own case (`1deacb72-…`) is
+already `'contacted'` so it's now permanently excluded from depth
+targeting going forward — not retroactively touched, nothing to undo.
+
+**Real-system verification (same day):** ran the unmodified
+`runDiscoveryForCampaign` for real (new `scripts/run-discovery-live.ts` —
+real Apollo/Emailable credentials, real Supabase writes, same shape as
+`/api/pipeline/discover`'s route) against the real, paused "1. Public Safety
+Agencies" campaign (client Uniforms Fashion, `d34557fb-…`), which already
+had a live before/after pair: Farmington PD (`contacted`, 1/2 contacts) and
+Suffolk PD (`new`, 1/2 contacts). Result: Farmington untouched
+(`updated_at` unchanged) — freshness cap confirmed with real data, this is
+the exact Ryanair shape. Suffolk was attempted (real domain-restricted
+depth search ran) but Apollo had no 2nd matching contact there today —
+legitimate empty result. Breadth found 2 genuinely new companies (Plano PD,
+Elkhart PD) in the same run — starvation fix confirmed not blocking new-
+company discovery. Blast radius stayed bounded as scoped beforehand: 0
+emails drafted/sent, 0 research-agent activity (`pipeline.research_trigger_failed`
+×2 — QStash publish targets `localhost` per `.env.local`, so the discovery
+→ research hand-off can't reach anywhere), campaign still `paused`.
+
+## Discovery/leads code review + fixes: depth starvation, company-key desync, unsafe cast — 2026-08-13
+
+**Trigger:** operator asked for a deep code review of the person-finding /
+per-company discovery system (the still-uncommitted `discover.ts`/`leads.ts`
+diff from the two sessions above), then "fix all." Ran the `code-review`
+skill at `max` effort (8 parallel finder agents + empirical repro) against
+`discover.ts`, `discover.test.ts`, `leads.ts`, the Apollo/Emailable client
+layer, and the discovery API routes. 8 findings, most-critical first.
+
+**Fix 1 — depth-starvation regression in `breadthReserve`/`depthCap`
+(`discover.ts`, critical, empirically reproduced):** the guaranteed-breadth-
+quota fix from the session above (`## Discovery depth-phase fixes` — the
+`breadthReserve = ceil(quota / contactsPerCompany)` cap) had a mirror-image
+bug: it reserves quota for breadth every round but never releases the
+reservation once breadth proves it can't use it, so once a campaign's
+new-company market is durably exhausted (a normal end-state for any
+long-running campaign — not an edge case), depth gets permanently capped
+below the real remaining backlog and `daily_target` silently under-delivers.
+Repro before the fix: `dailyTarget: 10`, `contactsPerCompany: 2`, a 10-company
+depth backlog each 1/2 verified, breadth returning 0 candidates every round
+→ `summary.verified` stalled at 5, not 10 (round 2's depth call never fired).
+Fix: `runBreadthSearch` now also returns `ranOutOfTargets` (true only when
+every keyword target was cycled through and came back empty — genuinely
+drained, not just paused by the page budget or an already-filled quota,
+same distinction `DepthSearchResult.exhaustedDomains` already draws for
+depth). The round loop tracks this as a sticky `breadthExhausted` flag
+(same "won't change within this run" reasoning as `exhaustedDomains`); once
+set, `depthCap`'s formula (`breadthOwed = breadthExhausted ? 0 :
+Math.max(0, breadthReserve - breadthVerifiedSoFar)`) stops withholding
+quota for a reserve breadth can no longer bank.
+
+**Fix 2 — company-key desync between search-time and enrich-time org
+fields (`discover.ts`, plausible correctness bug):** `applyEnrichResult` was
+keying `verifiedCompanyCounts`/`domainBackedCompanyKeys`/`freshCompanyKeys`
+off the pre-enrich search candidate's `organizationDomain`/`organizationName`,
+but the row Apollo's `bulk_match` enrich call actually persists prefers the
+enrich-time org fields whenever they differ (`person.organizationDomain ??
+source?.organizationDomain` in `enrichCandidates`) — and that persisted
+value is what `groupVerifiedLead` (case grouping) and tomorrow's
+`getVerifiedLeadCompanies` both key off. A divergent Apollo enrich response
+could silently desync this run's in-memory depth-targeting state from the
+company a lead actually gets grouped into. Fixed by keying directly off
+each row's own persisted `company_domain`/`company_name` instead of the
+pick — this also let the now-unused `picks` parameter be dropped from
+`applyEnrichResult` entirely. Caught a real test gap while fixing this:
+the test file's `enriched()` mock hardcoded `organizationDomain: 'acme.com'`
+for every response regardless of which candidate/domain was being enriched,
+masking exactly this kind of divergence in every existing test. Changed it
+to echo back `details[i].domain` (the real domain `enrichCandidates` sends
+to `bulkMatchPeople`) by default, updated all 33 call sites across
+`discover.test.ts` to thread `d.domain` through — this is what surfaced 3
+pre-existing tests silently relying on the old, wrong keying behavior; all
+3 pass again once the mock stopped lying about the domain.
+
+**Fix 3 — unnecessary unsafe cast in `getVerifiedLeadCompanies`
+(`leads.ts`):** the new `case:cases(status)` embed was going through a
+hand-written `type Row` and `as unknown as Row[]` cast. Confirmed via a
+throwaway `tsc` probe (isolating the exact `select` string against the real
+generated `Database` type, then reverted) that postgrest-js's native
+inference for this embed is already structurally identical — `case_id` is
+the FK column on `leads`, so the embed is inherently to-one, never an array.
+Removed the cast and the shadow `Row` type entirely; the compiler now
+actually protects this return value against a future embed-shape change
+instead of the cast silently suppressing that check. This also resolved a
+separate low-severity finding (the shadow `Row` type's name collided with
+the file's exported `LeadRow`) by deleting the type outright rather than
+renaming it.
+
+**Fix 4 — reuse + doc fixes (`leads.ts`, low severity):** `LeadCompanyRef`'s
+`caseStatus` field now imports and reuses `CaseStatus` from `src/lib/db/cases.ts`
+instead of re-deriving `Database['public']['Enums']['case_status']` inline a
+second time in the same file (no circular-import risk — `cases.ts` imports
+nothing from `leads.ts`). Reworded the `caseStatus: null` JSDoc: it
+previously attributed the null case solely to "a rare, isolated
+`groupVerifiedLead` failure," which understates it — a lead from a
+discovery run still mid-flight (grouping only runs after that run's entire
+round loop completes) reads back with `caseStatus: null` too, not just a
+genuine grouping failure.
+
+**Fix 5 — missing regression test (`discover.test.ts`):** added
+`'should release breadth's unbanked reserve back to depth once breadth is
+durably exhausted, still reaching daily_target'` — the exact scenario from
+Fix 1 (`dailyTarget: 10`, `contactsPerCompany: 2`, 10-company backlog,
+breadth permanently empty). Verified this test is a real regression guard,
+not just green-by-construction: manually reverted the `depthCap` fix,
+confirmed the new test fails (`expected "vi.fn()" to be called 3 times, but
+got 4 times` — the old formula skips round 2's depth call and falls through
+to an extra, unnecessary round 3), then restored the fix and confirmed
+green again.
+
+**Two lower-confidence findings from the review deliberately not acted on
+this session** (documented here so they aren't silently dropped): (a) a
+QStash-redelivery race that could produce `caseStatus: null` for a healthy,
+still-mid-flight lead with no backfill path if `groupVerifiedLead` then also
+throws once — real but requires a retry/backfill mechanism, out of scope
+for a bug-fix pass; (b) `runDiscoveryForCampaign` is ~290 lines, well past
+the file's own ~40-line function-length guideline — a refactor-only finding,
+no behavior change, deferred to avoid touching working logic right after a
+correctness fix.
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
+full `vitest run` — 219 files, 2422 tests, all green (2423 including the
+new regression test, which was confirmed RED against the pre-fix formula
+before being confirmed GREEN against the fix).

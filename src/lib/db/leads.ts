@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
+import type { CaseStatus } from '@/lib/db/cases'
 
 export type LeadRow = Database['public']['Tables']['leads']['Row']
 export type LeadInsert = Database['public']['Tables']['leads']['Insert']
@@ -23,6 +24,15 @@ export async function getKnownSourceIds(
 export interface LeadCompanyRef {
   companyDomain: string | null
   companyName: string | null
+  /** The company's case status, read off this lead's grouped case. Null when
+   * this specific lead hasn't been grouped into a case yet — most often a
+   * lead from a discovery run still mid-flight (grouping only happens after
+   * that run's entire round loop completes, see discover.ts), or more rarely
+   * a genuine `groupVerifiedLead` failure (logged as
+   * `pipeline.discover.group_lead_failed`) that never retries — callers must
+   * treat both cases as "not confirmed fresh," never as equivalent to a
+   * `'new'` case. */
+  caseStatus: CaseStatus | null
 }
 
 // Used by discovery (src/lib/pipeline/discover.ts) to see which companies
@@ -32,19 +42,32 @@ export interface LeadCompanyRef {
 // a row Apollo marked `verified` but that was later parked (suppressed,
 // post-enrich excluded, or AI-rejected) must not count as "this company
 // has a verified lead" — it was never grouped into a case.
+// Embeds the lead's case status (single row via the `case_id` FK, so a
+// left join — null when case_id is null) so callers can tell a company
+// whose case is still `'new'` apart from one already being worked, without
+// a second round-trip per company.
 export async function getVerifiedLeadCompanies(
   supabase: SupabaseClient<Database>,
   campaignId: string,
 ): Promise<LeadCompanyRef[]> {
   const { data, error } = await supabase
     .from('leads')
-    .select('company_domain, company_name')
+    .select('company_domain, company_name, case:cases(status)')
     .eq('campaign_id', campaignId)
     .eq('status', 'active')
   if (error) {
     throw new AppError('DB_ERROR', 'Failed to load verified lead companies', { campaignId, cause: error.message })
   }
-  return (data ?? []).map((r) => ({ companyDomain: r.company_domain, companyName: r.company_name }))
+  // No manual type/cast here on purpose: `case_id` is the FK column on
+  // `leads` (leads_case_id_fkey), so postgrest-js already infers this embed
+  // as a single `{ status } | null` object, not an array — confirmed against
+  // the generated Database type. Casting through `unknown` would only
+  // suppress the compiler's ability to catch a future embed-shape drift.
+  return (data ?? []).map((r) => ({
+    companyDomain: r.company_domain,
+    companyName: r.company_name,
+    caseStatus: r.case?.status ?? null,
+  }))
 }
 
 // Upsert with ignoreDuplicates so a QStash retry of /api/pipeline/discover is

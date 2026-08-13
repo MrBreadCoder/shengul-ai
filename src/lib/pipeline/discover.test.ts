@@ -42,10 +42,18 @@ function candidate(apolloId: string, domain = `${apolloId}.com`) {
   }
 }
 
-function enriched(apolloId: string, emailStatus: string) {
+// organizationDomain echoes back the domain the bulk_match request carried
+// (the mock's `details[i].domain`, itself derived from the search
+// candidate's organizationDomain — see candidate() above) by default, the
+// same way Apollo's real enrich response ordinarily confirms the same
+// company the search hit already found. Callers that need to simulate
+// enrich-time resolving a *different* company than the search candidate
+// carried (Apollo divergence — see discover.ts's applyEnrichResult comment)
+// pass an explicit domain override instead.
+function enriched(apolloId: string, emailStatus: string, organizationDomain = 'acme.com') {
   return {
     apolloId, firstName: 'Jo', lastName: 'Doe', title: 'VP Sales', email: `${apolloId}@acme.com`,
-    emailStatus, linkedinUrl: null, organizationName: 'Acme', organizationDomain: 'acme.com',
+    emailStatus, linkedinUrl: null, organizationName: 'Acme', organizationDomain,
   }
 }
 
@@ -113,8 +121,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: both targets exhausted
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing left
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -140,8 +148,8 @@ describe('runDiscoveryForCampaign', () => {
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // round 1 breadth: found, quota (1) met, stop
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p3', 'a.com')] }) // round 2 depth: second contact, fills remaining quota
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -177,8 +185,8 @@ describe('runDiscoveryForCampaign', () => {
         totalEntries: 2,
         candidates: [candidate('p3', 'a.com'), candidate('p4', 'b.com')],
       })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -194,6 +202,95 @@ describe('runDiscoveryForCampaign', () => {
     expect(summary.rounds).toBe(2)
   })
 
+  it('should reserve at least 1/contactsPerCompany of the daily quota for breadth even when the depth backlog could fill the whole quota by itself', async () => {
+    // Regression test: with a large enough depth backlog, depth used to be
+    // handed the entire remaining shortfall every round (uncapped) and could
+    // legitimately close the whole daily_target by itself — starving breadth
+    // completely, so no brand-new company was ever found on days a backlog
+    // existed. Two companies (a.com, b.com) both sit at 1/2 verified and both
+    // have a matching second contact available on the very first depth page
+    // — old, uncapped behavior would take both (depthCandidates: 2,
+    // breadthCandidates: 0). The fix must cap depth at quota -
+    // ceil(quota/contactsPerCompany), leaving room for breadth every round.
+    mockGetVerifiedLeadCompanies.mockResolvedValue([
+      { companyDomain: 'a.com', companyName: 'A', caseStatus: 'new' },
+      { companyDomain: 'b.com', companyName: 'B', caseStatus: 'new' },
+    ])
+    mockSearchPeople
+      // round 1 depth, page 1: both targets' second contact on the same
+      // page — capped to 1 pick (a.com) instead of taking both.
+      .mockResolvedValueOnce({
+        totalEntries: 2,
+        candidates: [candidate('pA', 'a.com'), candidate('pB', 'b.com')],
+      })
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('pC', 'c.com')] }) // round 1 breadth: a genuinely new company
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp })
+
+    expect(mockSearchPeople).toHaveBeenCalledTimes(2)
+    expect(summary.depthCandidates).toBe(1)
+    expect(summary.breadthCandidates).toBe(1)
+    expect(summary.verified).toBe(2)
+  })
+
+  it('should release breadth\'s unbanked reserve back to depth once breadth is durably exhausted, still reaching daily_target', async () => {
+    // Regression test for the depthCap starvation bug: breadthReserve used to
+    // be subtracted from depth's budget every round with no way to give it
+    // back, so once breadth's new-company search came back permanently empty
+    // (a normal end-state for a mature campaign whose ICP pool is mined out),
+    // depth was capped to 0 for the rest of the run even with an ample,
+    // non-exhausted backlog still available — silently under-delivering
+    // daily_target. 10 pre-existing companies each sit at 1/2 verified with a
+    // real second contact available; breadth finds nothing, every round.
+    // breadthReserve = ceil(10/2) = 5 caps round 1's depth pass at 5, leaving
+    // 5 backlog companies untouched — the fix must let round 2's depth pass
+    // claim the rest of the quota once breadth's round-1 pass proves it ran
+    // out of targets, instead of re-reserving room for a reserve breadth can
+    // never bank.
+    const backlog = Array.from({ length: 10 }, (_, i) => ({
+      companyDomain: `a${i + 1}.com`, companyName: `A${i + 1}`, caseStatus: 'new' as const,
+    }))
+    mockGetVerifiedLeadCompanies.mockResolvedValue(backlog)
+    mockSearchPeople
+      // round 1 depth: fills its 5-slot cap from the first 5 backlog companies.
+      .mockResolvedValueOnce({
+        totalEntries: 5,
+        candidates: backlog.slice(0, 5).map((c) => candidate(`p-${c.companyDomain}`, c.companyDomain)),
+      })
+      // round 1 breadth: genuinely nothing left for this ICP.
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
+      // round 2 depth: reserve released, claims the remaining 5 backlog companies.
+      .mockResolvedValueOnce({
+        totalEntries: 5,
+        candidates: backlog.slice(5, 10).map((c) => candidate(`p-${c.companyDomain}`, c.companyDomain)),
+      })
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
+      insertedRows(rows),
+    )
+    mockGroupVerifiedLead.mockResolvedValue('case1')
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, contactsPerCompany: 2, icp })
+
+    // Round 1 depth + round 1 breadth + round 2 depth. Quota is met exactly
+    // at the end of round 2, so round 2's breadth pass never fires
+    // (breadthQuota === 0) and there is no round 3.
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3)
+    expect(summary.depthCandidates).toBe(10)
+    expect(summary.breadthCandidates).toBe(0)
+    expect(summary.rounds).toBe(2)
+    expect(summary.verified).toBe(10)
+  })
+
   it('should fall back to breadth in a later round when depth finds no second contact, still reaching daily_target', async () => {
     // Regression test for the reported production bug: daily_target 15
     // returned only 9 companies, each with 1 lead, because the depth phase
@@ -204,8 +301,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'a.com')] }) // round 1 breadth: found, quota (1) met, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: a.com has no second contact
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // round 2 breadth: fresh company
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -233,8 +330,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p2', 'b.com')] }) // round 2 breadth: found, quota (1) met, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 3 depth (targets [b.com] only): exhausted
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 3 breadth: nothing left, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -271,8 +368,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: no second contact
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -286,13 +383,13 @@ describe('runDiscoveryForCampaign', () => {
   })
 
   it('should target a company from an earlier day that already has exactly 1 verified lead, starting with depth in round 1', async () => {
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 1 depth: found
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing new
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -309,8 +406,29 @@ describe('runDiscoveryForCampaign', () => {
     expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p5' })])
   })
 
+  it('should not target a company for a second contact once its case has moved past \'new\'', async () => {
+    // Regression test: a company whose case already left 'new' (researching,
+    // ready, writing, contacted, ...) must not be retargeted by the depth
+    // phase just because it still sits below contactsPerCompany — only a
+    // still-fresh case should gain a second contact. Depth must be skipped
+    // entirely (no domain-restricted search at all), leaving the daily quota
+    // to breadth instead.
+    mockGetVerifiedLeadCompanies.mockResolvedValue([
+      { companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'contacted' },
+    ])
+    mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
+    mockInsertLeads.mockResolvedValue([])
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 10, contactsPerCompany: 2, icp })
+
+    expect(summary.depthCandidates).toBe(0)
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1)
+    const onlyCallParams = mockSearchPeople.mock.calls[0]![0] as Record<string, string | string[]>
+    expect(onlyCallParams['q_organization_domains_list[]']).toBeUndefined()
+  })
+
   it('should not target a company with exactly 1 verified lead but no known domain', async () => {
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: null, companyName: 'No Domain Co' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: null, companyName: 'No Domain Co', caseStatus: 'new' }])
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
     mockInsertLeads.mockResolvedValue([])
 
@@ -321,7 +439,7 @@ describe('runDiscoveryForCampaign', () => {
   })
 
   it('should ignore depth-phase candidates whose company does not match any requested target domain', async () => {
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p9', 'other.com')] }) // round 1 depth, page 1: off-target
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 depth, page 2: empty, stop
@@ -354,8 +472,8 @@ describe('runDiscoveryForCampaign', () => {
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 25, candidates: page1 })
       .mockResolvedValueOnce({ totalEntries: 25, candidates: page2 })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       rows.map((r, i) => ({
@@ -430,8 +548,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -453,8 +571,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'p1.com')] }) // round 1 breadth, page 1
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockRejectedValueOnce(new Error('apollo down')) // round 2 depth: search throws
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -486,8 +604,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -524,7 +642,7 @@ describe('runDiscoveryForCampaign', () => {
 
   it('should skip a depth-phase candidate whose organization name matches an excluded keyword', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople
       .mockResolvedValueOnce({
         totalEntries: 1,
@@ -545,8 +663,8 @@ describe('runDiscoveryForCampaign', () => {
   it('should permanently drop a depth target company whose organization name alone matches an excluded keyword, without waiting for page exhaustion of the other target', async () => {
     const excludingIcp: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
     mockGetVerifiedLeadCompanies.mockResolvedValue([
-      { companyDomain: 'acme.com', companyName: 'Acme' },
-      { companyDomain: 'other.com', companyName: 'Other' },
+      { companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' },
+      { companyDomain: 'other.com', companyName: 'Other', caseStatus: 'new' },
     ])
     mockSearchPeople
       .mockResolvedValueOnce({
@@ -560,8 +678,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth: nothing, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth (targets [acme.com]): exhausted
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -591,8 +709,8 @@ describe('runDiscoveryForCampaign', () => {
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 depth: nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth: nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined }[]) =>
       insertedRows(rows),
@@ -611,7 +729,7 @@ describe('runDiscoveryForCampaign', () => {
   })
 
   it('should drop a depth target company whose organization name matches the confidential-org placeholder, before calling bulk_match', async () => {
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople
       .mockResolvedValueOnce({
         totalEntries: 1,
@@ -665,8 +783,8 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, apolloEmailStatus)),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, apolloEmailStatus, d.domain)),
     )
   }
 
@@ -814,8 +932,8 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => ({ ...enriched(d.id, 'verified'), email: null })),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified', d.domain), email: null })),
     )
 
     await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp })
@@ -829,8 +947,8 @@ describe('runDiscoveryForCampaign — Emailable deliverability guard', () => {
       .mockResolvedValueOnce({ totalEntries: 2, candidates: [candidate('p1', 'p1.com'), candidate('p2', 'p2.com')] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockVerifyEmail
       .mockRejectedValueOnce(new Error('boom'))
@@ -940,8 +1058,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should park a suppressed lead without calling Emailable, and never group it', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
 
@@ -957,8 +1075,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should log a pipeline.discover.suppressed_skipped event for a suppressed lead', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
 
@@ -974,8 +1092,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should park a lead that only matches an exclude keyword in post-enrich firmographics, without calling Emailable', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationIndustry: 'Staffing & Recruiting' })),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified', d.domain), organizationIndustry: 'Staffing & Recruiting' })),
     )
     const icpWithExclude: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
 
@@ -994,8 +1112,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should park a lead whose enriched company name matches the confidential-org placeholder, without calling Emailable', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationName: 'Private Airline Based in UAE' })),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified', d.domain), organizationName: 'Private Airline Based in UAE' })),
     )
 
     const summary = await runDiscoveryForCampaign(
@@ -1013,8 +1131,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should log a pipeline.discover.redacted_org_skipped event for a placeholder-name company', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationName: 'Private Airline Based in UAE' })),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified', d.domain), organizationName: 'Private Airline Based in UAE' })),
     )
 
     await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 2, contactsPerCompany: 2, icp })
@@ -1029,9 +1147,9 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should park a lead whose company has 2 or more blank firmographic fields (domain/city/state/country/founded year), even with a normal-looking name', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
       details.map((d) => ({
-        ...enriched(d.id, 'verified'),
+        ...enriched(d.id, 'verified', d.domain),
         organizationName: 'Royal Jet',
         organizationDomain: null,
         organizationCity: null,
@@ -1054,9 +1172,9 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should still activate a lead with a real name and at most 1 blank firmographic field', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
       details.map((d) => ({
-        ...enriched(d.id, 'verified'),
+        ...enriched(d.id, 'verified', d.domain),
         organizationName: 'Royal Jet',
         organizationDomain: 'royaljetgroup.com',
         organizationCity: 'Abu Dhabi',
@@ -1080,9 +1198,9 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should not double-count a lead that is both post-enrich excluded and a redacted org', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
       details.map((d) => ({
-        ...enriched(d.id, 'verified'),
+        ...enriched(d.id, 'verified', d.domain),
         organizationIndustry: 'Staffing & Recruiting',
         organizationName: 'Private Airline Based in UAE',
       })),
@@ -1102,8 +1220,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should not double-count a lead that is both suppressed and post-enrich excluded', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => ({ ...enriched(d.id, 'verified'), organizationIndustry: 'Staffing & Recruiting' })),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => ({ ...enriched(d.id, 'verified', d.domain), organizationIndustry: 'Staffing & Recruiting' })),
     )
     mockGetSuppressions.mockResolvedValue(new Set(['p1@acme.com']))
     const icpWithExclude: ApolloIcpFilters = { ...icp, excludeKeywords: ['staffing'] }
@@ -1130,8 +1248,8 @@ describe('runDiscoveryForCampaign — suppression and post-enrich exclude filter
 
   it('should still activate and group a lead that is neither suppressed nor excluded', async () => {
     singleCandidateRun()
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockVerifyEmail.mockResolvedValue(verification('deliverable'))
     mockGroupVerifiedLead.mockResolvedValue('case1')
@@ -1189,8 +1307,8 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // "private school": nothing
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // "academy": found, fills quota
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
@@ -1206,8 +1324,8 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
 
   it('should stop calling Apollo once the breadth quota is met, without searching remaining keywords', async () => {
     mockSearchPeople.mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
@@ -1221,15 +1339,15 @@ describe('runDiscoveryForCampaign — multi-keyword organization search', () => 
   })
 
   it('should NOT cycle through organization keywords during the depth phase — it searches once per page with no q_keywords', async () => {
-    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme' }])
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 1 depth: found, no keyword cycling
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, "private school": nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, "academy": nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth, "private school": nothing
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 2 breadth, "academy": nothing, stop
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockGroupVerifiedLead.mockResolvedValue('case1')
 
@@ -1279,8 +1397,8 @@ describe('runDiscoveryForCampaign — AI relevance filter', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
   }
 
@@ -1346,8 +1464,8 @@ describe('runDiscoveryForCampaign — AI relevance filter', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] }) // round 1 breadth, page 1
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: stop
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p5', 'acme.com')] }) // round 2 depth: second contact
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'verified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', d.domain)),
     )
     mockCheckCompanyRelevance.mockResolvedValue({ pass: true, reason: 'Matches target profile.' })
 
@@ -1379,8 +1497,8 @@ describe('runDiscoveryForCampaign — AI relevance filter', () => {
       .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p1', 'acme.com')] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
       .mockResolvedValueOnce({ totalEntries: 0, candidates: [] })
-    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
-      details.map((d) => enriched(d.id, 'unverified')),
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string; domain?: string }[]) =>
+      details.map((d) => enriched(d.id, 'unverified', d.domain)),
     )
 
     const summary = await runDiscoveryForCampaign(

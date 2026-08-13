@@ -101,6 +101,17 @@ interface SearchPassResult {
   candidatesSeen: number
 }
 
+interface BreadthSearchResult extends SearchPassResult {
+  /** True when every keyword target for this call was cycled through and
+   * came back with an empty page — i.e. Apollo's ICP-matching new-company
+   * pool is genuinely drained, not just paused by MAX_SEARCH_PAGES or an
+   * already-filled quota. The caller persists this across rounds (see
+   * breadthExhausted in runDiscoveryForCampaign) since Apollo's answer for
+   * an unchanged, unnarrowed breadth query will not change within the same
+   * run — same reasoning as DepthSearchResult.exhaustedDomains below. */
+  ranOutOfTargets: boolean
+}
+
 function toFreshCandidate(candidate: ApolloSearchCandidate): FreshCandidate {
   return {
     apolloId: candidate.apolloId,
@@ -164,7 +175,7 @@ async function runBreadthSearch(
   known: Set<string>,
   companyPickCounts: Map<string, number>,
   domainBackedCompanyKeys: Set<string>,
-): Promise<SearchPassResult> {
+): Promise<BreadthSearchResult> {
   const { icp } = campaign
   const picks: FreshCandidate[] = []
   let candidatesSeen = 0
@@ -203,7 +214,7 @@ async function runBreadthSearch(
     }
     page += 1
   }
-  return { picks, candidatesSeen }
+  return { picks, candidatesSeen, ranOutOfTargets: targetIndex >= targets.length }
 }
 
 interface DepthSearchResult extends SearchPassResult {
@@ -788,14 +799,22 @@ export async function runDiscoveryForCampaign(
     // docs/superpowers/specs/2026-08-07-discovery-retry-loop-design.md
     // ("Architecture"). verifiedCompanyCounts is only ever updated from a
     // phase's REAL post-verification outcome (never an optimistic guess made
-    // at pick time), so every round's depth-targeting decision stays
-    // accurate even across many rounds.
+    // at pick time, and never off the pre-enrich search candidate's company
+    // fields — see applyEnrichResult below), so every round's depth-targeting
+    // decision stays accurate even across many rounds.
     const verifiedCompanyCounts = new Map<string, number>()
     const domainBackedCompanyKeys = new Set<string>()
+    // Companies whose case is still 'new' (never yet reached research/write) —
+    // the only companies the depth phase may target for a second contact.
+    // A company with no case yet (caseStatus null — grouping hasn't run for
+    // this lead, a rare isolated failure) is conservatively treated as not
+    // confirmed fresh, same reasoning as the null-domain exclusion below.
+    const freshCompanyKeys = new Set<string>()
     for (const company of existingCompanies) {
       const key = computeCompanyKey(company.companyDomain, company.companyName)
       verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
       if (company.companyDomain) domainBackedCompanyKeys.add(key)
+      if (company.caseStatus === 'new') freshCompanyKeys.add(key)
     }
     // A domain that came back with zero further Apollo results in an
     // earlier round of THIS run — never retried, since Apollo's answer for
@@ -822,12 +841,37 @@ export async function runDiscoveryForCampaign(
     let aiFailedOpen = 0
     let rounds = 0
 
+    // Guarantees new-company discovery is never fully starved by a large
+    // depth backlog (companies from earlier days/rounds still below
+    // contactsPerCompany): breadth is entitled to at least this many of the
+    // run's total quota, computed once from the full daily quota rather than
+    // re-derived from each round's shrinking shortfall. That matters at the
+    // tail: once breadth has actually banked its reserve, depth reverts to
+    // its old effectively-unlimited priority for whatever quota remains, so
+    // a backlog of exactly contactsPerCompany-sized targets still gets
+    // finished off in one round instead of being throttled forever (see
+    // "should reach daily_target as N/contactsPerCompany companies..."
+    // below). contactsPerCompany === 1 reserves the entire quota for
+    // breadth, matching CampaignForDiscovery's documented "1 disables depth
+    // targeting entirely."
+    const breadthReserve = Math.ceil(quota / campaign.contactsPerCompany)
+    let breadthVerifiedSoFar = 0
+    // Mirrors exhaustedDomains' reasoning but for breadth: once a round's
+    // breadth pass reports ranOutOfTargets (every keyword cycled through and
+    // came back empty — Apollo's ICP-matching new-company pool is genuinely
+    // drained, not just paused by a page budget), the reserve above can never
+    // be banked, and reserving quota for it anyway would starve depth of a
+    // real, non-exhausted backlog it could otherwise fill. Sticky for the
+    // rest of the run — same "won't change within the same run" reasoning as
+    // exhaustedDomains.
+    let breadthExhausted = false
+
     // Folds one phase's enrichCandidates() output into the run's running
     // totals, persists its rows (durable immediately — a later phase or
     // round throwing must never discard already-durable work), and updates
     // verifiedCompanyCounts/domainBackedCompanyKeys from the real
     // post-verification outcome.
-    const applyEnrichResult = async (picks: FreshCandidate[], result: EnrichResult): Promise<void> => {
+    const applyEnrichResult = async (result: EnrichResult): Promise<void> => {
       enrichedCount += result.rows.length
       emailableChecked += result.emailableChecked
       emailableDeliverable += result.emailableDeliverable
@@ -845,14 +889,28 @@ export async function runDiscoveryForCampaign(
       const insertedRows = await insertLeads(supabase, result.rows)
       inserted.push(...insertedRows)
 
-      const verifiedApolloIds = new Set(
-        result.rows.filter((row) => row.status === 'active').map((row) => row.source_id),
-      )
-      for (const pick of picks) {
-        if (!verifiedApolloIds.has(pick.apolloId)) continue
-        const key = computeCompanyKey(pick.organizationDomain, pick.organizationName)
+      // Keyed off each row's own persisted company_domain/company_name, never
+      // the pre-enrich search candidate's organizationDomain/organizationName
+      // — enrichCandidates prefers Apollo's enrich-time (bulk_match) org
+      // fields over the search-time ones whenever they differ (`??` in
+      // enrichCandidates above), and groupVerifiedLead (after the round loop
+      // below) and tomorrow's getVerifiedLeadCompanies both key a lead's
+      // company by that same persisted value. Tracking anything else here
+      // would let this run's in-memory targeting state silently diverge from
+      // what actually gets grouped.
+      for (const row of result.rows) {
+        if (row.status !== 'active') continue
+        const key = computeCompanyKey(row.company_domain ?? null, row.company_name ?? null)
         verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
-        if (pick.organizationDomain) domainBackedCompanyKeys.add(key)
+        if (row.company_domain) domainBackedCompanyKeys.add(key)
+        // A company verified THIS run has no case yet at all (grouping only
+        // runs after the whole discovery loop finishes, below) — that is
+        // unambiguously fresh, so a later round of this same run may still
+        // target it as a depth candidate. Safe to add unconditionally: a
+        // company that reaches here via a depth pick was necessarily already
+        // in freshCompanyKeys (targetDomains is filtered by it), so this is
+        // a no-op re-add for that case.
+        freshCompanyKeys.add(key)
       }
     }
 
@@ -863,20 +921,31 @@ export async function runDiscoveryForCampaign(
       const targetDomains = [...verifiedCompanyCounts.entries()]
         .filter(
           ([key, count]) =>
-            count < campaign.contactsPerCompany && domainBackedCompanyKeys.has(key) && !exhaustedDomains.has(key),
+            count < campaign.contactsPerCompany
+            && domainBackedCompanyKeys.has(key)
+            && !exhaustedDomains.has(key)
+            && freshCompanyKeys.has(key),
         )
         .map(([key]) => key)
 
-      if (targetDomains.length > 0) {
-        const depthQuota = quota - verifiedSoFar
-        const depth = await runDepthSearch(campaign, rounds, depthQuota, known, targetDomains)
+      // Depth may spend the shortfall minus whatever's left of breadth's
+      // reserve (see breadthReserve above) — 0 once that reserve is already
+      // banked, uncapped again from then on. Also 0 owed once breadth is
+      // known to be durably exhausted (breadthExhausted): a reserve that
+      // breadth can never bank must not be left blocking a real,
+      // non-exhausted depth backlog — see breadthExhausted above.
+      const breadthOwed = breadthExhausted ? 0 : Math.max(0, breadthReserve - breadthVerifiedSoFar)
+      const depthCap = Math.max(0, (quota - verifiedSoFar) - breadthOwed)
+
+      if (targetDomains.length > 0 && depthCap > 0) {
+        const depth = await runDepthSearch(campaign, rounds, depthCap, known, targetDomains)
         candidatesSeen += depth.candidatesSeen
         depthCandidates += depth.picks.length
         roundPicks += depth.picks.length
         for (const domain of depth.exhaustedDomains) exhaustedDomains.add(domain)
         for (const pick of depth.picks) known.add(pick.apolloId)
         const depthEnriched = await enrichCandidates(depth.picks, campaign, supabase, aiVerdictCache)
-        await applyEnrichResult(depth.picks, depthEnriched)
+        await applyEnrichResult(depthEnriched)
       }
 
       const breadthQuota = quota - verifiedSoFar
@@ -909,9 +978,11 @@ export async function runDiscoveryForCampaign(
         candidatesSeen += breadth.candidatesSeen
         breadthCandidates += breadth.picks.length
         roundPicks += breadth.picks.length
+        if (breadth.ranOutOfTargets) breadthExhausted = true
         for (const pick of breadth.picks) known.add(pick.apolloId)
         const breadthEnriched = await enrichCandidates(breadth.picks, campaign, supabase, aiVerdictCache)
-        await applyEnrichResult(breadth.picks, breadthEnriched)
+        await applyEnrichResult(breadthEnriched)
+        breadthVerifiedSoFar += breadthEnriched.verifiedCount
       }
 
       if (roundPicks === 0) break
