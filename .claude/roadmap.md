@@ -5526,3 +5526,117 @@ shipping to production.
 legal documents under `/legal/*` stay English-only — not a gap, a
 deliberate decision (mistranslating GDPR/CCPA-grade legal text needs a
 qualified Turkish-speaking legal reviewer, not a coding-agent pass).
+
+## Mailreach sync cadence — 6h → 10min — 2026-08-13
+
+**Change:** `scripts/schedule-mailreach-sync-cron.ts`'s default cron changed
+from `0 */6 * * *` (every 6 hours) to `*/10 * * * *` (every 10 minutes), per
+explicit user request to refresh `/analytics`'/`/home`'s Mailreach warmup
+numbers faster. `src/lib/pipeline/mailreach-sync.ts` (`runMailreachStatsSync`)
+and `src/app/api/pipeline/mailreach-sync/route.ts` are unchanged — only the
+QStash schedule's cadence moves.
+
+**Not applied to the live QStash schedule from this environment.** The local
+`.env.local` has `APP_URL=http://localhost:3000`; re-running the script here
+would register a new schedule pointing at localhost (unreachable by QStash)
+rather than updating the production schedule, and would leave a second,
+duplicate schedule behind since `scheduleCron` doesn't know the existing
+production `scheduleId`. To apply this for real: find the live schedule's ID
+via `client.schedules.list()` (`src/lib/qstash/client.ts`) from an
+environment with the production `APP_URL`, then re-run this script passing
+that ID (or delete the old schedule first) — the QStash `create` API upserts
+by `scheduleId`.
+
+**Operational note flagged to user:** 10-minute cadence is ~36x more
+frequent than the previous 6-hour cadence, meaning ~36x more calls to the
+Mailreach vendor API (`getAccount` + `getAccountStats` per connected
+mailbox, per run) — worth confirming Mailreach's rate limits tolerate this
+before rolling out broadly.
+
+## Campaign mailbox picker + Uniforms Fashion mailbox_ids backfill — 2026-08-13
+
+**Trigger:** Shengul asked to check campaign results for "Otel ve Turizm"
+and "Ozel Sektor — Ulasim" ("there is somethings wrong, check").
+
+**Root cause investigation (systematic-debugging):**
+- Both campaigns (client: Uniforms Fashion) showed cases at `cases_contacted`
+  in `analytics_by_campaign` (4 and 2 respectively) while `emails_sent` was
+  `0` for both. Traced every email row for these cases: all `status: 'draft'`,
+  `sent_at: null`, `mailbox_id: null` — nothing had actually gone out.
+- Two compounding causes, both real, neither new code from this session:
+  1. `runWriteForCase` (`write.ts:286`) sets the case to `'contacted'`
+     unconditionally once the leads loop finishes, regardless of whether any
+     lead's outcome was `'sent'` vs `'drafted'`. This client's `reply_mode`
+     is `human_approve`, so every outcome is `'drafted'` — the case still
+     reads `'contacted'`, which is what fed the misleading analytics number.
+     **This is a distinct, still-open gap from the 2026-08-12 "False
+     'contacted' status on write failure" fix above** — that fix addressed
+     the case getting claimed as `'contacted'` *before* the write ran (now
+     `'writing'`); it left this file's *end-of-function* unconditional
+     `'contacted'` write untouched, and that one doesn't distinguish "sent"
+     from "drafted, pending human approval." Not fixed in this session —
+     flagged to Shengul, who chose to scope this session to the mailbox gap
+     below instead.
+  2. Every campaign under this client had `mailbox_ids: []` (not just the
+     two flagged) — `campaigns.mailbox_ids` had a DB column, generated
+     TS type, and every send path already gated on it
+     (`send-actions.ts`'s `loadSendableCampaign`, `sender.ts`'s
+     `sendViaMailbox`), but **no UI ever existed to set it** — so even
+     approving one of the 35 stuck drafts across this client would have
+     failed with `VALIDATION_ERROR: 'Campaign has no mailboxes configured'`.
+
+**Immediate fix — data backfill (not a code change):** all 8 Uniforms
+Fashion campaigns' `mailbox_ids` set to `['a8efd1ab-…' /* info@uniformsfashion.com */]`
+via a one-off admin-client script (not committed — scratch script, deleted
+after running). Unblocks approving the 35 stuck drafts from `/inbox` today.
+
+**Shipped feature (brainstorming → bounded path, approved in chat, no spec
+doc):** a mailbox checkbox picker in campaign create/edit settings.
+- `campaignSettingsSchema` gained `mailboxIds: z.array(z.string().uuid()).default([])`.
+  `POST /api/campaigns` tightens it via `.refine(mailboxIds.length > 0)` — a
+  new campaign can no longer be created mailbox-less. `PATCH
+  /api/campaigns/[campaignId]` leaves it unrefined — an already-broken
+  campaign must stay editable/saveable.
+- New `src/lib/db/mailboxes.ts` exports: `MailboxOption` (`{id, email_address}`
+  — deliberately narrower than `MailboxRow`, which carries `oauth` and would
+  otherwise get serialized into the client bundle for a form that only needs
+  a label), `listMailboxOptionsForClient`, `listMailboxOptionsByClientId`
+  (batched, grouped by `client_id` — avoids an N+1 across clients on the
+  `/campaigns` list page), and `assertMailboxesBelongToClient` (rejects a
+  mailbox id from another client, mirroring `resolveSelectedResources`'
+  scoping of resource ids). Both campaign routes call the assert before
+  writing and map `AppError('VALIDATION_ERROR', …)` to a 400, matching the
+  existing pattern in `clients/[clientId]/logo/route.ts` etc.
+- `CampaignSettingsPatch` (`db/campaigns.ts`) gained `mailbox_ids: string[]`;
+  `insertCampaign`'s row gained the same field from the POST route.
+- `campaign-settings-fields.tsx`: new checkbox-list `Field` (same pattern as
+  the existing seniority/contact-email-status checkboxes), rendering an
+  empty-state hint instead of an empty list when the client has zero
+  mailboxes. `new-campaign-form.tsx`'s client-picker variant recomputes the
+  visible mailbox set from `mailboxesByClientId[clientId]` as the operator
+  switches clients; its fixed-client variant and `edit-campaign-form.tsx`
+  each take a flat `mailboxes` list for their one client.
+- Server pages updated to fetch and pass the new data:
+  `campaigns/page.tsx` (batched `listMailboxOptionsByClientId` across every
+  client), `clients/[id]/page.tsx` (`listMailboxOptionsForClient`, fetched
+  unconditionally alongside `campaigns` since the New Campaign form renders
+  regardless of active tab), `campaigns/[campaignId]/edit/page.tsx`
+  (`listMailboxOptionsForClient` + the campaign's own `mailbox_ids`).
+- `en.json`/`tr.json`: `mailboxesLabel`/`mailboxesHint`/`mailboxesEmpty`/
+  `mailboxesToolParamDescription` added under `campaigns.newCampaignForm` —
+  matches this file's existing full-i18n convention for this operator-only
+  form (not a new pattern; every sibling field here was already translated).
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
+full `vitest run` — 218 files, 2397 tests, all passing (new coverage:
+`campaign-settings-schema.test.ts` mailboxIds default/accept/reject,
+`mailboxes.test.ts` for all three new exports, `campaigns.test.ts`'s
+`updateCampaignSettings` patch, both `api/campaigns` route test files for
+the create-requires-≥1 / edit-allows-0 / cross-client-mailbox-rejected /
+mailbox_ids-passthrough behaviors). Not run: `pnpm build` / a real browser
+pass — worth doing before the next deploy.
+
+**Still open, not addressed this session:** the `runWriteForCase`
+unconditional `'contacted'` write described above. Any client on
+`human_approve` will keep seeing analytics report cases as contacted the
+moment a draft is written, before a human ever approves or sends it.

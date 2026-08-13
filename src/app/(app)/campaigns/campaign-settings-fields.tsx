@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { TimeOfDayInput } from '@/components/ui/time-of-day-input'
 import { apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
+import type { MailboxOption } from '@/lib/db/mailboxes'
 
 const SENIORITY_KEY: Record<(typeof apolloPersonSeniorities)[number], string> = {
   owner: 'seniority.owner',
@@ -69,17 +70,22 @@ export interface CampaignSettingsDefaults {
   contactEmailStatuses: readonly string[]
   discoverTime: string
   discoverTimezone: string
+  mailboxIds: readonly string[]
 }
 
 interface CampaignSettingsFieldsProps {
   defaultValues: CampaignSettingsDefaults
+  // The client's available mailboxes to pick from — not a "default value"
+  // like the rest of the fieldset, since it's the option list rather than the
+  // current selection. Empty when the client has none connected yet.
+  mailboxes: MailboxOption[]
 }
 
 // Shared between NewCampaignForm and EditCampaignForm: value prop, booking
 // link, daily target, and the full ICP fieldset are identical in both create
 // and edit — only the surrounding <form> (client selector vs. fixed client,
 // submit target, submit label) differs between the two callers.
-export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFieldsProps): React.ReactElement {
+export function CampaignSettingsFields({ defaultValues, mailboxes }: CampaignSettingsFieldsProps): React.ReactElement {
   const t = useTranslations('campaigns')
   // Uncontrolled everywhere else in this component — FormData is read
   // straight off the DOM on submit. discoverTime is the one exception: it's
@@ -89,6 +95,27 @@ export function CampaignSettingsFields({ defaultValues }: CampaignSettingsFields
 
   return (
     <>
+      <Field id="mailboxIds" label={t('newCampaignForm.mailboxesLabel')} hint={t('newCampaignForm.mailboxesHint')}>
+        {mailboxes.length === 0 ? (
+          <p className="text-faint text-xs">{t('newCampaignForm.mailboxesEmpty')}</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {mailboxes.map((mailbox) => (
+              <label key={mailbox.id} htmlFor={`mailboxIds-${mailbox.id}`} className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  id={`mailboxIds-${mailbox.id}`}
+                  name="mailboxIds"
+                  value={mailbox.id}
+                  defaultChecked={defaultValues.mailboxIds.includes(mailbox.id)}
+                  toolparamdescription={t('newCampaignForm.mailboxesToolParamDescription')}
+                />
+                {mailbox.email_address}
+              </label>
+            ))}
+          </div>
+        )}
+      </Field>
+
       <Field
         id="valueProp"
         label={t('newCampaignForm.valuePropLabel')}

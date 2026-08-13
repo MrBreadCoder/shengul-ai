@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { ApolloIcpFilters } from '@/lib/apollo/types'
+import type { MailboxOption } from '@/lib/db/mailboxes'
 import { CampaignSettingsFields, Field } from '../../campaign-settings-fields'
 import { splitCsv, getAllStrings } from '../../campaign-form-utils'
 
@@ -24,6 +25,8 @@ interface EditCampaignFormProps {
   icp: ApolloIcpFilters
   discoverTime: string | null
   discoverTimezone: string | null
+  mailboxes: MailboxOption[]
+  mailboxIds: string[]
 }
 
 export function EditCampaignForm({
@@ -37,6 +40,8 @@ export function EditCampaignForm({
   icp,
   discoverTime,
   discoverTimezone,
+  mailboxes,
+  mailboxIds,
 }: EditCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
   const router = useRouter()
@@ -65,6 +70,7 @@ export function EditCampaignForm({
       contactEmailStatuses: getAllStrings(formData, 'contactEmailStatuses'),
       discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
       discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
+      mailboxIds: getAllStrings(formData, 'mailboxIds'),
     }
 
     try {
@@ -109,6 +115,7 @@ export function EditCampaignForm({
       </div>
 
       <CampaignSettingsFields
+        mailboxes={mailboxes}
         defaultValues={{
           valueProp,
           bookingLink: bookingLink ?? '',
@@ -125,6 +132,7 @@ export function EditCampaignForm({
           contactEmailStatuses: icp.contactEmailStatuses,
           discoverTime: discoverTime ?? '',
           discoverTimezone: discoverTimezone ?? '',
+          mailboxIds,
         }}
       />
 

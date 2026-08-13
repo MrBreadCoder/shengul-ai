@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertCampaign } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
+import { assertMailboxesBelongToClient } from '@/lib/db/mailboxes'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
 import { computeNextRunAt } from '@/lib/scheduling/next-run'
@@ -13,9 +14,17 @@ import { formatZodMessage } from '@/lib/errors/format-zod-message'
 
 export const runtime = 'nodejs'
 
-const createCampaignSchema = campaignSettingsSchema.extend({
-  clientId: z.string().uuid(),
-})
+// Unlike PATCH, create requires at least one mailbox: a brand-new campaign
+// has no legacy state to preserve, so there is no reason to let one come into
+// existence already unable to send (see .claude/roadmap.md 2026-08-13 —
+// every campaign in one client's account had shipped with mailbox_ids: []
+// and sat drafting mail nothing could ever deliver).
+const createCampaignSchema = campaignSettingsSchema
+  .extend({ clientId: z.string().uuid() })
+  .refine((data) => data.mailboxIds.length > 0, {
+    message: 'Select at least one mailbox for this campaign to send from',
+    path: ['mailboxIds'],
+  })
 
 export async function POST(request: Request) {
   const { appUser } = await requireUser()
@@ -44,6 +53,10 @@ export async function POST(request: Request) {
     if (!client) {
       return NextResponse.json({ error: 'client_not_found' }, { status: 404 })
     }
+    // Rejects a mailbox id from another client (or one that never existed)
+    // while the operator can still correct the form — the alternative is a
+    // campaign silently pointed at mail it can never actually send from.
+    await assertMailboxesBelongToClient(admin, body.clientId, body.mailboxIds)
     const effectiveTime = body.discoverTime ?? client.default_discover_time
     const effectiveTimezone = body.discoverTimezone ?? client.timezone
     const nextDiscoverAt = computeNextRunAt(new Date(), effectiveTime, effectiveTimezone)
@@ -59,6 +72,7 @@ export async function POST(request: Request) {
       discover_time: body.discoverTime,
       discover_timezone: body.discoverTimezone,
       next_discover_at: nextDiscoverAt.toISOString(),
+      mailbox_ids: body.mailboxIds,
     })
     try {
       await logEvent({
@@ -75,6 +89,9 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: formatZodMessage(error), issues: error.flatten() }, { status: 400 })
+    }
+    if (isAppError(error) && error.code === 'VALIDATION_ERROR') {
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })

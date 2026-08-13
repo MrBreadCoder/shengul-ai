@@ -153,6 +153,7 @@ export interface CampaignSettingsPatch {
   icp: Json
   discover_time: string | null
   discover_timezone: string | null
+  mailbox_ids: string[]
 }
 
 // Full-replace update of a campaign's editable settings (name, value prop,

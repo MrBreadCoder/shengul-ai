@@ -243,6 +243,70 @@ export async function listMailboxesForClient(
   return data ?? []
 }
 
+// The shape the campaign-settings mailbox picker renders and submits — just
+// enough to label a checkbox and post its id back. Deliberately narrower than
+// MailboxRow: that row carries `oauth` (encrypted, but still credential
+// material) and warmup/health bookkeeping a Server Component would otherwise
+// serialize straight into the client bundle for a form that only needs a name.
+export type MailboxOption = Pick<MailboxRow, 'id' | 'email_address'>
+
+export async function listMailboxOptionsForClient(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+): Promise<MailboxOption[]> {
+  const { data, error } = await supabase.from('mailboxes').select('id, email_address').eq('client_id', clientId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list mailbox options for client', { clientId, cause: error.message })
+  }
+  return data ?? []
+}
+
+// Batches the same lookup across every client in one query, grouped by
+// client_id — the campaigns list page's New Campaign form lets the operator
+// switch clients via a dropdown, so it needs every client's mailbox options
+// up front rather than issuing one query per client (N+1 for however many
+// clients exist).
+export async function listMailboxOptionsByClientId(
+  supabase: SupabaseClient<Database>,
+  clientIds: string[],
+): Promise<Record<string, MailboxOption[]>> {
+  if (clientIds.length === 0) return {}
+  const { data, error } = await supabase.from('mailboxes').select('id, email_address, client_id').in('client_id', clientIds)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list mailbox options for clients', { count: clientIds.length, cause: error.message })
+  }
+  const byClientId: Record<string, MailboxOption[]> = {}
+  for (const row of data ?? []) {
+    const bucket = byClientId[row.client_id] ?? []
+    bucket.push({ id: row.id, email_address: row.email_address })
+    byClientId[row.client_id] = bucket
+  }
+  return byClientId
+}
+
+// Rejects any mailbox id that does not belong to this client — an id from
+// another client (or one that never existed) is indistinguishable from a
+// missing one, matching resolveSelectedResources' scoping of resource ids
+// (src/lib/resources/select.ts). Called by the campaign create/edit routes
+// before mailbox_ids is written, so a bad id fails while the operator can
+// still correct the form rather than being discovered at send time.
+export async function assertMailboxesBelongToClient(
+  supabase: SupabaseClient<Database>,
+  clientId: string,
+  mailboxIds: readonly string[],
+): Promise<void> {
+  if (mailboxIds.length === 0) return
+  const owned = await listMailboxOptionsForClient(supabase, clientId)
+  const ownedIds = new Set(owned.map((mailbox) => mailbox.id))
+  const invalidIds = mailboxIds.filter((id) => !ownedIds.has(id))
+  if (invalidIds.length > 0) {
+    throw new AppError('VALIDATION_ERROR', 'One of the selected mailboxes does not belong to this client', {
+      clientId,
+      invalidIds,
+    })
+  }
+}
+
 // The stats-sync sweep's candidate set when called with no clientId (every
 // client at once). Home/Analytics/Reports pass a clientId to scope to one
 // client's mailboxes instead.

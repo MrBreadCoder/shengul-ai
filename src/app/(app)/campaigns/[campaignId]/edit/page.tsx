@@ -5,6 +5,7 @@ import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCampaignById } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
+import { listMailboxOptionsForClient } from '@/lib/db/mailboxes'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { PageHeader } from '@/components/page-header'
 import { EditCampaignForm } from './edit-campaign-form'
@@ -27,7 +28,10 @@ export default async function EditCampaignPage({
   const campaign = await getCampaignById(admin, campaignId)
   if (!campaign) notFound()
 
-  const client = await getClientById(admin, campaign.client_id)
+  const [client, mailboxes] = await Promise.all([
+    getClientById(admin, campaign.client_id),
+    listMailboxOptionsForClient(admin, campaign.client_id),
+  ])
   // Every row's icp column was written by this same schema (POST /api/campaigns
   // and this route's own PATCH both validate through it before insert/update),
   // so re-parsing it back to typed fields should never fail in practice.
@@ -47,6 +51,8 @@ export default async function EditCampaignPage({
         icp={icp}
         discoverTime={campaign.discover_time}
         discoverTimezone={campaign.discover_timezone}
+        mailboxes={mailboxes}
+        mailboxIds={campaign.mailbox_ids}
       />
     </div>
   )

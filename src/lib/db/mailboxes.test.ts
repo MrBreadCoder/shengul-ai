@@ -18,6 +18,9 @@ import {
   clearMailboxMailreachConnection,
   updateMailboxMailreachStats,
   listMailboxesForClient,
+  listMailboxOptionsForClient,
+  listMailboxOptionsByClientId,
+  assertMailboxesBelongToClient,
   listMailreachConnectedMailboxes,
   deleteMailbox,
 } from './mailboxes'
@@ -384,6 +387,76 @@ describe('listMailboxesForClient', () => {
       from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
     } as never
     await expect(listMailboxesForClient(supabase, 'c1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listMailboxOptionsForClient', () => {
+  it('should return the id/email_address projection for the client', async () => {
+    const rows = [{ id: 'm1', email_address: 'a@x.com' }, { id: 'm2', email_address: 'b@x.com' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    await expect(listMailboxOptionsForClient(supabase, 'c1')).resolves.toEqual(rows)
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
+    } as never
+    await expect(listMailboxOptionsForClient(supabase, 'c1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listMailboxOptionsByClientId', () => {
+  it('should return an empty object without querying when given no client ids', async () => {
+    const supabase = { from: vi.fn() } as never
+    await expect(listMailboxOptionsByClientId(supabase, [])).resolves.toEqual({})
+    expect((supabase as { from: ReturnType<typeof vi.fn> }).from).not.toHaveBeenCalled()
+  })
+
+  it('should group mailboxes by client_id', async () => {
+    const rows = [
+      { id: 'm1', email_address: 'a@x.com', client_id: 'c1' },
+      { id: 'm2', email_address: 'b@x.com', client_id: 'c1' },
+      { id: 'm3', email_address: 'c@y.com', client_id: 'c2' },
+    ]
+    const supabase = mockIn({ data: rows, error: null })
+    const result = await listMailboxOptionsByClientId(supabase, ['c1', 'c2'])
+    expect(result).toEqual({
+      c1: [{ id: 'm1', email_address: 'a@x.com' }, { id: 'm2', email_address: 'b@x.com' }],
+      c2: [{ id: 'm3', email_address: 'c@y.com' }],
+    })
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    const supabase = mockIn({ data: null, error: { message: 'boom' } })
+    await expect(listMailboxOptionsByClientId(supabase, ['c1'])).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('assertMailboxesBelongToClient', () => {
+  it('should resolve without querying when given no mailbox ids', async () => {
+    const supabase = { from: vi.fn() } as never
+    await expect(assertMailboxesBelongToClient(supabase, 'c1', [])).resolves.toBeUndefined()
+    expect((supabase as { from: ReturnType<typeof vi.fn> }).from).not.toHaveBeenCalled()
+  })
+
+  it('should resolve when every mailbox id belongs to the client', async () => {
+    const rows = [{ id: 'm1', email_address: 'a@x.com' }, { id: 'm2', email_address: 'b@x.com' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    await expect(assertMailboxesBelongToClient(supabase, 'c1', ['m1', 'm2'])).resolves.toBeUndefined()
+  })
+
+  it('should throw VALIDATION_ERROR when a mailbox id belongs to another client', async () => {
+    const rows = [{ id: 'm1', email_address: 'a@x.com' }]
+    const supabase = {
+      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
+    } as never
+    await expect(assertMailboxesBelongToClient(supabase, 'c1', ['m1', 'm-other-client'])).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    })
   })
 })
 

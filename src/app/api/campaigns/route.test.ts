@@ -4,14 +4,19 @@ const requireUserMock = vi.fn()
 const insertCampaignMock = vi.fn()
 const logEventMock = vi.fn()
 const getClientByIdMock = vi.fn()
+const assertMailboxesBelongToClientMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/db/campaigns', () => ({ insertCampaign: (...a: unknown[]) => insertCampaignMock(...a) }))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
+vi.mock('@/lib/db/mailboxes', () => ({
+  assertMailboxesBelongToClient: (...a: unknown[]) => assertMailboxesBelongToClientMock(...a),
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 
 import { POST } from './route'
+import { AppError } from '@/lib/errors/app-error'
 
 function req(body: unknown) {
   return new Request('http://x', { method: 'POST', body: JSON.stringify(body) })
@@ -21,12 +26,14 @@ const validBody = {
   clientId: '11111111-1111-4111-8111-111111111111',
   name: 'Q3 campaign',
   valueProp: 'We save you time',
+  mailboxIds: ['22222222-2222-4222-8222-222222222222'],
 }
 
 beforeEach(() => {
   requireUserMock.mockReset()
   insertCampaignMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
+  assertMailboxesBelongToClientMock.mockReset().mockResolvedValue(undefined)
   getClientByIdMock.mockReset().mockResolvedValue({
     id: validBody.clientId,
     reply_mode: 'human_approve',
@@ -167,6 +174,40 @@ describe('POST /api/campaigns', () => {
       {},
       expect.objectContaining({ discover_time: null, discover_timezone: null, next_discover_at: expect.any(String) }),
     )
+  })
+
+  it('should return 400 when no mailbox is selected', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+
+    const res = await POST(req({ ...validBody, mailboxIds: [] }))
+
+    expect(res.status).toBe(400)
+    expect(insertCampaignMock).not.toHaveBeenCalled()
+  })
+
+  it('should pass mailboxIds through as mailbox_ids on the inserted row', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req(validBody))
+
+    expect(assertMailboxesBelongToClientMock).toHaveBeenCalledWith({}, validBody.clientId, validBody.mailboxIds)
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ mailbox_ids: validBody.mailboxIds }),
+    )
+  })
+
+  it('should return 400 when a selected mailbox does not belong to the client', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    assertMailboxesBelongToClientMock.mockRejectedValue(
+      new AppError('VALIDATION_ERROR', 'One of the selected mailboxes does not belong to this client'),
+    )
+
+    const res = await POST(req(validBody))
+
+    expect(res.status).toBe(400)
+    expect(insertCampaignMock).not.toHaveBeenCalled()
   })
 
   it("should store the campaign's own discoverTime/discoverTimezone override", async () => {

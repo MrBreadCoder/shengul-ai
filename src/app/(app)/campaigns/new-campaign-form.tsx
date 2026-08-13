@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import type { MailboxOption } from '@/lib/db/mailboxes'
 import { CampaignSettingsFields, Field } from './campaign-settings-fields'
 import { splitCsv, getAllStrings } from './campaign-form-utils'
 
@@ -24,7 +25,9 @@ interface ClientOption {
 
 type SubmitState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
-type NewCampaignFormProps = { clients: ClientOption[] } | { fixedClientId: string; fixedClientName: string }
+type NewCampaignFormProps =
+  | { clients: ClientOption[]; mailboxesByClientId: Record<string, MailboxOption[]> }
+  | { fixedClientId: string; fixedClientName: string; mailboxes: MailboxOption[] }
 
 export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
@@ -35,6 +38,10 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
   // client is held in React state rather than read off the form. When the
   // client is fixed by the route, this never changes.
   const [clientId, setClientId] = useState(isFixed ? props.fixedClientId : '')
+  // Mailbox options depend on which client is selected — when the client
+  // picker is visible, switching it must re-render the checkbox list against
+  // that client's own mailboxes, not the previous client's.
+  const mailboxes = isFixed ? props.mailboxes : (props.mailboxesByClientId[clientId] ?? [])
 
   async function onSubmit(formData: FormData): Promise<void> {
     if (!clientId) {
@@ -64,6 +71,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       contactEmailStatuses: getAllStrings(formData, 'contactEmailStatuses'),
       discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
       discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
+      mailboxIds: getAllStrings(formData, 'mailboxIds'),
     }
 
     try {
@@ -137,6 +145,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       </div>
 
       <CampaignSettingsFields
+        mailboxes={mailboxes}
         defaultValues={{
           valueProp: '',
           bookingLink: '',
@@ -153,6 +162,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           contactEmailStatuses: ['verified'],
           discoverTime: '',
           discoverTimezone: '',
+          mailboxIds: [],
         }}
       />
 

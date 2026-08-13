@@ -9,7 +9,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, listClientRoleAppUsers } from '@/lib/db/clients'
 import { listEmailStyles, getDefaultEmailStyle } from '@/lib/db/email-styles'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
-import { listMailboxesForClient } from '@/lib/db/mailboxes'
+import { listMailboxesForClient, listMailboxOptionsForClient } from '@/lib/db/mailboxes'
 import { listEventsForClient } from '@/lib/db/events'
 import { listSourcesForClient } from '@/lib/db/client-knowledge'
 import { SEVERITIES_FOR_FILTER } from '@/types/logs'
@@ -97,10 +97,14 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
     emailStyles.find((style) => style.id === client.email_style_id) ?? (await getDefaultEmailStyle(admin))
   const t = await getTranslations('clients')
 
-  const [campaigns, clientAppUsers, authUsers] = await Promise.all([
+  const [campaigns, clientAppUsers, authUsers, mailboxOptions] = await Promise.all([
     listCampaignsForClient(admin, clientId),
     listClientRoleAppUsers(admin),
     listAllAuthUsers(admin),
+    // Unconditional like `campaigns` above: the New Campaign form renders
+    // regardless of which tab is active, so its mailbox picker needs this
+    // client's options up front rather than gated behind tab === 'campaigns'.
+    listMailboxOptionsForClient(admin, clientId),
   ])
   const emailById = new Map(authUsers.map((user) => [user.id, user.email]))
   const users = clientAppUsers
@@ -248,7 +252,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
 
         <TabsContent value="campaigns">
           <div className="flex max-w-3xl flex-col gap-6">
-            <NewCampaignForm fixedClientId={client.id} fixedClientName={client.name} />
+            <NewCampaignForm fixedClientId={client.id} fixedClientName={client.name} mailboxes={mailboxOptions} />
             {campaigns.length === 0 ? (
               <EmptyState icon={Lightning} title={t('detail.noCampaignsTitle')} description={t('detail.noCampaignsDescription')} />
             ) : (

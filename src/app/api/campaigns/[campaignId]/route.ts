@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCampaignById, deleteCampaign, updateCampaignSettings, recomputeCampaignNextDiscoverAt } from '@/lib/db/campaigns'
+import { assertMailboxesBelongToClient } from '@/lib/db/mailboxes'
 import { campaignSettingsSchema } from '@/lib/apollo/campaign-settings-schema'
 import { apolloIcpSchema } from '@/lib/apollo/types'
 import { logEvent } from '@/lib/events/log-event'
@@ -90,6 +91,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       personSeniorities: body.personSeniorities,
       contactEmailStatuses: body.contactEmailStatuses,
     })
+    // Unlike create, an edit may save with zero mailboxes: an already-broken
+    // campaign (mailbox_ids: []) must still be openable and saveable so an
+    // operator can fix an unrelated field, or fix the mailbox itself, without
+    // the form refusing to submit on some other pre-existing gap.
+    await assertMailboxesBelongToClient(admin, campaign.client_id, body.mailboxIds)
 
     await updateCampaignSettings(admin, campaignId, {
       name: body.name,
@@ -100,6 +106,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       icp,
       discover_time: body.discoverTime,
       discover_timezone: body.discoverTimezone,
+      mailbox_ids: body.mailboxIds,
     })
     // Recompute unconditionally rather than diffing old vs. new — cheap,
     // and correctly handles every case: an override changed, an override
@@ -121,6 +128,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: formatZodMessage(error), issues: error.flatten() }, { status: 400 })
+    }
+    if (isAppError(error) && error.code === 'VALIDATION_ERROR') {
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     const code = isAppError(error) ? error.code : 'unknown'
     return NextResponse.json({ error: code }, { status: 500 })

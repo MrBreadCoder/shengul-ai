@@ -26,6 +26,13 @@ export const campaignSettingsSchema = z.object({
   // null = inherit the owning client's timezone/default_discover_time.
   discoverTime: timeOfDaySchema.nullable().default(null),
   discoverTimezone: timezoneSchema.nullable().default(null),
+  // Which of the client's mailboxes this campaign sends from. Empty is a
+  // valid shape at this shared-schema level — POST /api/campaigns tightens it
+  // to at least one via .refine() (a campaign can't be created mailbox-less),
+  // while PATCH leaves it as-is so an already-broken campaign can still be
+  // opened and saved. Ownership (does each id belong to this campaign's
+  // client) is checked by the route, not here — this schema has no DB access.
+  mailboxIds: z.array(z.string().uuid()).default([]),
 })
 
 export type CampaignSettingsInput = z.infer<typeof campaignSettingsSchema>

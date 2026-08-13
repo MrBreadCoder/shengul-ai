@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerClient } from '@/lib/supabase/server'
 import { listCampaignsForClient, type CampaignRow } from '@/lib/db/campaigns'
 import { listClients, type ClientOption } from '@/lib/db/clients'
+import { listMailboxOptionsByClientId, type MailboxOption } from '@/lib/db/mailboxes'
 import { formatRelative } from '@/lib/format'
 import { PageHeader, Section } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
@@ -60,12 +61,17 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
   // reply_mode/mailboxes on /settings.
   let campaigns: CampaignRow[]
   let clients: ClientOption[] = []
+  let mailboxesByClientId: Record<string, MailboxOption[]> = {}
   if (isOperator) {
     const admin = createAdminClient()
     ;[campaigns, clients] = await Promise.all([
       listCampaignsForClient(admin, null),
       listClients(admin),
     ])
+    // One batched query for every client's mailbox options — the New
+    // Campaign form's client picker needs each client's list up front so
+    // switching clients re-renders the checkbox set without a round trip.
+    mailboxesByClientId = await listMailboxOptionsByClientId(admin, clients.map((client) => client.id))
   } else {
     const supabase = await createServerClient()
     campaigns = await listCampaignsForClient(supabase, null)
@@ -88,7 +94,7 @@ export default async function CampaignsPage(): Promise<React.ReactElement> {
               description={t('noClientsDescription')}
             />
           ) : (
-            <NewCampaignForm clients={clients} />
+            <NewCampaignForm clients={clients} mailboxesByClientId={mailboxesByClientId} />
           )}
         </Section>
       ) : null}

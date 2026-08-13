@@ -73,4 +73,20 @@ describe('campaignSettingsSchema', () => {
     const result = campaignSettingsSchema.safeParse({ ...valid, employeeRangeMin: 40, employeeRangeMax: null })
     expect(result.success).toBe(true)
   })
+
+  it('should default mailboxIds to an empty array when omitted', () => {
+    const result = campaignSettingsSchema.parse(valid)
+    expect(result.mailboxIds).toEqual([])
+  })
+
+  it('should accept a list of mailbox uuids', () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    const result = campaignSettingsSchema.parse({ ...valid, mailboxIds: [id] })
+    expect(result.mailboxIds).toEqual([id])
+  })
+
+  it('should reject a non-uuid mailboxIds entry', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, mailboxIds: ['not-a-uuid'] })
+    expect(result.success).toBe(false)
+  })
 })

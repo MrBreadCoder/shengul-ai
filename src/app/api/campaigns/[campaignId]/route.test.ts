@@ -6,6 +6,7 @@ const deleteCampaignMock = vi.fn()
 const updateCampaignSettingsMock = vi.fn()
 const recomputeCampaignNextDiscoverAtMock = vi.fn()
 const logEventMock = vi.fn()
+const assertMailboxesBelongToClientMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
@@ -15,9 +16,13 @@ vi.mock('@/lib/db/campaigns', () => ({
   updateCampaignSettings: (...a: unknown[]) => updateCampaignSettingsMock(...a),
   recomputeCampaignNextDiscoverAt: (...a: unknown[]) => recomputeCampaignNextDiscoverAtMock(...a),
 }))
+vi.mock('@/lib/db/mailboxes', () => ({
+  assertMailboxesBelongToClient: (...a: unknown[]) => assertMailboxesBelongToClientMock(...a),
+}))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 
 import { DELETE, PATCH } from './route'
+import { AppError } from '@/lib/errors/app-error'
 
 function deleteReq(body: unknown) {
   return new Request('http://x', { method: 'DELETE', body: JSON.stringify(body) })
@@ -45,6 +50,7 @@ function validPatchBody(overrides: Record<string, unknown> = {}) {
     contactEmailStatuses: [],
     discoverTime: null,
     discoverTimezone: null,
+    mailboxIds: [],
     ...overrides,
   }
 }
@@ -56,6 +62,7 @@ beforeEach(() => {
   updateCampaignSettingsMock.mockReset()
   recomputeCampaignNextDiscoverAtMock.mockReset()
   logEventMock.mockReset().mockResolvedValue(undefined)
+  assertMailboxesBelongToClientMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('DELETE /api/campaigns/[campaignId]', () => {
@@ -126,6 +133,49 @@ describe('PATCH /api/campaigns/[campaignId]', () => {
     )
     expect(recomputeCampaignNextDiscoverAtMock).toHaveBeenCalledWith(expect.anything(), 'camp1')
     expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'campaign.updated' }))
+  })
+
+  it('should allow saving with zero mailboxes (an already-broken campaign stays editable)', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch' })
+    updateCampaignSettingsMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+
+    const res = await PATCH(patchReq(validPatchBody({ mailboxIds: [] })), ctx('camp1'))
+
+    expect(res.status).toBe(200)
+    expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'camp1',
+      expect.objectContaining({ mailbox_ids: [] }),
+    )
+  })
+
+  it('should pass mailboxIds through as mailbox_ids on the update', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch' })
+    updateCampaignSettingsMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    const mailboxIds = ['22222222-2222-4222-8222-222222222222']
+
+    await PATCH(patchReq(validPatchBody({ mailboxIds })), ctx('camp1'))
+
+    expect(assertMailboxesBelongToClientMock).toHaveBeenCalledWith(expect.anything(), 'c1', mailboxIds)
+    expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'camp1',
+      expect.objectContaining({ mailbox_ids: mailboxIds }),
+    )
+  })
+
+  it('should return 400 when a selected mailbox does not belong to the campaign\'s client', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Acme launch' })
+    assertMailboxesBelongToClientMock.mockRejectedValue(
+      new AppError('VALIDATION_ERROR', 'One of the selected mailboxes does not belong to this client'),
+    )
+
+    const res = await PATCH(patchReq(validPatchBody({ mailboxIds: ['22222222-2222-4222-8222-222222222222'] })), ctx('camp1'))
+
+    expect(res.status).toBe(400)
+    expect(updateCampaignSettingsMock).not.toHaveBeenCalled()
   })
 
   it('should recompute next_discover_at after a successful update', async () => {
