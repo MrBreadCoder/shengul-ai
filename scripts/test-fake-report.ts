@@ -189,7 +189,7 @@ async function main(): Promise<void> {
     periodLabel: 'this week' | 'this month',
     overview: OverviewMetrics,
   ): Promise<void> {
-    const template = deps.pickTemplate(summaries.length)
+    const template = deps.pickTemplate(summaries.length, false)
     const rendered = deps.renderTemplate(template, {
       clientName,
       periodLabel,
@@ -197,6 +197,7 @@ async function main(): Promise<void> {
       emailsSent: overview.emailsSent,
       repliesReceived: overview.repliesReceived,
       reportUrl: new URL(`/reports/${reportId}`, appUrl).toString(),
+      warmup: null,
     })
     await deps.sendReportEmail({ to: PREVIEW_RECIPIENT, subject: rendered.subject, text: rendered.text, html: rendered.html })
   }

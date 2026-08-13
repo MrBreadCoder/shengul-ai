@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFetchJson = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/http/fetch-json', () => ({ fetchJson: mockFetchJson }))
 
-import { connectSmtpAccount, buildOAuthAuthorizeUrl, completeOAuthConnect, disconnectAccount, getAccountStats } from './client'
+import { connectSmtpAccount, buildOAuthAuthorizeUrl, completeOAuthConnect, disconnectAccount, getAccount, getAccountStats } from './client'
 
 const smtpInput = {
   emailAddress: 'sales@acme.com',
@@ -101,25 +101,67 @@ describe('disconnectAccount', () => {
   })
 })
 
-describe('getAccountStats', () => {
+describe('getAccount', () => {
   beforeEach(() => mockFetchJson.mockReset())
 
   it('should return the reputation score', async () => {
-    mockFetchJson.mockResolvedValueOnce({ reputation_score: 94 })
-    const result = await getAccountStats('acc_123', 'test-mailreach-key')
-    expect(result).toEqual({ reputationScore: 94 })
+    mockFetchJson.mockResolvedValueOnce({ score: 82 })
+    const result = await getAccount('acc_123', 'test-mailreach-key')
+    expect(result).toEqual({ reputationScore: 82 })
+    const [url, options] = mockFetchJson.mock.calls[0]!
+    expect(url).toBe('https://api.mailreach.co/api/v1/accounts/acc_123')
+    expect(options.method).toBe('GET')
   })
 
   it('should return null when the score is absent', async () => {
     mockFetchJson.mockResolvedValueOnce({})
-    const result = await getAccountStats('acc_123', 'test-mailreach-key')
+    const result = await getAccount('acc_123', 'test-mailreach-key')
     expect(result).toEqual({ reputationScore: null })
   })
 
   it('should send the given apiKey in the request header', async () => {
-    mockFetchJson.mockResolvedValueOnce({ reputation_score: 50 })
-    await getAccountStats('acc_123', 'uniforms-fashion-key')
+    mockFetchJson.mockResolvedValueOnce({ score: 50 })
+    await getAccount('acc_123', 'uniforms-fashion-key')
     const [, options] = mockFetchJson.mock.calls[0]!
+    expect(options.headers['X-Api-Key']).toBe('Bearer uniforms-fashion-key')
+  })
+})
+
+describe('getAccountStats', () => {
+  beforeEach(() => mockFetchJson.mockReset())
+
+  it('should return the messaging-volume fields with the real field names', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      total_messages_sent: 120,
+      total_messages_received: 95,
+      total_spam: 2,
+      config_current_conversation_running: 8,
+    })
+    const result = await getAccountStats('acc_123', 'test-mailreach-key')
+    expect(result).toEqual({
+      totalMessagesSent: 120,
+      totalMessagesReceived: 95,
+      totalSpam: 2,
+      currentConversationsRunning: 8,
+    })
+  })
+
+  it('should return null for every field when absent', async () => {
+    mockFetchJson.mockResolvedValueOnce({})
+    const result = await getAccountStats('acc_123', 'test-mailreach-key')
+    expect(result).toEqual({
+      totalMessagesSent: null,
+      totalMessagesReceived: null,
+      totalSpam: null,
+      currentConversationsRunning: null,
+    })
+  })
+
+  it('should request the 180-day window and send the given apiKey', async () => {
+    mockFetchJson.mockResolvedValueOnce({})
+    await getAccountStats('acc_123', 'uniforms-fashion-key')
+    const [url, options] = mockFetchJson.mock.calls[0]!
+    expect(url).toBe('https://api.mailreach.co/api/v1/accounts/acc_123/stats?past_days=180')
     expect(options.headers['X-Api-Key']).toBe('Bearer uniforms-fashion-key')
   })
 })

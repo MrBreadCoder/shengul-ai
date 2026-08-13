@@ -15,6 +15,9 @@ import { listRecentLeadsForClient } from '@/lib/db/leads'
 import { listEmailsForClient, listDraftEmailsForClient } from '@/lib/db/emails'
 import { listOpenKnowledgeRequestsForClient } from '@/lib/db/knowledge-requests'
 import { listCaseCompanyNames } from '@/lib/db/crm'
+import { getClientById } from '@/lib/db/clients'
+import { listMailreachConnectedMailboxes } from '@/lib/db/mailboxes'
+import { summarizeMailboxWarmup } from '@/lib/mailbox/mailreach-gate'
 import { PageHeader } from '@/components/page-header'
 import { StatTile } from '@/components/stat-tile'
 import { RealtimeRefresher } from '@/components/realtime-refresher'
@@ -23,6 +26,7 @@ import { NeedsActionCard } from './needs-action-card'
 import { CampaignRow } from './campaign-row'
 import { LeadRow } from './lead-row'
 import { MailRow } from './mail-row'
+import { WarmupBanner } from './warmup-banner'
 
 export const dynamic = 'force-dynamic'
 
@@ -80,16 +84,19 @@ export default async function HomePage(): Promise<React.ReactElement> {
   const t = await getTranslations('home')
   const { from, to } = rangeFromDays(HOME_RANGE_DAYS, new Date())
 
-  const [overview, daily, campaigns, leads, mail, drafts, knowledgeRequests, cases] = await Promise.all([
-    getOverviewMetrics(supabase, { from, to, campaignId: null, clientId }),
-    getDailyMetrics(supabase, { from, to, campaignId: null, clientId }),
-    listCampaignsForClient(supabase, clientId),
-    listRecentLeadsForClient(supabase, { limit: LIST_LIMIT }),
-    listEmailsForClient(supabase, { direction: 'outbound', limit: LIST_LIMIT }),
-    listDraftEmailsForClient(supabase),
-    listOpenKnowledgeRequestsForClient(supabase),
-    listCaseCompanyNames(supabase),
-  ])
+  const [overview, daily, campaigns, leads, mail, drafts, knowledgeRequests, cases, client, mailreachMailboxes] =
+    await Promise.all([
+      getOverviewMetrics(supabase, { from, to, campaignId: null, clientId }),
+      getDailyMetrics(supabase, { from, to, campaignId: null, clientId }),
+      listCampaignsForClient(supabase, clientId),
+      listRecentLeadsForClient(supabase, { limit: LIST_LIMIT }),
+      listEmailsForClient(supabase, { direction: 'outbound', limit: LIST_LIMIT }),
+      listDraftEmailsForClient(supabase),
+      listOpenKnowledgeRequestsForClient(supabase),
+      listCaseCompanyNames(supabase),
+      getClientById(supabase, clientId),
+      listMailreachConnectedMailboxes(supabase, clientId),
+    ])
 
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'active')
   // The campaigns column shows every campaign, active first — a client with
@@ -102,6 +109,8 @@ export default async function HomePage(): Promise<React.ReactElement> {
   ].slice(0, LIST_LIMIT)
   const companyByCaseId = new Map(cases.map((kase) => [kase.id, kase.companyName]))
   const now = new Date()
+  const warmup = summarizeMailboxWarmup(mailreachMailboxes, client?.mailreach_enabled ?? false, now)
+  const gatedWarmup = warmup.filter((w) => w.isGated)
 
   return (
     // The fixed height only engages at lg — the shell's content padding is
@@ -113,6 +122,8 @@ export default async function HomePage(): Promise<React.ReactElement> {
     <div className="flex flex-col gap-6 lg:h-[calc(100dvh-5rem)] lg:min-h-0">
       <RealtimeRefresher channel="home-metrics" />
       <PageHeader title={t('pageTitle')} description={t('description')} className="shrink-0" />
+
+      {gatedWarmup.length > 0 ? <WarmupBanner mailboxes={warmup} gated={gatedWarmup} /> : null}
 
       {/*
         Asymmetric bento, not five equal boxes: leads found is the

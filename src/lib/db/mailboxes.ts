@@ -211,11 +211,25 @@ export async function clearMailboxMailreachConnection(
 export async function updateMailboxMailreachStats(
   supabase: SupabaseClient<Database>,
   id: string,
-  fields: { reputationScore: number | null; syncedAt: string },
+  fields: {
+    reputationScore: number | null
+    totalMessagesSent: number | null
+    totalMessagesReceived: number | null
+    totalSpam: number | null
+    currentConversations: number | null
+    syncedAt: string
+  },
 ): Promise<void> {
   const { error } = await supabase
     .from('mailboxes')
-    .update({ mailreach_reputation_score: fields.reputationScore, mailreach_stats_synced_at: fields.syncedAt })
+    .update({
+      mailreach_reputation_score: fields.reputationScore,
+      mailreach_total_messages_sent: fields.totalMessagesSent,
+      mailreach_total_messages_received: fields.totalMessagesReceived,
+      mailreach_total_spam: fields.totalSpam,
+      mailreach_current_conversations: fields.currentConversations,
+      mailreach_stats_synced_at: fields.syncedAt,
+    })
     .eq('id', id)
   if (error) throw new AppError('DB_ERROR', 'Failed to update mailbox mailreach stats', { id, cause: error.message })
 }
@@ -229,13 +243,17 @@ export async function listMailboxesForClient(
   return data ?? []
 }
 
-// The stats-sync sweep's candidate set — every mailbox currently live on
-// Mailreach's side, across every client.
+// The stats-sync sweep's candidate set when called with no clientId (every
+// client at once). Home/Analytics/Reports pass a clientId to scope to one
+// client's mailboxes instead.
 export async function listMailreachConnectedMailboxes(
   supabase: SupabaseClient<Database>,
+  clientId?: string,
 ): Promise<MailboxRow[]> {
-  const { data, error } = await supabase.from('mailboxes').select('*').eq('mailreach_status', 'connected')
-  if (error) throw new AppError('DB_ERROR', 'Failed to list mailreach-connected mailboxes', { cause: error.message })
+  let query = supabase.from('mailboxes').select('*').eq('mailreach_status', 'connected')
+  if (clientId) query = query.eq('client_id', clientId)
+  const { data, error } = await query.order('email_address')
+  if (error) throw new AppError('DB_ERROR', 'Failed to list mailreach-connected mailboxes', { clientId, cause: error.message })
   return data ?? []
 }
 

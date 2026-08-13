@@ -7,6 +7,7 @@ const generateReportCommentaryMock = vi.fn()
 const buildFallbackCommentaryMock = vi.fn()
 const pickTemplateMock = vi.fn()
 const renderTemplateMock = vi.fn()
+const buildWarmupTemplateContextMock = vi.fn()
 const sendReportEmailMock = vi.fn()
 const upsertReportMock = vi.fn()
 const getPreviousReportMock = vi.fn()
@@ -30,6 +31,7 @@ vi.mock('./commentary', () => ({
 vi.mock('./email-templates', () => ({
   pickTemplate: (...a: unknown[]) => pickTemplateMock(...a),
   renderTemplate: (...a: unknown[]) => renderTemplateMock(...a),
+  buildWarmupTemplateContext: (...a: unknown[]) => buildWarmupTemplateContextMock(...a),
 }))
 vi.mock('./mailer', () => ({ sendReportEmail: (...a: unknown[]) => sendReportEmailMock(...a) }))
 vi.mock('@/lib/db/reports', () => ({
@@ -86,6 +88,7 @@ beforeEach(() => {
   buildFallbackCommentaryMock.mockReset().mockReturnValue(commentary)
   pickTemplateMock.mockReset().mockReturnValue('template')
   renderTemplateMock.mockReset().mockReturnValue(rendered)
+  buildWarmupTemplateContextMock.mockReset().mockReturnValue(null)
   sendReportEmailMock.mockReset().mockResolvedValue(undefined)
   upsertReportMock.mockReset().mockResolvedValue(reportRow('generating'))
   getPreviousReportMock.mockReset().mockResolvedValue(null)
@@ -162,5 +165,49 @@ describe('generateReport', () => {
     await generateReport({} as never, { clientId: 'c1', type: 'monthly', now: new Date() })
     expect(getMonthlyPeriodMock).toHaveBeenCalled()
     expect(getWeeklyPeriodMock).not.toHaveBeenCalled()
+  })
+
+  it('should pass an empty warmup array to the commentary call when no mailboxes are enrolled', async () => {
+    upsertReportMock.mockResolvedValueOnce(reportRow('generating')).mockResolvedValueOnce(reportRow('ready')).mockResolvedValueOnce(reportRow('sent'))
+    await generateReport({} as never, { clientId: 'c1', type: 'weekly', now: new Date() })
+    expect(generateReportCommentaryMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ warmup: [] }))
+  })
+
+  it('should use the warmup template when there were zero sends and a mailbox is still gated', async () => {
+    const gatedMailbox = {
+      mailboxId: '11111111-1111-4111-8111-111111111111',
+      emailAddress: 'sales@acme.com',
+      elapsedDays: 6,
+      gateDays: 14,
+      isGated: true,
+      reputationScore: 70,
+      totalMessagesSent: 10,
+      totalMessagesReceived: 8,
+      totalSpam: 0,
+      currentConversations: 2,
+    }
+    buildReportMetricsMock.mockResolvedValue({ overview: { ...overview, emailsSent: 0 }, daily: [], warmup: [gatedMailbox] })
+    upsertReportMock.mockResolvedValueOnce(reportRow('generating')).mockResolvedValueOnce(reportRow('ready')).mockResolvedValueOnce(reportRow('sent'))
+    await generateReport({} as never, { clientId: 'c1', type: 'weekly', now: new Date() })
+    expect(pickTemplateMock).toHaveBeenCalledWith(0, true)
+  })
+
+  it('should use the normal rotating template when sends happened even with a mailbox still gated', async () => {
+    const gatedMailbox = {
+      mailboxId: '11111111-1111-4111-8111-111111111111',
+      emailAddress: 'sales@acme.com',
+      elapsedDays: 6,
+      gateDays: 14,
+      isGated: true,
+      reputationScore: 70,
+      totalMessagesSent: 10,
+      totalMessagesReceived: 8,
+      totalSpam: 0,
+      currentConversations: 2,
+    }
+    buildReportMetricsMock.mockResolvedValue({ overview, daily: [], warmup: [gatedMailbox] })
+    upsertReportMock.mockResolvedValueOnce(reportRow('generating')).mockResolvedValueOnce(reportRow('ready')).mockResolvedValueOnce(reportRow('sent'))
+    await generateReport({} as never, { clientId: 'c1', type: 'weekly', now: new Date() })
+    expect(pickTemplateMock).toHaveBeenCalledWith(0, false)
   })
 })

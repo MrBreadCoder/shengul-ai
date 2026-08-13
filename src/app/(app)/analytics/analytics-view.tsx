@@ -4,7 +4,9 @@ import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createServerClient } from '@/lib/supabase/server'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
-import { listClients } from '@/lib/db/clients'
+import { listClients, getClientById } from '@/lib/db/clients'
+import { listMailreachConnectedMailboxes } from '@/lib/db/mailboxes'
+import { summarizeMailboxWarmup } from '@/lib/mailbox/mailreach-gate'
 import {
   getOverviewMetrics,
   getDailyMetrics,
@@ -81,12 +83,14 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
     : null
 
   const { from, to } = rangeFromDays(days, new Date())
-  const [overview, daily, byCampaign, allMailboxes, eventCounts] = await Promise.all([
+  const [overview, daily, byCampaign, allMailboxes, eventCounts, client, warmupMailboxes] = await Promise.all([
     getOverviewMetrics(supabase, { from, to, campaignId, clientId }),
     getDailyMetrics(supabase, { from, to, campaignId, clientId }),
     getCampaignMetrics(supabase, { from, to }),
     getMailboxMetrics(supabase),
     getEventCounts(supabase, { from, to, limit: EVENT_TYPE_LIMIT }),
+    clientId ? getClientById(supabase, clientId) : Promise.resolve(null),
+    listMailreachConnectedMailboxes(supabase, clientId ?? undefined),
   ])
 
   const replyRate = rate(overview.leadsReplied, overview.leadsContacted)
@@ -99,6 +103,13 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
   )
   const mailboxes = clientId ? allMailboxes.filter((mailbox) => mailbox.clientId === clientId) : allMailboxes
   const hasAnyData = overview.leadsDiscovered + overview.emailsSent + overview.repliesReceived > 0
+  // `?? true` for the no-client-filter global-operator case: the client-level
+  // switch doesn't apply when aggregating across every client, and
+  // listMailreachConnectedMailboxes already only returns mailreach_status =
+  // 'connected' rows — a mailbox can't be connected while its owning client's
+  // switch is off, since disabling the switch disconnects it.
+  const now = new Date()
+  const warmup = summarizeMailboxWarmup(warmupMailboxes, client?.mailreach_enabled ?? true, now)
 
   return (
     <div className="flex flex-col gap-8">
@@ -340,6 +351,43 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
           </div>
         )}
       </Section>
+
+      {warmup.length > 0 ? (
+        <Section title={t('sectionMailboxWarmup')}>
+          <div className="border-hairline overflow-x-auto rounded-lg border">
+            <Table className="min-w-[760px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">{t('mailboxWarmupTable.mailbox')}</TableHead>
+                  <TableHead scope="col">{t('mailboxWarmupTable.status')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxWarmupTable.reputation')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxWarmupTable.sent')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxWarmupTable.received')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxWarmupTable.spam')}</TableHead>
+                  <TableHead scope="col" className="text-right">{t('mailboxWarmupTable.activeConversations')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {warmup.map((m) => (
+                  <TableRow key={m.mailboxId}>
+                    <TableCell className="font-medium">{m.emailAddress}</TableCell>
+                    <TableCell>
+                      {m.isGated
+                        ? t('mailboxWarmupTable.statusWarming', { elapsed: m.elapsedDays, gate: m.gateDays })
+                        : t('mailboxWarmupTable.statusWarm')}
+                    </TableCell>
+                    <TableCell className="tnum text-right">{m.reputationScore ?? '—'}</TableCell>
+                    <TableCell className="tnum text-right">{formatCount(m.totalMessagesSent ?? 0)}</TableCell>
+                    <TableCell className="tnum text-right">{formatCount(m.totalMessagesReceived ?? 0)}</TableCell>
+                    <TableCell className="tnum text-right">{formatCount(m.totalSpam ?? 0)}</TableCell>
+                    <TableCell className="tnum text-right">{formatCount(m.currentConversations ?? 0)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Section>
+      ) : null}
 
       <Section title={t('sectionAgentActivity')} className="pb-4">
         {eventCounts.length === 0 ? (

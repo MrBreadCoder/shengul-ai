@@ -59,7 +59,15 @@
     "emptyMailTitle": "No mail sent yet",
     "emptyMailDescription": "Sent messages will appear here once the agent reaches out.",
     "noCase": "Not linked to a case yet",
-    "noSubject": "(no subject)"
+    "noSubject": "(no subject)",
+    "warmupBanner": {
+      "title": "Building your sending reputation",
+      "progress": "{gated} of {total} mailboxes still warming up",
+      "closest": "Closest to ready: day {elapsed} of {gate}",
+      "reputation": "Reputation score: {score}",
+      "messagesExchanged": "{count} messages exchanged so far",
+      "viewDetails": "View mailbox details"
+    }
   },
   "settings": {
     "errorTitle": "Settings unavailable",
@@ -872,6 +880,7 @@
     "sectionDailyTrend": "Daily trend",
     "sectionCampaigns": "Campaigns",
     "sectionMailboxes": "Mailboxes",
+    "sectionMailboxWarmup": "Mailbox warmup",
     "sectionAgentActivity": "Agent activity",
     "noDataTitle": "No pipeline activity in this range",
     "noDataDescription": "Run discovery or widen the date range above. Metrics appear the moment the first lead lands.",
@@ -931,6 +940,17 @@
       "bounceRate": "Bounce rate",
       "lastSend": "Last send"
     },
+    "mailboxWarmupTable": {
+      "mailbox": "Mailbox",
+      "status": "Status",
+      "statusWarming": "Day {elapsed} of {gate}",
+      "statusWarm": "Warm",
+      "reputation": "Reputation",
+      "sent": "Messages sent",
+      "received": "Messages received",
+      "spam": "Landed in spam",
+      "activeConversations": "Active conversations"
+    },
     "activityTable": {
       "empty": "No agent events logged in this range.",
       "event": "Event",
@@ -970,7 +990,14 @@
     "activityTrend": "Activity trend",
     "activityTrendEmpty": "No data for this period yet.",
     "weeklyRecap": "Weekly recap",
-    "weeklyRecapStat": "{count} leads found"
+    "weeklyRecapStat": "{count} leads found",
+    "warmupPanel": {
+      "title": "Warming up your mailboxes",
+      "description": "{gated} of {total} mailboxes were still building sending reputation during this period.",
+      "statusWarming": "Day {elapsed} of {gate}",
+      "statusWarm": "Warm",
+      "reputation": "Reputation"
+    }
   },
   "auth": {
     "brand": "Shengul AI",

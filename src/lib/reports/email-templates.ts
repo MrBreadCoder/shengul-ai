@@ -1,4 +1,6 @@
+import { AppError } from '@/lib/errors/app-error'
 import { assertNoHeaderInjection } from '@/lib/mailbox/headers'
+import { closestToReady, totalMessagesExchanged, type MailboxWarmupInfo } from '@/lib/mailbox/mailreach-gate'
 
 // The agency's booking link for clients to flag an issue or talk it
 // through — a fixed, non-secret constant, not env (spec §6).
@@ -11,6 +13,30 @@ export interface ReportEmailTemplateInput {
   emailsSent: number
   repliesReceived: number
   reportUrl: string
+  warmup: WarmupTemplateContext | null
+}
+
+export interface WarmupTemplateContext {
+  gatedCount: number
+  totalEnrolled: number
+  closestElapsedDays: number
+  closestGateDays: number
+  closestReputationScore: number | null
+  messagesExchanged: number
+}
+
+export function buildWarmupTemplateContext(warmup: MailboxWarmupInfo[]): WarmupTemplateContext | null {
+  const gated = warmup.filter((w) => w.isGated)
+  const closest = closestToReady(gated)
+  if (!closest) return null
+  return {
+    gatedCount: gated.length,
+    totalEnrolled: warmup.length,
+    closestElapsedDays: closest.elapsedDays,
+    closestGateDays: closest.gateDays,
+    closestReputationScore: closest.reputationScore,
+    messagesExchanged: totalMessagesExchanged(gated),
+  }
 }
 
 export interface RenderedReportEmail {
@@ -88,9 +114,30 @@ const TEMPLATES: readonly ReportEmailTemplate[] = [
   },
 ]
 
+const WARMUP_TEMPLATE: ReportEmailTemplate = {
+  subject: ({ clientName }) => `Shengul AI — building ${clientName}'s sending reputation`,
+  body: ({ clientName, periodLabel, warmup, reportUrl }) => {
+    if (!warmup) {
+      throw new AppError('INVARIANT_VIOLATION', 'Warmup template rendered without warmup context', {})
+    }
+    const scoreLine = warmup.closestReputationScore !== null ? `, reputation score ${warmup.closestReputationScore}` : ''
+    return (
+      `Hey ${clientName} team,\n\n` +
+      `No outreach numbers to report ${periodLabel} yet — ${warmup.gatedCount} of ${warmup.totalEnrolled} mailboxes ` +
+      `are still building sending reputation with Mailreach. The closest is on day ${warmup.closestElapsedDays} of ` +
+      `${warmup.closestGateDays}${scoreLine}. ${warmup.messagesExchanged} messages exchanged so far as part of warmup.\n\n` +
+      `Once warmup clears, outreach starts automatically — full detail here: ${reportUrl}\n\n` +
+      `Questions? Reply to this email, or grab 15 minutes: ${FEEDBACK_CALL_URL}\n\n` +
+      `— Shengul\n\n${SIGNATURE}`
+    )
+  },
+}
+
 // Deterministic, never repeats back-to-back across a client's reports —
-// spec §6.
-export function pickTemplate(priorReportCount: number): ReportEmailTemplate {
+// spec §6. The warmup template is deliberately not part of this rotation
+// (YAGNI — a narrower, temporary state doesn't need 7 variants).
+export function pickTemplate(priorReportCount: number, useWarmupTemplate: boolean): ReportEmailTemplate {
+  if (useWarmupTemplate) return WARMUP_TEMPLATE
   return TEMPLATES[priorReportCount % TEMPLATES.length]!
 }
 

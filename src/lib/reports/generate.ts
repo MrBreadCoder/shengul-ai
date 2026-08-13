@@ -3,7 +3,7 @@ import type { Database } from '@/types/database'
 import { getWeeklyPeriod, getMonthlyPeriod } from './period'
 import { buildReportMetrics } from './metrics'
 import { generateReportCommentary, buildFallbackCommentary } from './commentary'
-import { pickTemplate, renderTemplate, type ReportEmailTemplateInput } from './email-templates'
+import { pickTemplate, renderTemplate, buildWarmupTemplateContext, type ReportEmailTemplateInput } from './email-templates'
 import { sendReportEmail } from './mailer'
 import {
   upsertReport,
@@ -61,8 +61,10 @@ export async function generateReport(
     type: input.type,
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
+    now: input.now,
   })
   const validatedMetrics = reportMetricsSnapshotSchema.parse(metrics)
+  const warmup = validatedMetrics.warmup ?? []
 
   const previousReport = await getPreviousReport(admin, {
     clientId: input.clientId,
@@ -83,6 +85,7 @@ export async function generateReport(
         periodLabel: period.periodLabel,
         current: validatedMetrics.overview,
         previous: previousOverview,
+        warmup,
       },
     )
   } catch (cause) {
@@ -94,7 +97,7 @@ export async function generateReport(
       error: cause,
       payload: { reportType: input.type },
     })
-    commentary = buildFallbackCommentary(period.periodLabel, validatedMetrics.overview)
+    commentary = buildFallbackCommentary(period.periodLabel, validatedMetrics.overview, warmup)
   }
 
   report = await upsertReport(admin, {
@@ -123,7 +126,9 @@ export async function generateReport(
   }
 
   const priorCount = await countPriorReportsForClient(admin, input.clientId)
-  const template = pickTemplate(priorCount)
+  const gatedMailboxes = warmup.filter((w) => w.isGated)
+  const useWarmupTemplate = validatedMetrics.overview.emailsSent === 0 && gatedMailboxes.length > 0
+  const template = pickTemplate(priorCount, useWarmupTemplate)
   const templateInput: ReportEmailTemplateInput = {
     clientName: client.name,
     periodLabel: period.periodLabel,
@@ -131,6 +136,7 @@ export async function generateReport(
     emailsSent: validatedMetrics.overview.emailsSent,
     repliesReceived: validatedMetrics.overview.repliesReceived,
     reportUrl: reportUrlFor(report.id),
+    warmup: useWarmupTemplate ? buildWarmupTemplateContext(warmup) : null,
   }
   const rendered = renderTemplate(template, templateInput)
 

@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/page-header'
 import { StatTile } from '@/components/stat-tile'
 import { ReportChart } from '@/components/report-chart'
 import { formatCount } from '@/lib/analytics/rates'
+import { WarmupPanel } from './warmup-panel'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Report' }
@@ -48,6 +49,8 @@ export default async function ReportDetailPage({
         title={report.type === 'monthly' ? t('typeMonthly') : t('typeWeekly')}
         description={`${formatPeriodDate(report.period_start)} – ${formatPeriodDate(report.period_end)}`}
       />
+
+      {metrics.warmup && metrics.warmup.length > 0 ? <WarmupPanel mailboxes={metrics.warmup} /> : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile index={0} label={t('tile.leadsFound')} value={formatCount(metrics.overview.leadsDiscovered)} />

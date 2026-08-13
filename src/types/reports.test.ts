@@ -50,4 +50,40 @@ describe('reportMetricsSnapshotSchema', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('should accept a snapshot with a warmup array', () => {
+    const result = reportMetricsSnapshotSchema.safeParse({
+      overview: validOverview,
+      daily: [],
+      warmup: [
+        {
+          mailboxId: '11111111-1111-4111-8111-111111111111',
+          emailAddress: 'sales@acme.com',
+          elapsedDays: 6,
+          gateDays: 14,
+          isGated: true,
+          reputationScore: 70,
+          totalMessagesSent: 10,
+          totalMessagesReceived: 8,
+          totalSpam: 0,
+          currentConversations: 2,
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('should accept a snapshot with no warmup key at all', () => {
+    const result = reportMetricsSnapshotSchema.safeParse({ overview: validOverview, daily: [] })
+    expect(result.success).toBe(true)
+  })
+
+  it('should reject a warmup entry missing a required field', () => {
+    const result = reportMetricsSnapshotSchema.safeParse({
+      overview: validOverview,
+      daily: [],
+      warmup: [{ mailboxId: '11111111-1111-4111-8111-111111111111', emailAddress: 'sales@acme.com' }],
+    })
+    expect(result.success).toBe(false)
+  })
 })

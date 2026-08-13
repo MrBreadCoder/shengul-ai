@@ -97,13 +97,47 @@ export async function disconnectAccount(accountId: string, apiKey: string): Prom
   await fetchJson(`${BASE_URL}/accounts/${accountId}`, { method: 'DELETE', headers: authHeaders(apiKey) }, z.unknown())
 }
 
-const accountStatsResponseSchema = z.object({ reputation_score: z.number().nullable().optional() }).passthrough()
+const accountResponseSchema = z.object({ score: z.number().nullable().optional() }).passthrough()
 
-export async function getAccountStats(accountId: string, apiKey: string): Promise<{ reputationScore: number | null }> {
+export async function getAccount(accountId: string, apiKey: string): Promise<{ reputationScore: number | null }> {
   const res = await fetchJson(
-    `${BASE_URL}/accounts/${accountId}/stats`,
+    `${BASE_URL}/accounts/${accountId}`,
+    { method: 'GET', headers: authHeaders(apiKey) },
+    accountResponseSchema,
+  )
+  return { reputationScore: res.score ?? null }
+}
+
+export interface MailreachAccountStats {
+  totalMessagesSent: number | null
+  totalMessagesReceived: number | null
+  totalSpam: number | null
+  currentConversationsRunning: number | null
+}
+
+const accountStatsResponseSchema = z
+  .object({
+    total_messages_sent: z.number().int().nonnegative().nullable().optional(),
+    total_messages_received: z.number().int().nonnegative().nullable().optional(),
+    total_spam: z.number().int().nonnegative().nullable().optional(),
+    config_current_conversation_running: z.number().int().nonnegative().nullable().optional(),
+  })
+  .passthrough()
+
+// past_days=180 (the endpoint's max) rather than the 14-day default: the field
+// names read like lifetime totals but are actually windowed by past_days. 180
+// days safely covers a mailbox's whole history for the "since connecting"
+// numbers this feature shows — see docs.mailreach.co/usage/account-stats.
+export async function getAccountStats(accountId: string, apiKey: string): Promise<MailreachAccountStats> {
+  const res = await fetchJson(
+    `${BASE_URL}/accounts/${accountId}/stats?past_days=180`,
     { method: 'GET', headers: authHeaders(apiKey) },
     accountStatsResponseSchema,
   )
-  return { reputationScore: res.reputation_score ?? null }
+  return {
+    totalMessagesSent: res.total_messages_sent ?? null,
+    totalMessagesReceived: res.total_messages_received ?? null,
+    totalSpam: res.total_spam ?? null,
+    currentConversationsRunning: res.config_current_conversation_running ?? null,
+  }
 }

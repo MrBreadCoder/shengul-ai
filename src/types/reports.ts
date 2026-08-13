@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { OverviewMetrics, DailyMetric } from './analytics'
+import type { MailboxWarmupInfo } from '@/lib/mailbox/mailreach-gate'
 
 const overviewMetricsSchema = z.object({
   leadsDiscovered: z.number().int().nonnegative(),
@@ -24,6 +25,19 @@ const dailyMetricSchema = z.object({
   repliesReceived: z.number().int().nonnegative(),
 }) satisfies z.ZodType<DailyMetric>
 
+const mailboxWarmupSchema = z.object({
+  mailboxId: z.string().uuid(),
+  emailAddress: z.string(),
+  elapsedDays: z.number().int().nonnegative(),
+  gateDays: z.number().int().positive(),
+  isGated: z.boolean(),
+  reputationScore: z.number().nullable(),
+  totalMessagesSent: z.number().int().nonnegative().nullable(),
+  totalMessagesReceived: z.number().int().nonnegative().nullable(),
+  totalSpam: z.number().int().nonnegative().nullable(),
+  currentConversations: z.number().int().nonnegative().nullable(),
+}) satisfies z.ZodType<MailboxWarmupInfo>
+
 export const reportMetricsSnapshotSchema = z.object({
   overview: overviewMetricsSchema,
   daily: z.array(dailyMetricSchema),
@@ -39,6 +53,10 @@ export const reportMetricsSnapshotSchema = z.object({
       }),
     )
     .optional(),
+  // Present only when the client has ≥1 Mailreach-enrolled, connected
+  // mailbox at generation time. Frozen like weeklyBreakdown — the report
+  // stays historically accurate even after the gate later clears.
+  warmup: z.array(mailboxWarmupSchema).optional(),
 })
 
 export type ReportMetricsSnapshot = z.infer<typeof reportMetricsSnapshotSchema>

@@ -1,4 +1,5 @@
 import { AppError } from '@/lib/errors/app-error'
+import type { MailboxRow } from '@/lib/db/mailboxes'
 
 /** Days of continuous Mailreach warmup before a mailbox may send campaign mail. */
 export const MAILREACH_CAMPAIGN_GATE_DAYS = 14
@@ -39,4 +40,75 @@ export function isEligibleForCampaignSend(input: CampaignSendEligibilityInput): 
   const effectivelyEnrolled = input.mailreachEnabled && input.clientMailreachEnabled
   if (!effectivelyEnrolled || input.mailreachStartedAt === null) return true
   return mailreachElapsedDays(input.mailreachStartedAt, input.now) >= MAILREACH_CAMPAIGN_GATE_DAYS
+}
+
+export interface MailboxWarmupInfo {
+  mailboxId: string
+  emailAddress: string
+  elapsedDays: number
+  gateDays: number
+  isGated: boolean
+  reputationScore: number | null
+  totalMessagesSent: number | null
+  totalMessagesReceived: number | null
+  totalSpam: number | null
+  currentConversations: number | null
+}
+
+export type MailboxWarmupSource = Pick<
+  MailboxRow,
+  | 'id'
+  | 'email_address'
+  | 'mailreach_enabled'
+  | 'mailreach_started_at'
+  | 'mailreach_status'
+  | 'mailreach_reputation_score'
+  | 'mailreach_total_messages_sent'
+  | 'mailreach_total_messages_received'
+  | 'mailreach_total_spam'
+  | 'mailreach_current_conversations'
+>
+
+/**
+ * Every currently-connected, enrolled mailbox in `mailboxes`, gated or not.
+ * Callers filter to `.isGated` themselves for "still warming" surfaces (home
+ * banner, report trigger) — Analytics wants the full list including mailboxes
+ * that already cleared the gate ("Warm").
+ */
+export function summarizeMailboxWarmup(
+  mailboxes: MailboxWarmupSource[],
+  clientMailreachEnabled: boolean,
+  now: Date,
+): MailboxWarmupInfo[] {
+  const summaries: MailboxWarmupInfo[] = []
+  for (const mailbox of mailboxes) {
+    if (!mailbox.mailreach_enabled || !clientMailreachEnabled) continue
+    if (mailbox.mailreach_status !== 'connected') continue
+    if (mailbox.mailreach_started_at === null) continue
+    const elapsedDays = mailreachElapsedDays(mailbox.mailreach_started_at, now)
+    summaries.push({
+      mailboxId: mailbox.id,
+      emailAddress: mailbox.email_address,
+      elapsedDays,
+      gateDays: MAILREACH_CAMPAIGN_GATE_DAYS,
+      isGated: elapsedDays < MAILREACH_CAMPAIGN_GATE_DAYS,
+      reputationScore: mailbox.mailreach_reputation_score,
+      totalMessagesSent: mailbox.mailreach_total_messages_sent,
+      totalMessagesReceived: mailbox.mailreach_total_messages_received,
+      totalSpam: mailbox.mailreach_total_spam,
+      currentConversations: mailbox.mailreach_current_conversations,
+    })
+  }
+  return summaries
+}
+
+/** The mailbox nearest to clearing the gate — null when none are gated. */
+export function closestToReady(gated: MailboxWarmupInfo[]): MailboxWarmupInfo | null {
+  if (gated.length === 0) return null
+  return gated.reduce((closest, current) => (current.elapsedDays > closest.elapsedDays ? current : closest))
+}
+
+/** Sum of sent + received across the given mailboxes, treating null as 0. */
+export function totalMessagesExchanged(mailboxes: MailboxWarmupInfo[]): number {
+  return mailboxes.reduce((sum, m) => sum + (m.totalMessagesSent ?? 0) + (m.totalMessagesReceived ?? 0), 0)
 }

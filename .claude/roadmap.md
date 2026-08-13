@@ -5241,3 +5241,126 @@ touched files and the full `landing/` directory. Not verified: no manual
 in-browser render — no dev server in this environment; the 4.5s interval,
 row roll animation, and reduced-motion fallback are unexercised by any
 automated check.
+
+## Mailreach warmup surfacing — Tasks 1–6 — 2026-08-13
+
+Implemented from `docs/superpowers/specs/2026-08-13-mailreach-warmup-surfacing-design.md`
++ `docs/superpowers/plans/2026-08-13-mailreach-warmup-surfacing.md`, tasks 1–6
+(the fix + shared plumbing + Home/Analytics surfacing; Reports — tasks 7+ —
+not yet done). Executed inline in-session (TDD steps from the plan: write
+failing test → verify fail → implement → verify pass), commits skipped per
+instruction — nothing has been committed yet, working tree only.
+
+1. **`src/lib/mailreach/client.ts`**: the broken `getAccountStats` (read a
+   `reputation_score` field that doesn't exist on the real
+   `GET /v1/accounts/{id}/stats` response — confirmed `null` for every
+   mailbox since launch) split into `getAccount` (real reputation `score`
+   from `GET /v1/accounts/{id}`) + a corrected `getAccountStats` (the real
+   messaging-volume fields, `total_messages_sent` / `_received` / `_spam` /
+   `config_current_conversation_running`, requested with `past_days=180`).
+   Old `{ reputationScore }` shape removed entirely — breaking change, only
+   caller (`mailreach-sync.ts`) fixed in the same batch.
+2. **DB**: new migration `0042_mailreach_stats_fields.sql` adds
+   `mailreach_total_messages_sent/_received/_spam` +
+   `mailreach_current_conversations` (all nullable `integer`) to
+   `mailboxes`; `database.ts` hand-authored types updated to match.
+   `updateMailboxMailreachStats` now writes all 5 fields;
+   `listMailreachConnectedMailboxes` gained an optional `clientId` filter
+   (sync sweep keeps calling with none; Home/Analytics/Reports scope to one
+   client) plus a stable `order('email_address')`.
+3. **`src/lib/pipeline/mailreach-sync.ts`**: `runMailreachStatsSync` now
+   calls `getAccount` + `getAccountStats` concurrently per mailbox inside
+   the same per-mailbox `try/catch` — either failing skips that mailbox
+   for the run rather than writing partial stats.
+4. **New `src/lib/mailbox/mailreach-gate.ts` exports**:
+   `summarizeMailboxWarmup` (pure DB-rows → `MailboxWarmupInfo[]`, the one
+   summarizer shared by all three consumers), `closestToReady`,
+   `totalMessagesExchanged`.
+5. **Home** (`src/app/(app)/home/page.tsx` + new `warmup-banner.tsx`): a
+   banner between `PageHeader` and the stat-tile grid, shown only when ≥1
+   mailbox is still gated — day counter, closest-to-ready mailbox,
+   reputation score, messages exchanged, link to `/settings`.
+6. **Analytics** (`analytics-view.tsx`): new "Mailbox warmup" `Section`
+   after "Mailboxes", shown only when `warmup.length > 0` — per-mailbox
+   table (status/reputation/sent/received/spam/active conversations).
+
+Both `/home` and `/analytics` are client-facing → real English **and**
+Turkish translations added for every new string (`home.warmupBanner`,
+`analytics.sectionMailboxWarmup` + `analytics.mailboxWarmupTable`), no
+English fallback left in `tr.json`.
+
+**Verified:** `pnpm typecheck` clean, `pnpm lint` clean (only 9 pre-existing
+warnings, none in touched files), full `pnpm test` — 216 files / 2342 tests,
+all passing. Migration `0042` unverified against a real Postgres — same
+Docker-unavailable caveat as every prior migration from this environment.
+
+**Not done yet (plan tasks 7+):** Reports — frozen warmup snapshot in
+`types/reports.ts`/`metrics.ts`, LLM commentary + fallback-commentary
+warmup branch, the dedicated warmup email template, `generate.ts` wiring,
+and the report-detail-page warmup panel.
+
+## Mailreach warmup surfacing — Tasks 7–12 (Reports + full verification) — 2026-08-13
+
+Continuation of the entry above — plan tasks 7–12, completing all of
+`docs/superpowers/plans/2026-08-13-mailreach-warmup-surfacing.md`. Same
+approach: inline in-session, TDD steps from the plan, commits skipped per
+instruction.
+
+7. **`src/types/reports.ts`**: `reportMetricsSnapshotSchema` gains an
+   optional `warmup: MailboxWarmupInfo[]` array (`mailboxWarmupSchema`,
+   `satisfies z.ZodType<MailboxWarmupInfo>`). `src/lib/reports/metrics.ts`:
+   `buildReportMetrics` now also fetches the client row + Mailreach-
+   connected mailboxes and freezes `summarizeMailboxWarmup`'s result into
+   the snapshot (`undefined` when no mailbox is enrolled). `BuildReportMetricsInput`
+   gained a required `now: Date`.
+8. **`src/lib/reports/commentary.ts`**: `GenerateReportCommentaryInput`
+   gained required `warmup: MailboxWarmupInfo[]`; `buildPrompt` appends a
+   "Mailbox warmup in progress" block (day counters, reputation scores,
+   messages exchanged) only when ≥1 mailbox is gated. Instructions tell the
+   LLM to lead with warmup progress over dwelling on low counts when that's
+   the actual cause. `buildFallbackCommentary` gained a `warmup` 3rd
+   parameter and a warmup-first branch, checked before the normal fallback,
+   triggered on `emailsSent === 0 && gated.length > 0`.
+9. **`src/lib/reports/email-templates.ts`**: new `WarmupTemplateContext` +
+   `buildWarmupTemplateContext` (aggregates gated mailboxes, keeps only the
+   closest-to-ready one for the day counter). New `WARMUP_TEMPLATE`,
+   deliberately outside the 7-template rotation (YAGNI). `pickTemplate`
+   gained a required `useWarmupTemplate: boolean` 2nd parameter —
+   `ReportEmailTemplateInput` gained a required `warmup: WarmupTemplateContext | null`.
+   Fixed a latent bug in the plan's own `generate.test.ts` fixtures along
+   the way: `mailboxId: 'm1'` fails the schema's real (unmocked)
+   `.uuid()` check inside `generate.ts` — replaced with a valid UUID in
+   both new tests before they could pass.
+10. **`src/lib/reports/generate.ts`**: wires `now` into `buildReportMetrics`,
+    `warmup` into both commentary calls, and template selection —
+    `useWarmupTemplate = emailsSent === 0 && gatedMailboxes.length > 0`
+    (narrower than "any mailbox gated": only fires when that's also *why*
+    the numbers are near-zero).
+11. **Report detail page** (`src/app/(app)/reports/[id]/page.tsx` + new
+    `warmup-panel.tsx`): panel rendered from the *frozen* snapshot (so it
+    reflects generation-time state, not live), right after `PageHeader`,
+    shown only when `metrics.warmup` is non-empty — one-line summary +
+    per-mailbox day-counter/reputation list.
+12. **Full verification**: `pnpm test` — 216 files / **2359 tests**, all
+    passing (+17 over the Tasks 1–6 checkpoint). `pnpm typecheck` clean
+    repo-wide — also caught and fixed an out-of-plan caller,
+    `scripts/test-fake-report.ts` (a manual preview script, unmocked
+    `pickTemplate`/`renderTemplate` call), updated to the new 2-arg
+    `pickTemplate` signature and `warmup: null`. `pnpm lint` clean (same 9
+    pre-existing warnings, none in touched files). `en.json`/`tr.json` key-
+    parity check passes — identical key sets, no English fallback left in
+    Turkish.
+
+Both `/home`, `/analytics`, and `/reports` are client-facing → every new
+string got a real English and a real Turkish translation
+(`reports.warmupPanel`), consistent with Tasks 1–6.
+
+**Not verified (needs a real deploy, per plan §Task 12 Step 6):**
+1. Apply migration `0042` to the live database.
+2. Confirm a real `/api/pipeline/mailreach-sync` run populates the 5
+   mailreach stat columns from the real Mailreach API (mocked unit tests
+   can't prove this end-to-end).
+3. Confirm `/home` banner + `/analytics` section render for a real
+   mid-warmup client.
+4. Trigger a real report generation and confirm the warmup email/panel
+   framing appears when `emailsSent` is 0.

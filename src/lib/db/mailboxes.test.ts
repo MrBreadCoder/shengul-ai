@@ -54,6 +54,13 @@ function mockIn(result: { data: unknown; error: unknown }) {
 function mockRpc(result: { data: unknown; error: unknown }) {
   return { rpc: () => Promise.resolve(result) } as never
 }
+function chainable(result: { data: unknown; error: unknown }) {
+  const node: { eq: ReturnType<typeof vi.fn>; order: ReturnType<typeof vi.fn> } = {
+    eq: vi.fn(() => node),
+    order: vi.fn(() => Promise.resolve(result)),
+  }
+  return node
+}
 
 describe('insertMailbox', () => {
   it('should return the created mailbox row', async () => {
@@ -329,13 +336,37 @@ describe('clearMailboxMailreachConnection', () => {
 })
 
 describe('updateMailboxMailreachStats', () => {
-  it('should persist the reputation score and sync timestamp', async () => {
+  it('should persist reputation, messaging volume, and the sync timestamp', async () => {
+    const update = vi.fn().mockReturnValue({ eq: () => Promise.resolve({ error: null }) })
+    await updateMailboxMailreachStats({ from: () => ({ update }) } as never, 'm1', {
+      reputationScore: 94,
+      totalMessagesSent: 120,
+      totalMessagesReceived: 95,
+      totalSpam: 2,
+      currentConversations: 8,
+      syncedAt: '2026-07-29T00:00:00.000Z',
+    })
+    expect(update).toHaveBeenCalledWith({
+      mailreach_reputation_score: 94,
+      mailreach_total_messages_sent: 120,
+      mailreach_total_messages_received: 95,
+      mailreach_total_spam: 2,
+      mailreach_current_conversations: 8,
+      mailreach_stats_synced_at: '2026-07-29T00:00:00.000Z',
+    })
+  })
+
+  it('should throw DB_ERROR when the update fails', async () => {
     await expect(
-      updateMailboxMailreachStats(mockUpdate({ error: null }), 'm1', {
-        reputationScore: 94,
+      updateMailboxMailreachStats(mockUpdate({ error: { message: 'boom' } }), 'm1', {
+        reputationScore: null,
+        totalMessagesSent: null,
+        totalMessagesReceived: null,
+        totalSpam: null,
+        currentConversations: null,
         syncedAt: '2026-07-29T00:00:00.000Z',
       }),
-    ).resolves.toBeUndefined()
+    ).rejects.toThrow(AppError)
   })
 })
 
@@ -357,12 +388,23 @@ describe('listMailboxesForClient', () => {
 })
 
 describe('listMailreachConnectedMailboxes', () => {
-  it('should return every connected mailbox', async () => {
+  it('should return every connected mailbox across all clients when no clientId is given', async () => {
     const rows = [{ id: 'm1', mailreach_status: 'connected' }]
-    const supabase = {
-      from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) }),
-    } as never
+    const node = chainable({ data: rows, error: null })
+    const supabase = { from: () => ({ select: () => node }) } as never
     await expect(listMailreachConnectedMailboxes(supabase)).resolves.toEqual(rows)
+    expect(node.eq).toHaveBeenCalledWith('mailreach_status', 'connected')
+    expect(node.eq).toHaveBeenCalledTimes(1)
+  })
+
+  it('should scope to a single client when clientId is given', async () => {
+    const rows = [{ id: 'm1', mailreach_status: 'connected', client_id: 'c1' }]
+    const node = chainable({ data: rows, error: null })
+    const supabase = { from: () => ({ select: () => node }) } as never
+    await expect(listMailreachConnectedMailboxes(supabase, 'c1')).resolves.toEqual(rows)
+    expect(node.eq).toHaveBeenCalledWith('mailreach_status', 'connected')
+    expect(node.eq).toHaveBeenCalledWith('client_id', 'c1')
+    expect(node.eq).toHaveBeenCalledTimes(2)
   })
 })
 

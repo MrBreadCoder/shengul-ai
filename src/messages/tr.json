@@ -59,7 +59,15 @@
     "emptyMailTitle": "Henüz gönderilmiş e-posta yok",
     "emptyMailDescription": "Ajan iletişime geçtiğinde gönderilen mesajlar burada görünecek.",
     "noCase": "Henüz bir vakaya bağlı değil",
-    "noSubject": "(konu yok)"
+    "noSubject": "(konu yok)",
+    "warmupBanner": {
+      "title": "E-posta itibarınız oluşturuluyor",
+      "progress": "{total} kutudan {gated} tanesi hâlâ ısınma sürecinde",
+      "closest": "Hazıra en yakın: {gate} günün {elapsed}. günü",
+      "reputation": "İtibar puanı: {score}",
+      "messagesExchanged": "Şu ana kadar {count} e-posta alışverişi yapıldı",
+      "viewDetails": "Kutu detaylarını görüntüle"
+    }
   },
   "settings": {
     "errorTitle": "Ayarlara ulaşılamıyor",
@@ -872,6 +880,7 @@
     "sectionDailyTrend": "Günlük eğilim",
     "sectionCampaigns": "Kampanyalar",
     "sectionMailboxes": "Posta kutuları",
+    "sectionMailboxWarmup": "Kutu ısınması",
     "sectionAgentActivity": "Ajan etkinliği",
     "noDataTitle": "Bu aralıkta hiçbir ajan etkinliği yok",
     "noDataDescription": "Keşfi çalıştırın veya yukarıdaki tarih aralığını genişletin. İlk kişi ulaştığı anda metrikler görünür.",
@@ -931,6 +940,17 @@
       "bounceRate": "Geri dönüş oranı",
       "lastSend": "Son gönderim"
     },
+    "mailboxWarmupTable": {
+      "mailbox": "Kutu",
+      "status": "Durum",
+      "statusWarming": "{gate} günün {elapsed}. günü",
+      "statusWarm": "Isındı",
+      "reputation": "İtibar",
+      "sent": "Gönderilen mesaj",
+      "received": "Alınan mesaj",
+      "spam": "Spam'e düşen",
+      "activeConversations": "Aktif konuşmalar"
+    },
     "activityTable": {
       "empty": "Bu aralıkta kaydedilmiş ajan etkinliği yok.",
       "event": "Etkinlik",
@@ -970,7 +990,14 @@
     "activityTrend": "Etkinlik eğilimi",
     "activityTrendEmpty": "Bu dönem için henüz veri yok.",
     "weeklyRecap": "Haftalık özet",
-    "weeklyRecapStat": "{count} kişi bulundu"
+    "weeklyRecapStat": "{count} kişi bulundu",
+    "warmupPanel": {
+      "title": "Kutularınız ısınıyor",
+      "description": "Bu dönemde {total} kutudan {gated} tanesi hâlâ gönderim itibarı oluşturuyordu.",
+      "statusWarming": "{gate} günün {elapsed}. günü",
+      "statusWarm": "Isındı",
+      "reputation": "İtibar"
+    }
   },
   "auth": {
     "brand": "Shengul AI",

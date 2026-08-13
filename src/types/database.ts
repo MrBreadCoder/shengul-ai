@@ -746,6 +746,10 @@ export interface Database {
           mailreach_account_id: string | null
           mailreach_status: Database['public']['Enums']['mailreach_status']
           mailreach_reputation_score: number | null
+          mailreach_total_messages_sent: number | null
+          mailreach_total_messages_received: number | null
+          mailreach_total_spam: number | null
+          mailreach_current_conversations: number | null
           mailreach_stats_synced_at: string | null
           inbound_cursor: string | null
           created_at: string
@@ -775,6 +779,10 @@ export interface Database {
           mailreach_account_id?: string | null
           mailreach_status?: Database['public']['Enums']['mailreach_status']
           mailreach_reputation_score?: number | null
+          mailreach_total_messages_sent?: number | null
+          mailreach_total_messages_received?: number | null
+          mailreach_total_spam?: number | null
+          mailreach_current_conversations?: number | null
           mailreach_stats_synced_at?: string | null
           inbound_cursor?: string | null
           created_at?: string
