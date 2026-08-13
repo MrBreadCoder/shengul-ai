@@ -7,6 +7,10 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/')).toBe(true)
   })
 
+  it('should allow the Turkish marketing page', () => {
+    expect(isPublicPath('/tr')).toBe(true)
+  })
+
   it('should allow the sign-in form and the auth callback', () => {
     expect(isPublicPath('/login')).toBe(true)
     expect(isPublicPath('/auth/callback')).toBe(true)
@@ -55,5 +59,6 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/legal-hold')).toBe(false)
     expect(isPublicPath('/api/pipelines-admin')).toBe(false)
     expect(isPublicPath('/api/inbound-admin')).toBe(false)
+    expect(isPublicPath('/track')).toBe(false)
   })
 })

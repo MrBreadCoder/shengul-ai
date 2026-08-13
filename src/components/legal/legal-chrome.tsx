@@ -30,7 +30,7 @@ export function LegalHeader(): React.ReactElement {
           >
             Sign in
           </Link>
-          <BookMeetingButton />
+          <BookMeetingButton locale="en" />
         </div>
       </div>
     </header>

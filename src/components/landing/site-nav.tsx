@@ -4,15 +4,39 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
+import type { AppLocale } from '@/types/i18n'
 import { BookMeetingButton } from './book-meeting-button'
-import { LANDING_EASE, NAV_LINKS } from './constants'
+import { LANDING_EASE } from './constants'
+
+export interface SiteNavLink {
+  readonly href: string
+  readonly label: string
+}
+
+export interface SiteNavCopy {
+  readonly ariaLabel: string
+  readonly links: readonly SiteNavLink[]
+  readonly signIn: string
+  readonly openMenu: string
+  readonly closeMenu: string
+}
+
+interface SiteNavProps {
+  readonly copy: SiteNavCopy
+  readonly locale: AppLocale
+}
 
 /**
  * Floating navigation for the marketing page. Detached glass pill on desktop,
  * full-screen overlay on mobile. Fixed position, so the backdrop blur is
  * composited once instead of repainting a scrolling subtree.
+ *
+ * Translated strings arrive pre-resolved via `copy` rather than this
+ * component calling into next-intl itself: it is the only client component
+ * on the marketing page, and resolving server-side keeps next-intl's message
+ * catalog (and its client runtime) out of the browser bundle entirely.
  */
-export function SiteNav(): React.ReactElement {
+export function SiteNav({ copy, locale }: SiteNavProps): React.ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const prefersReducedMotion = useReducedMotion()
 
@@ -37,7 +61,7 @@ export function SiteNav(): React.ReactElement {
   return (
     <header className="fixed inset-x-0 top-0 z-40 flex justify-center px-4 pt-5">
       <nav
-        aria-label="Primary"
+        aria-label={copy.ariaLabel}
         className={cn(
           'flex h-14 w-full max-w-[980px] items-center justify-between gap-6 rounded-full',
           'border border-[var(--l-hairline-strong)] bg-[color-mix(in_oklch,var(--l-bg)_72%,transparent)]',
@@ -50,7 +74,7 @@ export function SiteNav(): React.ReactElement {
         </Link>
 
         <div className="hidden items-center gap-7 md:flex">
-          {NAV_LINKS.map(({ href, label }) => (
+          {copy.links.map(({ href, label }) => (
             <a
               key={href}
               href={href}
@@ -66,15 +90,15 @@ export function SiteNav(): React.ReactElement {
             href="/login"
             className="hidden rounded-full px-3 py-2 text-[13px] text-[var(--l-muted)] transition-colors duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-[var(--l-text)] md:inline-flex"
           >
-            Sign in
+            {copy.signIn}
           </Link>
-          <BookMeetingButton className="hidden md:inline-flex" />
+          <BookMeetingButton locale={locale} className="hidden md:inline-flex" />
 
           <button
             type="button"
             aria-expanded={isMenuOpen}
             aria-controls="landing-menu"
-            aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+            aria-label={isMenuOpen ? copy.closeMenu : copy.openMenu}
             onClick={() => setIsMenuOpen((open) => !open)}
             className="relative grid size-11 place-items-center rounded-full md:hidden"
           >
@@ -108,7 +132,7 @@ export function SiteNav(): React.ReactElement {
             className="fixed inset-0 -z-10 flex flex-col justify-end bg-[color-mix(in_oklch,var(--l-bg-deep)_88%,transparent)] px-6 pt-28 pb-14 backdrop-blur-3xl md:hidden"
           >
             <div className="flex flex-col gap-6">
-              {NAV_LINKS.map(({ href, label }, index) => (
+              {copy.links.map(({ href, label }, index) => (
                 <motion.a
                   key={href}
                   href={href}
@@ -127,9 +151,9 @@ export function SiteNav(): React.ReactElement {
                 transition={{ duration: 0.55, delay: 0.18, ease: LANDING_EASE }}
                 className="mt-4 flex flex-col items-start gap-5"
               >
-                <BookMeetingButton size="lg" />
+                <BookMeetingButton locale={locale} size="lg" />
                 <Link href="/login" onClick={closeMenu} className="text-sm text-[var(--l-muted)]">
-                  Sign in
+                  {copy.signIn}
                 </Link>
               </motion.div>
             </div>

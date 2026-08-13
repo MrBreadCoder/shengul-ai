@@ -7,7 +7,7 @@ import { SUPPORTED_LOCALES, type AppLocale } from '@/types/i18n'
 
 const DEFAULT_LOCALE: AppLocale = 'en'
 
-function isSupportedLocale(value: string): value is AppLocale {
+export function isSupportedLocale(value: string): value is AppLocale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(value)
 }
 
@@ -15,7 +15,7 @@ function isSupportedLocale(value: string): value is AppLocale {
 // Accept-Language header, e.g. "tr-TR,tr;q=0.9,en;q=0.8" -> "tr". Used only
 // pre-login, where there is no stored preference yet — ignores quality
 // weighting beyond taking the browser's preference order at face value.
-function parseAcceptLanguage(header: string | null): AppLocale {
+export function parseAcceptLanguage(header: string | null): AppLocale {
   if (!header) return DEFAULT_LOCALE
   for (const part of header.split(',')) {
     const tag = part.split(';')[0]?.trim().split('-')[0]

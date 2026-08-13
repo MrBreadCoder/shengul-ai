@@ -1,24 +1,21 @@
 import { X } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { Highlighter } from '@/components/ui/highlighter'
+import type { AppLocale } from '@/types/i18n'
 import { BookMeetingButton } from './book-meeting-button'
 import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { Reveal } from './reveal'
 
-/** What the four numbers cost when you produce them by hand. */
-const COSTS: readonly string[] = [
-  'Hours every morning spent building lead lists.',
-  'Late nights rewriting emails that still sound like a template.',
-  'Follow-ups that never get sent, even to your best leads.',
-  'Days of work for just a few meetings booked.',
-]
+export async function TheGrind({ locale }: { locale: AppLocale }): Promise<React.ReactElement> {
+  const t = await getTranslations({ locale, namespace: 'marketing.theGrind' })
+  const costs = t.raw('costs') as readonly string[]
 
-export function TheGrind(): React.ReactElement {
   return (
     <section className="px-4 py-28 md:py-32">
       <div className="mx-auto max-w-[1180px]">
         <Reveal>
           <h2 className="max-w-[24ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            Doing this yourself takes hours and{' '}
+            {t('headlinePrefix')}
             <Highlighter
               action="underline"
               color={LANDING_HIGHLIGHT_COLOR}
@@ -26,14 +23,14 @@ export function TheGrind(): React.ReactElement {
               padding={4}
               startDelay={REVEAL_DURATION_MS}
             >
-              rarely pays off
+              {t('headlineHighlight')}
             </Highlighter>
-            .
+            {t('headlineSuffix')}
           </h2>
         </Reveal>
 
         <ul className="mt-14 grid gap-x-10 gap-y-8 md:grid-cols-2">
-          {COSTS.map((cost, index) => (
+          {costs.map((cost, index) => (
             <li key={cost}>
               <Reveal delay={index * 0.05}>
                 <div className="flex gap-4 border-t border-[var(--l-hairline)] pt-6">
@@ -53,10 +50,10 @@ export function TheGrind(): React.ReactElement {
 
         <Reveal delay={0.24}>
           <p className="mt-14 text-lg leading-snug text-[var(--l-text)] sm:text-xl">
-            We take all of that off your plate.
+            {t('closingLine')}
           </p>
           <div className="mt-8">
-            <BookMeetingButton size="lg" />
+            <BookMeetingButton locale={locale} size="lg" />
           </div>
         </Reveal>
       </div>

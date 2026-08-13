@@ -5,50 +5,38 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { initialsFor } from '@/lib/format'
 import { LANDING_EASE } from './constants'
 
-interface BookedMeeting {
+export interface BookedMeeting {
   readonly company: string
   readonly kind: string
   readonly when: string
 }
 
-/**
- * Illustrative meetings, labelled as such in the frame header. Deliberately not
- * fetched: the marketing page is public, and no real client's calendar may
- * appear on it. Company names are invented.
- *
- * Ordered as the sequence they roll through: the first three are on screen at
- * load, the rest arrive one at a time and the oldest visible row retires. The
- * ring wraps indefinitely so the panel stays in motion, but the counter below
- * only advances through `ROLL_INCREMENTS` — see `useRollingMeetings`.
- */
-const MEETING_POOL: readonly BookedMeeting[] = [
-  { company: 'Halvorsen Logistik', kind: 'Intro call', when: 'Tue 09:30' },
-  { company: 'Nordkap Fertigung', kind: 'Second call', when: 'Wed 14:00' },
-  { company: 'Vantera Diagnostics', kind: 'Intro call', when: 'Thu 11:15' },
-  { company: 'Beckmann & Sohn', kind: 'Intro call', when: 'Fri 09:10' },
-  { company: 'Lindqvist Interiors', kind: 'Second call', when: 'Mon 13:45' },
-  { company: 'Alderney Robotics', kind: 'Intro call', when: 'Tue 10:20' },
-  { company: 'Solheim Maritime', kind: 'Intro call', when: 'Wed 15:30' },
-  { company: 'Kastrup & Weiss', kind: 'Second call', when: 'Thu 08:50' },
-]
+export interface OutcomePanelCopy {
+  readonly thisMonth: string
+  readonly live: string
+  readonly exampleFigures: string
+  readonly meetingsBookedLine1: string
+  readonly meetingsBookedLine2: string
+  readonly new: string
+  readonly footerNote: string
+  readonly meetingPool: readonly BookedMeeting[]
+}
 
 const VISIBLE_ROWS = 3
 const MEETINGS_BOOKED_BASE = 68
-/** How many of the pool's later entries count as "new" and tick the header number up. */
-const ROLL_INCREMENTS = MEETING_POOL.length - VISIBLE_ROWS
 const ROLL_INTERVAL_MS = 4500
 /** How long a freshly-arrived row stays highlighted before it settles in. */
 const HIGHLIGHT_DURATION_S = 1.4
 
 /**
- * Reads `MEETING_POOL` at a wrapped index. `index` here is always produced by
- * a modulo against `MEETING_POOL.length`, so it is always in range — the
- * throw only fires if that invariant is ever broken by a future edit.
+ * Reads `pool` at a wrapped index. `index` here is always produced by a
+ * modulo against `pool.length`, so it is always in range — the throw only
+ * fires if that invariant is ever broken by a future edit.
  */
-function poolAt(index: number): BookedMeeting {
-  const wrapped = ((index % MEETING_POOL.length) + MEETING_POOL.length) % MEETING_POOL.length
-  const meeting = MEETING_POOL[wrapped]
-  if (!meeting) throw new Error(`MEETING_POOL invariant violated: no entry at index ${wrapped}`)
+function poolAt(pool: readonly BookedMeeting[], index: number): BookedMeeting {
+  const wrapped = ((index % pool.length) + pool.length) % pool.length
+  const meeting = pool[wrapped]
+  if (!meeting) throw new Error(`meetingPool invariant violated: no entry at index ${wrapped}`)
   return meeting
 }
 
@@ -60,45 +48,46 @@ interface RollingMeetingsState {
 }
 
 /**
- * Advances a cursor through `MEETING_POOL` on an interval, exposing the three
- * most recently "arrived" meetings and a monthly count that climbs through
- * `ROLL_INCREMENTS` ticks and then holds — the visual roll keeps looping so
- * the panel stays alive, but the headline number never runs away.
+ * Advances a cursor through `pool` on an interval, exposing the three most
+ * recently "arrived" meetings and a monthly count that climbs through
+ * `pool.length - VISIBLE_ROWS` ticks and then holds — the visual roll keeps
+ * looping so the panel stays alive, but the headline number never runs away.
  *
  * Under `prefers-reduced-motion` the interval never starts: the panel renders
  * the same static first three rows and base count it always has, matching
  * `Reveal`'s reduced-motion contract elsewhere on this page.
  */
-function useRollingMeetings(): RollingMeetingsState {
+function useRollingMeetings(pool: readonly BookedMeeting[]): RollingMeetingsState {
   const prefersReducedMotion = useReducedMotion()
   const [cursor, setCursor] = useState(VISIBLE_ROWS - 1)
   const [tick, setTick] = useState(0)
+  const rollIncrements = pool.length - VISIBLE_ROWS
 
   useEffect(() => {
     if (prefersReducedMotion) return
 
     const id = setInterval(() => {
-      setCursor((current) => (current + 1) % MEETING_POOL.length)
+      setCursor((current) => (current + 1) % pool.length)
       setTick((current) => current + 1)
     }, ROLL_INTERVAL_MS)
 
     return () => clearInterval(id)
-  }, [prefersReducedMotion])
+  }, [prefersReducedMotion, pool.length])
 
   const visible = Array.from({ length: VISIBLE_ROWS }, (_, offset) =>
-    poolAt(cursor - (VISIBLE_ROWS - 1 - offset)),
+    poolAt(pool, cursor - (VISIBLE_ROWS - 1 - offset)),
   )
 
   return {
     visible,
-    newestCompany: poolAt(cursor).company,
-    meetingsBooked: MEETINGS_BOOKED_BASE + Math.min(tick, ROLL_INCREMENTS),
+    newestCompany: poolAt(pool, cursor).company,
+    meetingsBooked: MEETINGS_BOOKED_BASE + Math.min(tick, rollIncrements),
     isLive: !prefersReducedMotion,
   }
 }
 
 /** Pulsing dot + label. Monochrome, matching this page's zero-chroma palette. */
-function LiveBadge({ isLive }: { isLive: boolean }): React.ReactElement {
+function LiveBadge({ label, isLive }: { label: string; isLive: boolean }): React.ReactElement {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_oklch,white_7%,transparent)] px-2 py-1 font-mono text-[10px] text-[var(--l-muted)]">
       <span className="relative flex size-1.5">
@@ -107,7 +96,7 @@ function LiveBadge({ isLive }: { isLive: boolean }): React.ReactElement {
         )}
         <span className="relative inline-flex size-1.5 rounded-full bg-[var(--l-accent)]" />
       </span>
-      Live
+      {label}
     </span>
   )
 }
@@ -119,19 +108,19 @@ function LiveBadge({ isLive }: { isLive: boolean }): React.ReactElement {
  * The list rolls new illustrative meetings in on a timer so the panel reads
  * as an active pipeline, not a screenshot.
  */
-export function OutcomePanel(): React.ReactElement {
-  const { visible, newestCompany, meetingsBooked, isLive } = useRollingMeetings()
+export function OutcomePanel({ copy }: { copy: OutcomePanelCopy }): React.ReactElement {
+  const { visible, newestCompany, meetingsBooked, isLive } = useRollingMeetings(copy.meetingPool)
 
   return (
     <div className="rounded-[28px] border border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_4%,transparent)] p-1.5">
       <div className="overflow-hidden rounded-[22px] border border-[var(--l-hairline)] bg-[var(--l-surface)] shadow-[inset_0_1px_0_color-mix(in_oklch,white_8%,transparent)]">
         <div className="flex items-center justify-between border-b border-[var(--l-hairline)] px-5 py-3.5">
           <div className="flex items-center gap-2">
-            <span className="text-[13px] font-medium">This month</span>
-            <LiveBadge isLive={isLive} />
+            <span className="text-[13px] font-medium">{copy.thisMonth}</span>
+            <LiveBadge label={copy.live} isLive={isLive} />
           </div>
           <span className="rounded-full bg-[color-mix(in_oklch,white_7%,transparent)] px-2.5 py-1 font-mono text-[10px] text-[var(--l-faint)]">
-            Example figures
+            {copy.exampleFigures}
           </span>
         </div>
 
@@ -151,9 +140,9 @@ export function OutcomePanel(): React.ReactElement {
             </AnimatePresence>
           </p>
           <p className="pb-1 text-[15px] leading-snug text-[var(--l-muted)]">
-            meetings booked
+            {copy.meetingsBookedLine1}
             <br />
-            from your own mailbox
+            {copy.meetingsBookedLine2}
           </p>
         </div>
 
@@ -197,7 +186,7 @@ export function OutcomePanel(): React.ReactElement {
                           transition={{ duration: HIGHLIGHT_DURATION_S, ease: 'easeOut' }}
                           className="shrink-0 rounded-full bg-[var(--l-accent)] px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-wide text-[var(--l-accent-ink)] uppercase"
                         >
-                          New
+                          {copy.new}
                         </motion.span>
                       )}
                     </p>
@@ -213,9 +202,7 @@ export function OutcomePanel(): React.ReactElement {
         </ul>
 
         <div className="border-t border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_3%,transparent)] px-5 py-3">
-          <span className="text-[11px] text-[var(--l-muted)]">
-            Each one asked for the time themselves.
-          </span>
+          <span className="text-[11px] text-[var(--l-muted)]">{copy.footerNote}</span>
         </div>
       </div>
     </div>

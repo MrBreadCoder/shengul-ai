@@ -1,12 +1,5 @@
-import {
-  absoluteUrl,
-  OG_IMAGE_HEIGHT,
-  OG_IMAGE_PATH,
-  OG_IMAGE_WIDTH,
-  SITE_LANGUAGE,
-  SITE_NAME,
-  SITE_SUMMARY,
-} from '@/lib/seo/site'
+import { absoluteUrl, OG_IMAGE_HEIGHT, OG_IMAGE_PATH, OG_IMAGE_WIDTH, SITE_NAME } from '@/lib/seo/site'
+import type { AppLocale } from '@/types/i18n'
 
 /**
  * Structured data for the public marketing page.
@@ -24,6 +17,11 @@ export interface FaqEntry {
 export interface LandingJsonLdInput {
   /** Site origin, no trailing slash. */
   readonly siteUrl: string
+  /** `/` or `/tr` — which marketing page this graph describes. */
+  readonly pagePath: string
+  readonly locale: AppLocale
+  /** Locale-appropriate one-line summary — `SITE_SUMMARY` or `SITE_SUMMARY_TR`. */
+  readonly summary: string
   readonly faqItems: readonly FaqEntry[]
   /** ISO 8601 timestamps. Surfaced as the page's freshness signal. */
   readonly publishedAt: string
@@ -34,22 +32,30 @@ type JsonLdNode = Record<string, unknown>
 
 export function buildLandingJsonLd({
   siteUrl,
+  pagePath,
+  locale,
+  summary,
   faqItems,
   publishedAt,
   updatedAt,
 }: LandingJsonLdInput): JsonLdNode {
-  const organizationId = `${siteUrl}/#organization`
-  const websiteId = `${siteUrl}/#website`
-  const webPageId = `${siteUrl}/#webpage`
-  const imageId = `${siteUrl}/#primaryimage`
+  // Organization/Website identity is anchored to the canonical root
+  // regardless of which page renders it — it is the same organisation on
+  // every page. WebPage/FAQPage are anchored to the page actually rendering,
+  // so each locale's crawl gets its own resolvable node.
   const homeUrl = absoluteUrl(siteUrl, '/')
+  const pageUrl = absoluteUrl(siteUrl, pagePath)
+  const organizationId = `${homeUrl}#organization`
+  const websiteId = `${homeUrl}#website`
+  const webPageId = `${pageUrl}#webpage`
+  const imageId = `${homeUrl}#primaryimage`
 
   const organization: JsonLdNode = {
     '@type': 'Organization',
     '@id': organizationId,
     name: SITE_NAME,
     url: homeUrl,
-    description: SITE_SUMMARY,
+    description: summary,
     logo: { '@id': imageId },
     image: { '@id': imageId },
   }
@@ -61,7 +67,7 @@ export function buildLandingJsonLd({
     contentUrl: absoluteUrl(siteUrl, OG_IMAGE_PATH),
     width: OG_IMAGE_WIDTH,
     height: OG_IMAGE_HEIGHT,
-    caption: `${SITE_NAME} — ${SITE_SUMMARY}`,
+    caption: `${SITE_NAME} — ${summary}`,
   }
 
   const website: JsonLdNode = {
@@ -69,30 +75,30 @@ export function buildLandingJsonLd({
     '@id': websiteId,
     url: homeUrl,
     name: SITE_NAME,
-    description: SITE_SUMMARY,
+    description: summary,
     publisher: { '@id': organizationId },
-    inLanguage: SITE_LANGUAGE,
+    inLanguage: locale,
   }
 
   const webPage: JsonLdNode = {
     '@type': 'WebPage',
     '@id': webPageId,
-    url: homeUrl,
-    name: `${SITE_NAME} — ${SITE_SUMMARY}`,
-    description: SITE_SUMMARY,
+    url: pageUrl,
+    name: `${SITE_NAME} — ${summary}`,
+    description: summary,
     isPartOf: { '@id': websiteId },
     about: { '@id': organizationId },
     primaryImageOfPage: { '@id': imageId },
     datePublished: publishedAt,
     dateModified: updatedAt,
-    inLanguage: SITE_LANGUAGE,
+    inLanguage: locale,
   }
 
   const faqPage: JsonLdNode = {
     '@type': 'FAQPage',
-    '@id': `${siteUrl}/#faq`,
+    '@id': `${pageUrl}#faq`,
     isPartOf: { '@id': webPageId },
-    inLanguage: SITE_LANGUAGE,
+    inLanguage: locale,
     dateModified: updatedAt,
     mainEntity: faqItems.map(({ question, answer }) => ({
       '@type': 'Question',

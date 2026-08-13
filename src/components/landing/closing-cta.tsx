@@ -1,10 +1,14 @@
+import { getTranslations } from 'next-intl/server'
 import { Highlighter } from '@/components/ui/highlighter'
+import type { AppLocale } from '@/types/i18n'
 import { BookMeetingButton } from './book-meeting-button'
 import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
-export function ClosingCta(): React.ReactElement {
+export async function ClosingCta({ locale }: { locale: AppLocale }): Promise<React.ReactElement> {
+  const t = await getTranslations({ locale, namespace: 'marketing.closingCta' })
+
   return (
     <section className="px-4 pt-8 pb-28 md:pb-36">
       <div className="mx-auto max-w-[1180px] rounded-[28px] border border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_4%,transparent)] p-1.5">
@@ -15,7 +19,7 @@ export function ClosingCta(): React.ReactElement {
           />
           <Reveal>
             <h2 className="mx-auto max-w-[18ch] text-[2.25rem] leading-[1.05] font-medium tracking-tight text-balance sm:text-[3rem]">
-              Tell us{' '}
+              {t('headlinePrefix')}
               <Highlighter
                 action="underline"
                 color={LANDING_HIGHLIGHT_COLOR}
@@ -23,20 +27,20 @@ export function ClosingCta(): React.ReactElement {
                 padding={4}
                 startDelay={REVEAL_DURATION_MS}
               >
-                who you want to meet
+                {t('headlineHighlight')}
               </Highlighter>
-              .
+              {t('headlineSuffix')}
             </h2>
             <p className="mx-auto mt-6 max-w-[46ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-              Half an hour is enough. You describe the buyer, we show you what the first month
-              would look like, and you decide from there.
+              {t('description')}
             </p>
             <div className="mt-10 flex justify-center">
-              <BookMeetingButton size="lg" />
+              <BookMeetingButton locale={locale} size="lg" />
             </div>
             <p className="mt-7 text-[13px] text-[var(--l-faint)]">
-              Already working with us? <InlineLink href="/login">Sign in to your console</InlineLink>{' '}
-              to see today&rsquo;s replies.
+              {t.rich('footerNote', {
+                link: (chunks) => <InlineLink href="/login">{chunks}</InlineLink>,
+              })}
             </p>
           </Reveal>
         </div>

@@ -94,7 +94,7 @@ export default function LegalIndexPage(): React.ReactElement {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter locale="en" />
     </div>
   )
 }

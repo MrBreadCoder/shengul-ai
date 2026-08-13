@@ -8,6 +8,9 @@ const FAQ_ITEMS: readonly FaqEntry[] = [
 
 const INPUT = {
   siteUrl: 'https://example.com',
+  pagePath: '/',
+  locale: 'en',
+  summary: 'Managed B2B outbound, run from your own mailbox.',
   faqItems: FAQ_ITEMS,
   publishedAt: '2026-07-18T00:00:00.000Z',
   updatedAt: '2026-07-25T00:00:00.000Z',
@@ -70,6 +73,30 @@ describe('buildLandingJsonLd', () => {
       'WebPage',
     )
     expect(webPage?.url).toBe('https://example.com/')
+  })
+
+  it('should anchor the WebPage/FAQPage ids to the given pagePath, not always /', () => {
+    const built = buildLandingJsonLd({ ...INPUT, pagePath: '/tr' })
+    const webPage = nodesByType(built).get('WebPage')
+    const faqPage = nodesByType(built).get('FAQPage')
+    expect(webPage?.url).toBe('https://example.com/tr')
+    expect(webPage?.['@id']).toBe('https://example.com/tr#webpage')
+    expect(faqPage?.['@id']).toBe('https://example.com/tr#faq')
+  })
+
+  it('should keep Organization/WebSite anchored to the site root regardless of pagePath', () => {
+    const built = buildLandingJsonLd({ ...INPUT, pagePath: '/tr' })
+    const nodes = nodesByType(built)
+    expect(nodes.get('Organization')?.['@id']).toBe('https://example.com/#organization')
+    expect(nodes.get('WebSite')?.['@id']).toBe('https://example.com/#website')
+  })
+
+  it('should reflect the given locale and summary on every node', () => {
+    const built = buildLandingJsonLd({ ...INPUT, locale: 'tr', summary: 'Türkçe özet.' })
+    const nodes = nodesByType(built)
+    expect(nodes.get('WebPage')?.inLanguage).toBe('tr')
+    expect(nodes.get('FAQPage')?.inLanguage).toBe('tr')
+    expect(nodes.get('Organization')?.description).toBe('Türkçe özet.')
   })
 })
 

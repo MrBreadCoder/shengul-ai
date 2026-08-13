@@ -1018,5 +1018,154 @@
     "passwordTooShort": "Password must be at least {min} characters.",
     "passwordMismatch": "Passwords do not match.",
     "setPasswordError": "Could not set your password. Try requesting a new invite link."
+  },
+  "marketing": {
+    "nav": {
+      "ariaLabel": "Primary",
+      "linkOutcomes": "Outcomes",
+      "linkHow": "How it works",
+      "linkSafeguards": "Email reputation",
+      "signIn": "Sign in",
+      "openMenu": "Open menu",
+      "closeMenu": "Close menu"
+    },
+    "bookMeetingButton": {
+      "label": "Book a meeting"
+    },
+    "footer": {
+      "ariaLabelFooter": "Footer",
+      "ariaLabelLegal": "Legal",
+      "linkHow": "How it works",
+      "linkPrivacy": "Privacy and security",
+      "signIn": "Sign in",
+      "bookMeeting": "Book a meeting",
+      "copyright": "{year} Shengul AI. Outbound, handled."
+    },
+    "hero": {
+      "eyebrow": "Outbound, handled",
+      "headlinePrefix": "More ",
+      "headlineHighlight": "qualified meetings",
+      "headlineSuffix": ". Less manual prospecting.",
+      "subtext": "Shengul AI finds your ideal prospects, researches them, creates personalized outreach, follows up automatically, and turns outbound into a predictable sales channel.",
+      "secondaryCta": "See how it works"
+    },
+    "outcomePanel": {
+      "thisMonth": "This month",
+      "live": "Live",
+      "exampleFigures": "Example figures",
+      "meetingsBookedLine1": "meetings booked",
+      "meetingsBookedLine2": "from your own mailbox",
+      "new": "New",
+      "footerNote": "Each one asked for the time themselves.",
+      "meetingPool": [
+        { "company": "Halvorsen Logistik", "kind": "Intro call", "when": "Tue 09:30" },
+        { "company": "Nordkap Fertigung", "kind": "Second call", "when": "Wed 14:00" },
+        { "company": "Vantera Diagnostics", "kind": "Intro call", "when": "Thu 11:15" },
+        { "company": "Beckmann & Sohn", "kind": "Intro call", "when": "Fri 09:10" },
+        { "company": "Lindqvist Interiors", "kind": "Second call", "when": "Mon 13:45" },
+        { "company": "Alderney Robotics", "kind": "Intro call", "when": "Tue 10:20" },
+        { "company": "Solheim Maritime", "kind": "Intro call", "when": "Wed 15:30" },
+        { "company": "Kastrup & Weiss", "kind": "Second call", "when": "Thu 08:50" }
+      ]
+    },
+    "outcomes": {
+      "headlinePrefix": "Four numbers we track. ",
+      "headlineHighlight": "One you close.",
+      "description": "Everything here is meant to grow that fourth number. These are example figures for one month, just to show how the numbers connect — not a promise of your results.",
+      "items": [
+        { "value": "1,284", "label": "Leads found", "detail": "People who match the buyer you described." },
+        { "value": "3,146", "label": "Emails sent", "detail": "Sent from your own mailbox, in small batches, at normal hours." },
+        { "value": "184", "label": "Replies", "detail": "Answered in your voice. Follow-ups stop the moment someone replies." },
+        { "value": "68", "label": "Meetings booked", "detail": "Booked straight into your calendar, with notes on the company attached." }
+      ],
+      "revenueFifthPrefix": "The fifth number is ",
+      "revenueFifthHighlight": "yours",
+      "revenueFifthSuffix": ".",
+      "revenueBody": "{meetings} meetings, a {averageDeal} average deal, and a {closeRate} close rate adds up to {newBusiness} in new business from one month. Use your own numbers to see what a month could be worth to you.",
+      "revenueMeetings": "68",
+      "revenueAverageDeal": "$10,000",
+      "revenueCloseRate": "30%",
+      "revenueNewBusiness": "$204,000"
+    },
+    "theGrind": {
+      "headlinePrefix": "Doing this yourself takes hours and ",
+      "headlineHighlight": "rarely pays off",
+      "headlineSuffix": ".",
+      "costs": [
+        "Hours every morning spent building lead lists.",
+        "Late nights rewriting emails that still sound like a template.",
+        "Follow-ups that never get sent, even to your best leads.",
+        "Days of work for just a few meetings booked."
+      ],
+      "closingLine": "We take all of that off your plate."
+    },
+    "howItWorks": {
+      "headlinePrefix": "Four steps. You only do ",
+      "headlineHighlight": "two of them",
+      "headlineSuffix": ".",
+      "description": "Nothing to learn, nothing to check every morning. You start it and show up to the meetings — we handle everything in between, and report back as <link>four numbers</link>.",
+      "movements": [
+        { "title": "Talk with us.", "detail": "One call. Tell us what you sell and who you want to reach. That’s the whole setup." },
+        { "title": "We find your leads.", "detail": "Every day, we find people who match the buyer you described, and check they’re a real fit for what you sell." },
+        { "title": "We write a real email.", "detail": "Not a template with a name dropped in. Each email mentions something real about that company, written in your voice, sent from your own inbox." },
+        { "title": "You take the meetings.", "detail": "We follow up until someone replies, then stop right away. The meeting lands on your calendar, waiting for you in the morning." }
+      ]
+    },
+    "capabilities": {
+      "heading": "What a normal week looks like.",
+      "tile1Prefix": "Get ",
+      "tile1Highlight": "two hours back every day",
+      "tile1Suffix": ", and meetings on your calendar.",
+      "tile1Body": "The time you used to spend on lists and rewritten emails now goes to people who already replied and picked a time.",
+      "reliefs": ["No list building", "No first drafts", "No chasing"],
+      "tile2Number": "3",
+      "tile2Title": "Up to 3 follow-ups, then we stop.",
+      "tile2Body": "Nobody is forgotten, and nobody is spammed. The moment someone replies, the follow-ups stop.",
+      "tile3Title": "Every email is personal.",
+      "tile3Body": "Each one opens with something real about that company — not a guess, not a generic line.",
+      "tile3Callout": "Rather than: I hope this email finds you well.",
+      "tile4Title": "It sounds like a person.",
+      "tile4Body": "No tracking pixel, no unsubscribe footer, no bulk markers. An email from your own address, sent at an hour a human would send it.",
+      "tile5Title": "You can read every email.",
+      "tile5Body": "Every email we send is there for you to check. If a reply asks something we can’t answer honestly, we check with you instead of guessing."
+    },
+    "safeguards": {
+      "headlinePrefix": "Protect and grow your ",
+      "headlineHighlight": "email reputation",
+      "headlineSuffix": ".",
+      "description": "Your emails shouldn’t end up in spam. Sending too many at once is what causes that, so we do the opposite — small numbers, human hours, your own mailbox. The reputation you’ve built stays protected, and gets stronger over time. Here’s <link>how your data is stored and deleted</link>.",
+      "promises": [
+        { "title": "We start small.", "detail": "A few emails on day one, building up gradually. Nothing about it looks automated." },
+        { "title": "We back off automatically.", "detail": "If something looks off, we pull that mailbox out of rotation right away, and tell you." },
+        { "title": "One switch stops it.", "detail": "Stop one email, one mailbox, or everything at once — instantly." }
+      ]
+    },
+    "privacy": {
+      "heading": "How your data is handled.",
+      "description": "Running outbound means sharing your mailbox and your lead list with us. Here’s exactly what happens to both — and separately, how we protect <link>the reputation of the domain you send from</link>.",
+      "commitments": [
+        { "title": "Everything is encrypted.", "detail": "Every connection uses TLS, and your mailbox login gets extra encryption before it’s ever saved." },
+        { "title": "You can disconnect anytime.", "detail": "Your mailbox connects through Google or Microsoft’s own sign-in screen. Disconnect it and sending stops immediately." },
+        { "title": "Your data stays yours.", "detail": "Kept separate at the database level — no query can ever return someone else’s information." },
+        { "title": "Nothing is kept forever.", "detail": "Regular activity is deleted after 30 days, flagged records after 90, automatically." }
+      ]
+    },
+    "faq": {
+      "heading": "The things people ask before saying yes.",
+      "items": [
+        { "question": "Will it sound like me?", "answer": "Yes. Every email goes out from your own address, in your voice, and mentions something real about that company. If there’s nothing worth saying, we don’t send anything." },
+        { "question": "Do I have to approve every email?", "answer": "Only if you want to. Some people read everything for the first fortnight and then let it run. Others never look. You can change your mind either way at any point." },
+        { "question": "What happens when somebody actually replies?", "answer": "Follow-ups stop right away, and we reply the way you would. Anything serious comes straight to you, with your booking link already included." },
+        { "question": "Will it make things up?", "answer": "No. We only write what we can verify. If a question comes up that we can’t answer honestly, we check with you first." },
+        { "question": "What do you need from me?", "answer": "A mailbox, a clear picture of who you want to meet, what you sell, and a link to your calendar. Everything after that is set up and run for you." }
+      ]
+    },
+    "closingCta": {
+      "headlinePrefix": "Tell us ",
+      "headlineHighlight": "who you want to meet",
+      "headlineSuffix": ".",
+      "description": "Half an hour is enough. You describe the buyer, we show you what the first month would look like, and you decide from there.",
+      "footerNote": "Already working with us? <link>Sign in to your console</link> to see today’s replies."
+    }
   }
 }

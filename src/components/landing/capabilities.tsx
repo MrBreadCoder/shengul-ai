@@ -1,12 +1,11 @@
 import { Clock, Eye, Newspaper, User } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { Highlighter } from '@/components/ui/highlighter'
 import { cn } from '@/lib/utils'
+import type { AppLocale } from '@/types/i18n'
 import { BookMeetingButton } from './book-meeting-button'
 import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { Reveal } from './reveal'
-
-/** The three jobs that stop landing on your desk. */
-const RELIEFS: readonly string[] = ['No list building', 'No first drafts', 'No chasing']
 
 interface TileProps {
   className?: string
@@ -43,13 +42,16 @@ function Tile({ className, children, isFeature = false }: TileProps): React.Reac
   )
 }
 
-export function Capabilities(): React.ReactElement {
+export async function Capabilities({ locale }: { locale: AppLocale }): Promise<React.ReactElement> {
+  const t = await getTranslations({ locale, namespace: 'marketing.capabilities' })
+  const reliefs = t.raw('reliefs') as readonly string[]
+
   return (
     <section id="capabilities" className="scroll-mt-28 px-4 py-28 md:py-36">
       <div className="mx-auto max-w-[1180px]">
         <Reveal className="max-w-[36ch]">
           <h2 className="text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            What a normal week looks like.
+            {t('heading')}
           </h2>
         </Reveal>
 
@@ -58,7 +60,7 @@ export function Capabilities(): React.ReactElement {
             <Tile isFeature className="h-full">
               <Clock weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
               <h3 className="max-w-[16ch] text-xl font-medium tracking-tight sm:text-2xl">
-                Get{' '}
+                {t('tile1Prefix')}
                 <Highlighter
                   action="underline"
                   color={LANDING_HIGHLIGHT_COLOR}
@@ -66,16 +68,15 @@ export function Capabilities(): React.ReactElement {
                   padding={3}
                   startDelay={REVEAL_DURATION_MS}
                 >
-                  two hours back every day
+                  {t('tile1Highlight')}
                 </Highlighter>
-                , and meetings on your calendar.
+                {t('tile1Suffix')}
               </h3>
               <p className="mt-4 max-w-[44ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                The time you used to spend on lists and rewritten emails now goes to people who
-                already replied and picked a time.
+                {t('tile1Body')}
               </p>
               <ul className="mt-9 flex flex-wrap gap-2">
-                {RELIEFS.map((relief) => (
+                {reliefs.map((relief) => (
                   <li
                     key={relief}
                     className="rounded-full border border-[var(--l-hairline-strong)] px-3.5 py-1.5 text-[12px] text-[var(--l-muted)]"
@@ -90,14 +91,11 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-5" delay={0.05}>
             <Tile className="h-full">
               <p className="font-mono text-[3.25rem] leading-none tracking-tighter tabular-nums">
-                3
+                {t('tile2Number')}
               </p>
-              <h3 className="mt-6 text-lg font-medium tracking-tight">
-                Up to 3 follow-ups, then we stop.
-              </h3>
+              <h3 className="mt-6 text-lg font-medium tracking-tight">{t('tile2Title')}</h3>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Nobody is forgotten, and nobody is spammed. The moment someone replies, the
-                follow-ups stop.
+                {t('tile2Body')}
               </p>
             </Tile>
           </Reveal>
@@ -105,13 +103,12 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-5" delay={0.1}>
             <Tile className="h-full">
               <Newspaper weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
-              <h3 className="text-lg font-medium tracking-tight">Every email is personal.</h3>
+              <h3 className="text-lg font-medium tracking-tight">{t('tile3Title')}</h3>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Each one opens with something real about that company — not a guess, not a
-                generic line.
+                {t('tile3Body')}
               </p>
               <p className="mt-6 rounded-[14px] border border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_4%,transparent)] px-4 py-3.5 text-[13px] leading-relaxed text-[var(--l-muted)]">
-                Rather than: I hope this email finds you well.
+                {t('tile3Callout')}
               </p>
             </Tile>
           </Reveal>
@@ -119,10 +116,9 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-4" delay={0.15}>
             <Tile className="h-full">
               <User weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
-              <h3 className="text-lg font-medium tracking-tight">It sounds like a person.</h3>
+              <h3 className="text-lg font-medium tracking-tight">{t('tile4Title')}</h3>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--l-muted)]">
-                No tracking pixel, no unsubscribe footer, no bulk markers. An email from your own
-                address, sent at an hour a human would send it.
+                {t('tile4Body')}
               </p>
             </Tile>
           </Reveal>
@@ -130,10 +126,9 @@ export function Capabilities(): React.ReactElement {
           <Reveal className="h-full lg:col-span-8" delay={0.2}>
             <Tile className="h-full">
               <Eye weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
-              <h3 className="text-lg font-medium tracking-tight">You can read every email.</h3>
+              <h3 className="text-lg font-medium tracking-tight">{t('tile5Title')}</h3>
               <p className="mt-3 max-w-[56ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
-                Every email we send is there for you to check. If a reply asks something we
-                can&rsquo;t answer honestly, we check with you instead of guessing.
+                {t('tile5Body')}
               </p>
             </Tile>
           </Reveal>
@@ -141,7 +136,7 @@ export function Capabilities(): React.ReactElement {
 
         <Reveal delay={0.25}>
           <div className="mt-14">
-            <BookMeetingButton size="lg" />
+            <BookMeetingButton locale={locale} size="lg" />
           </div>
         </Reveal>
       </div>

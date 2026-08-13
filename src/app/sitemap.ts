@@ -4,9 +4,10 @@ import { absoluteUrl, CONTENT_UPDATED_AT } from '@/lib/seo/site'
 import { SITE_URL } from '@/lib/seo/site-url'
 
 /**
- * `/` plus the published legal documents: every other route is either behind
- * auth or a sign-in form carrying `noindex`, and a sitemap that advertises
- * unindexable URLs is a negative quality signal rather than a neutral one.
+ * `/` and `/tr` plus the published legal documents: every other route is
+ * either behind auth or a sign-in form carrying `noindex`, and a sitemap
+ * that advertises unindexable URLs is a negative quality signal rather than
+ * a neutral one.
  *
  * The legal pages belong here despite being unglamorous — somebody who wants to
  * know where we got their details should be able to reach that page from a
@@ -20,6 +21,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: absoluteUrl(SITE_URL, '/'),
+      lastModified: new Date(CONTENT_UPDATED_AT),
+      changeFrequency: 'monthly',
+      priority: 1,
+    },
+    {
+      url: absoluteUrl(SITE_URL, '/tr'),
       lastModified: new Date(CONTENT_UPDATED_AT),
       changeFrequency: 'monthly',
       priority: 1,

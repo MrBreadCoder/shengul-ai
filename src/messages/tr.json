@@ -1018,5 +1018,154 @@
     "passwordTooShort": "Şifre en az {min} karakter olmalıdır.",
     "passwordMismatch": "Şifreler eşleşmiyor.",
     "setPasswordError": "Şifreniz belirlenemedi. Yeni bir davet bağlantısı isteyin."
+  },
+  "marketing": {
+    "nav": {
+      "ariaLabel": "Ana menü",
+      "linkOutcomes": "Sonuçlar",
+      "linkHow": "Nasıl çalışır",
+      "linkSafeguards": "E-posta itibarı",
+      "signIn": "Giriş yap",
+      "openMenu": "Menüyü aç",
+      "closeMenu": "Menüyü kapat"
+    },
+    "bookMeetingButton": {
+      "label": "Görüşme planlayın"
+    },
+    "footer": {
+      "ariaLabelFooter": "Alt bilgi",
+      "ariaLabelLegal": "Yasal",
+      "linkHow": "Nasıl çalışır",
+      "linkPrivacy": "Gizlilik ve güvenlik",
+      "signIn": "Giriş yap",
+      "bookMeeting": "Görüşme planlayın",
+      "copyright": "{year} Shengul AI. Dış satış, bizde."
+    },
+    "hero": {
+      "eyebrow": "Dış satış, bizde",
+      "headlinePrefix": "Daha fazla ",
+      "headlineHighlight": "nitelikli görüşme",
+      "headlineSuffix": ". Daha az manuel müşteri arama.",
+      "subtext": "Shengul AI, ideal potansiyel müşterilerinizi bulur, onları araştırır, kişiselleştirilmiş e-postalar oluşturur, otomatik olarak takip eder ve dış satışı öngörülebilir bir satış kanalına dönüştürür.",
+      "secondaryCta": "Nasıl çalıştığını gör"
+    },
+    "outcomePanel": {
+      "thisMonth": "Bu ay",
+      "live": "Canlı",
+      "exampleFigures": "Örnek rakamlar",
+      "meetingsBookedLine1": "planlanan görüşme",
+      "meetingsBookedLine2": "kendi e-posta kutunuzdan",
+      "new": "Yeni",
+      "footerNote": "Her biri randevu saatini kendisi seçti.",
+      "meetingPool": [
+        { "company": "Halvorsen Logistik", "kind": "Tanışma görüşmesi", "when": "Sal 09:30" },
+        { "company": "Nordkap Fertigung", "kind": "İkinci görüşme", "when": "Çar 14:00" },
+        { "company": "Vantera Diagnostics", "kind": "Tanışma görüşmesi", "when": "Per 11:15" },
+        { "company": "Beckmann & Sohn", "kind": "Tanışma görüşmesi", "when": "Cum 09:10" },
+        { "company": "Lindqvist Interiors", "kind": "İkinci görüşme", "when": "Pzt 13:45" },
+        { "company": "Alderney Robotics", "kind": "Tanışma görüşmesi", "when": "Sal 10:20" },
+        { "company": "Solheim Maritime", "kind": "Tanışma görüşmesi", "when": "Çar 15:30" },
+        { "company": "Kastrup & Weiss", "kind": "İkinci görüşme", "when": "Per 08:50" }
+      ]
+    },
+    "outcomes": {
+      "headlinePrefix": "Takip ettiğimiz dört rakam. ",
+      "headlineHighlight": "Kapattığınız bir tanesi.",
+      "description": "Buradaki her şey o dördüncü rakamı büyütmek için var. Bunlar rakamların nasıl bağlandığını göstermek için tek bir aya ait örnek rakamlardır — sonuçlarınızın bir garantisi değildir.",
+      "items": [
+        { "value": "1.284", "label": "Bulunan potansiyel müşteri", "detail": "Tarif ettiğiniz alıcı profiline uyan kişiler." },
+        { "value": "3.146", "label": "Gönderilen e-posta", "detail": "Kendi e-posta adresinizden, küçük gruplar hâlinde, normal saatlerde gönderilir." },
+        { "value": "184", "label": "Yanıt", "detail": "Sizin üslubunuzla yanıtlanır. Biri yanıt verdiği an takip e-postaları durur." },
+        { "value": "68", "label": "Planlanan görüşme", "detail": "Şirket hakkında notlarla birlikte doğrudan takviminize eklenir." }
+      ],
+      "revenueFifthPrefix": "Beşinci rakam ",
+      "revenueFifthHighlight": "sizinki",
+      "revenueFifthSuffix": ".",
+      "revenueBody": "{meetings} görüşme, {averageDeal} ortalama anlaşma değeri ve {closeRate} kapanış oranıyla bir ayda {newBusiness} yeni iş demek. Bir ayın sizin için ne değer taşıyacağını görmek için kendi rakamlarınızı kullanın.",
+      "revenueMeetings": "68",
+      "revenueAverageDeal": "10.000 $",
+      "revenueCloseRate": "%30",
+      "revenueNewBusiness": "204.000 $"
+    },
+    "theGrind": {
+      "headlinePrefix": "Bunu kendiniz yapmak saatler alır ve ",
+      "headlineHighlight": "nadiren karşılığını verir",
+      "headlineSuffix": ".",
+      "costs": [
+        "Her sabah liste oluşturmakla geçen saatler.",
+        "Hâlâ şablon gibi duran e-postaları yeniden yazmakla geçen geç saatler.",
+        "En iyi adaylarınıza bile gönderilmeyen takip e-postaları.",
+        "Sadece birkaç görüşme için günlerce süren emek."
+      ],
+      "closingLine": "Bunların hepsini sizin yerinize biz üstleniyoruz."
+    },
+    "howItWorks": {
+      "headlinePrefix": "Dört adım. Bunlardan sadece ",
+      "headlineHighlight": "ikisini siz yapıyorsunuz",
+      "headlineSuffix": ".",
+      "description": "Öğrenecek bir şey yok, her sabah kontrol edecek bir şey yok. Siz başlatın ve görüşmelere gelin — arada kalan her şeyi biz hallederiz ve size <link>dört rakam</link> olarak raporlarız.",
+      "movements": [
+        { "title": "Bizimle konuşun.", "detail": "Tek bir görüşme. Ne sattığınızı ve kime ulaşmak istediğinizi anlatın. Kurulum bundan ibaret." },
+        { "title": "Potansiyel müşterilerinizi buluruz.", "detail": "Her gün, tarif ettiğiniz alıcı profiline uyan kişileri buluruz ve sattığınız şey için gerçekten uygun olduklarını kontrol ederiz." },
+        { "title": "Gerçek bir e-posta yazarız.", "detail": "İçine isim sıkıştırılmış bir şablon değil. Her e-posta o şirketle ilgili gerçek bir şeyden bahseder, sizin üslubunuzla yazılır ve kendi e-posta adresinizden gönderilir." },
+        { "title": "Görüşmelere siz katılırsınız.", "detail": "Biri yanıt verene kadar takip ederiz, sonra hemen dururuz. Görüşme takviminize düşer ve sabah sizi bekler." }
+      ]
+    },
+    "capabilities": {
+      "heading": "Normal bir hafta neye benzer?",
+      "tile1Prefix": "Her gün ",
+      "tile1Highlight": "iki saatinizi geri kazanın",
+      "tile1Suffix": " ve takviminizde görüşmeler olsun.",
+      "tile1Body": "Eskiden listelere ve yeniden yazılan e-postalara harcadığınız zaman, artık yanıt verip bir saat seçmiş kişilere ayrılıyor.",
+      "reliefs": ["Liste oluşturma yok", "İlk taslak yazma yok", "Peşinden koşma yok"],
+      "tile2Number": "3",
+      "tile2Title": "En fazla 3 takip e-postası, sonra dururuz.",
+      "tile2Body": "Kimse unutulmaz, kimseye spam gönderilmez. Biri yanıt verdiği an takip e-postaları durur.",
+      "tile3Title": "Her e-posta kişiseldir.",
+      "tile3Body": "Her biri o şirketle ilgili gerçek bir şeyle başlar — tahmin değil, kalıp bir cümle değil.",
+      "tile3Callout": "Şöyle değil: Umarım bu e-posta sizi iyi bulur.",
+      "tile4Title": "Bir insan gibi duyulur.",
+      "tile4Body": "Takip pikseli yok, abonelikten çıkma metni yok, toplu gönderim işareti yok. Kendi adresinizden, bir insanın göndereceği saatte gönderilen bir e-posta.",
+      "tile5Title": "Her e-postayı okuyabilirsiniz.",
+      "tile5Body": "Gönderdiğimiz her e-posta kontrol etmeniz için orada durur. Bir yanıt dürüstçe cevaplayamayacağımız bir şey sorarsa, tahmin etmek yerine size danışırız."
+    },
+    "safeguards": {
+      "headlinePrefix": "E-posta itibarınızı ",
+      "headlineHighlight": "koruyun ve büyütün",
+      "headlineSuffix": ".",
+      "description": "E-postalarınız spam’e düşmemeli. Bunun genelde sebebi bir kerede çok fazla e-posta göndermektir; biz tam tersini yapıyoruz — küçük sayılar, insan saatleri, kendi e-posta adresiniz. Oluşturduğunuz itibar korunur ve zamanla güçlenir. <link>Verilerinizin nasıl saklandığını ve silindiğini</link> buradan öğrenebilirsiniz.",
+      "promises": [
+        { "title": "Küçük başlarız.", "detail": "İlk gün birkaç e-posta, kademeli olarak artar. Hiçbir şey otomatik görünmez." },
+        { "title": "Otomatik olarak geri çekiliriz.", "detail": "Bir şey ters görünürse, o e-posta kutusunu hemen devre dışı bırakır ve size haber veririz." },
+        { "title": "Tek bir düğmeyle durdurulur.", "detail": "Tek bir e-postayı, tek bir kutuyu ya da her şeyi anında durdurun." }
+      ]
+    },
+    "privacy": {
+      "heading": "Verileriniz nasıl işlenir?",
+      "description": "Dış satış yapmak, e-posta kutunuzu ve potansiyel müşteri listenizi bizimle paylaşmak demektir. İkisine de tam olarak ne olduğunu — ve ayrıca <link>gönderim yaptığınız alan adının itibarını nasıl koruduğumuzu</link> — burada bulabilirsiniz.",
+      "commitments": [
+        { "title": "Her şey şifrelenir.", "detail": "Her bağlantı TLS kullanır ve e-posta kutunuzun giriş bilgileri kaydedilmeden önce ekstra şifrelemeden geçer." },
+        { "title": "İstediğiniz zaman bağlantıyı kesebilirsiniz.", "detail": "E-posta kutunuz Google veya Microsoft’un kendi giriş ekranı üzerinden bağlanır. Bağlantıyı kesin, gönderim anında durur." },
+        { "title": "Verileriniz size ait kalır.", "detail": "Veritabanı seviyesinde ayrı tutulur — hiçbir sorgu başka birinin bilgisini döndüremez." },
+        { "title": "Hiçbir şey sonsuza kadar saklanmaz.", "detail": "Rutin etkinlik kayıtları 30 gün, işaretlenmiş kayıtlar 90 gün sonra otomatik olarak silinir." }
+      ]
+    },
+    "faq": {
+      "heading": "İnsanların evet demeden önce sorduğu şeyler.",
+      "items": [
+        { "question": "Bana benziyor mu?", "answer": "Evet. Her e-posta kendi adresinizden, sizin üslubunuzla gönderilir ve o şirketle ilgili gerçek bir şeyden bahseder. Söylenecek bir şey yoksa, hiçbir şey göndermeyiz." },
+        { "question": "Her e-postayı onaylamam gerekir mi?", "answer": "Sadece isterseniz. Bazı kullanıcılar ilk iki hafta her şeyi okur, sonra kendi hâline bırakır. Bazıları hiç bakmaz. İstediğiniz zaman fikrinizi değiştirebilirsiniz." },
+        { "question": "Biri gerçekten yanıt verirse ne olur?", "answer": "Takip e-postaları hemen durur ve sizin yanıtlayacağınız gibi yanıtlarız. Ciddi olan her şey, randevu linkiniz eklenmiş şekilde doğrudan size gelir." },
+        { "question": "Bir şeyler uydurur mu?", "answer": "Hayır. Yalnızca doğrulayabildiğimiz şeyleri yazarız. Dürüstçe cevaplayamayacağımız bir soru çıkarsa, önce size danışırız." },
+        { "question": "Benden ne istiyorsunuz?", "answer": "Bir e-posta kutusu, kiminle görüşmek istediğinize dair net bir fikir, ne sattığınız ve takvim linkiniz. Bundan sonraki her şeyi biz kurar ve yürütürüz." }
+      ]
+    },
+    "closingCta": {
+      "headlinePrefix": "Bize ",
+      "headlineHighlight": "kiminle görüşmek istediğinizi söyleyin",
+      "headlineSuffix": ".",
+      "description": "Yarım saat yeterli. Alıcı profilinizi anlatın, ilk ayın neye benzeyeceğini gösterelim, gerisine siz karar verin.",
+      "footerNote": "Zaten bizimle çalışıyor musunuz? Bugünkü yanıtları görmek için <link>kontrol panelinize giriş yapın</link>."
+    }
   }
 }

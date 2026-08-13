@@ -34,6 +34,21 @@ export const LANDING_DESCRIPTION =
 export const SITE_SUMMARY =
   'Managed B2B outbound: buyer research, cold email, reply handling and meeting booking, run from your own mailbox.'
 
+/**
+ * Turkish counterparts of `SITE_TITLE`/`LANDING_DESCRIPTION`/`SITE_SUMMARY`,
+ * used only by `/tr` (`src/app/(marketing)/tr/page.tsx`) and its JSON-LD.
+ * Kept here rather than in the `marketing` message namespace so every
+ * machine-readable surface still has exactly one source of copy, per this
+ * file's own header comment above.
+ */
+export const LANDING_TITLE_TR = 'Daha fazla görüşme, dış satışın zahmeti yok'
+
+export const LANDING_DESCRIPTION_TR =
+  'Alıcı profilinizi siz tarif edin. Shengul AI onları bulur, e-postaları yazar, yanıtları cevaplar ve planlanan görüşmeleri size teslim eder. Dış satış ekibine gerek yok.'
+
+export const SITE_SUMMARY_TR =
+  'Yönetilen B2B dış satış: alıcı araştırması, soğuk e-posta, yanıt yönetimi ve görüşme planlama — hepsi kendi e-posta adresinizden yürütülür.'
+
 export const SITE_LANGUAGE = 'en'
 export const SITE_LOCALE = 'en_US'
 

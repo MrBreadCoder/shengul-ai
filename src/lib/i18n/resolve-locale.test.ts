@@ -74,3 +74,31 @@ describe('resolveLocale', () => {
     await expect(resolveLocale()).resolves.toBe('en')
   })
 })
+
+const { isSupportedLocale, parseAcceptLanguage } = await import('./resolve-locale')
+
+describe('isSupportedLocale', () => {
+  it('should accept every supported locale', () => {
+    expect(isSupportedLocale('en')).toBe(true)
+    expect(isSupportedLocale('tr')).toBe(true)
+  })
+
+  it('should reject an unsupported value', () => {
+    expect(isSupportedLocale('fr')).toBe(false)
+    expect(isSupportedLocale('')).toBe(false)
+  })
+})
+
+describe('parseAcceptLanguage', () => {
+  it('should pick the first supported tag in preference order', () => {
+    expect(parseAcceptLanguage('tr-TR,tr;q=0.9,en;q=0.8')).toBe('tr')
+  })
+
+  it('should default to en when no tag is supported', () => {
+    expect(parseAcceptLanguage('fr-FR,fr;q=0.9')).toBe('en')
+  })
+
+  it('should default to en for a null header', () => {
+    expect(parseAcceptLanguage(null)).toBe('en')
+  })
+})

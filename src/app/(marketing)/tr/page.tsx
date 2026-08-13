@@ -3,16 +3,15 @@ import { redirect } from 'next/navigation'
 import { LandingPage } from '@/components/landing/landing-page'
 import { createServerClient } from '@/lib/supabase/server'
 import {
-  LANDING_DESCRIPTION,
+  LANDING_DESCRIPTION_TR,
+  LANDING_TITLE_TR,
   OG_IMAGE_ALT,
   OG_IMAGE_HEIGHT,
   OG_IMAGE_PATH,
   OG_IMAGE_WIDTH,
   SITE_NAME,
-  SITE_TITLE,
 } from '@/lib/seo/site'
 
-/** Resolved against `metadataBase` in the root layout. */
 const OG_IMAGE = {
   url: OG_IMAGE_PATH,
   width: OG_IMAGE_WIDTH,
@@ -21,34 +20,34 @@ const OG_IMAGE = {
 } as const
 
 export const metadata: Metadata = {
-  title: SITE_TITLE,
-  description: LANDING_DESCRIPTION,
-  alternates: { canonical: '/', languages: { en: '/', tr: '/tr' } },
+  title: LANDING_TITLE_TR,
+  description: LANDING_DESCRIPTION_TR,
+  alternates: { canonical: '/tr', languages: { en: '/', tr: '/tr' } },
   openGraph: {
     type: 'website',
-    url: '/',
+    url: '/tr',
     siteName: SITE_NAME,
-    title: `${SITE_NAME} · ${SITE_TITLE}`,
-    description: LANDING_DESCRIPTION,
+    title: `${SITE_NAME} · ${LANDING_TITLE_TR}`,
+    description: LANDING_DESCRIPTION_TR,
     images: [OG_IMAGE],
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${SITE_NAME} · ${SITE_TITLE}`,
-    description: LANDING_DESCRIPTION,
+    title: `${SITE_NAME} · ${LANDING_TITLE_TR}`,
+    description: LANDING_DESCRIPTION_TR,
     images: [OG_IMAGE],
   },
 }
 
 /**
- * Public marketing page. A signed-in operator has no use for it, so they are
- * sent straight to the board they actually work in — the same reasoning that
- * made `/` redirect to `/crm` before this page existed.
+ * Turkish mirror of `/` — see `src/app/(marketing)/page.tsx` for the shared
+ * composition and the landing i18n design doc for why this is a second
+ * static route rather than a `[locale]` dynamic segment.
  */
-export default async function MarketingPage(): Promise<React.ReactElement> {
+export default async function MarketingPageTurkish(): Promise<React.ReactElement> {
   const supabase = await createServerClient()
   const { data } = await supabase.auth.getUser()
   if (data.user) redirect('/crm')
 
-  return <LandingPage locale="en" />
+  return <LandingPage locale="tr" />
 }

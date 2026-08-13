@@ -1,8 +1,11 @@
 import { ArrowUpRight } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
 import { cn } from '@/lib/utils'
+import type { AppLocale } from '@/types/i18n'
 import { BOOKING_URL } from './constants'
 
 interface BookMeetingButtonProps {
+  readonly locale: AppLocale
   size?: 'md' | 'lg'
   className?: string
 }
@@ -24,10 +27,13 @@ const NESTED_SIZE_CLASSES: Record<'md' | 'lg', string> = {
  *
  * Opens the scheduler in a new tab, so a half-read page is never lost.
  */
-export function BookMeetingButton({
+export async function BookMeetingButton({
+  locale,
   size = 'md',
   className,
-}: BookMeetingButtonProps): React.ReactElement {
+}: BookMeetingButtonProps): Promise<React.ReactElement> {
+  const t = await getTranslations({ locale, namespace: 'marketing.bookMeetingButton' })
+
   return (
     <a
       href={BOOKING_URL}
@@ -42,7 +48,7 @@ export function BookMeetingButton({
         className,
       )}
     >
-      Book a meeting
+      {t('label')}
       <span
         aria-hidden
         className={cn(

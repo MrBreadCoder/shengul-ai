@@ -7,8 +7,11 @@
  * to stay reachable — both worth a test rather than a careful read.
  */
 
-/** Matched exactly. `startsWith('/')` would make the entire app public. */
-const EXACT_PUBLIC_PATHS: readonly string[] = ['/', '/legal']
+/**
+ * Matched exactly. `startsWith('/')` would make the entire app public.
+ * `/tr` is the Turkish mirror of `/` — see the landing i18n design doc.
+ */
+const EXACT_PUBLIC_PATHS: readonly string[] = ['/', '/legal', '/tr']
 
 /**
  * Matched as prefixes.

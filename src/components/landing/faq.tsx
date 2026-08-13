@@ -1,20 +1,30 @@
 import { Plus } from '@phosphor-icons/react/dist/ssr'
+import { getTranslations } from 'next-intl/server'
+import type { AppLocale } from '@/types/i18n'
 import { BookMeetingButton } from './book-meeting-button'
-import { FAQ_ITEMS } from './faq-items'
 import { Reveal } from './reveal'
 
-export function Faq(): React.ReactElement {
+interface FaqItem {
+  readonly question: string
+  readonly answer: string
+}
+
+export async function Faq({ locale }: { locale: AppLocale }): Promise<React.ReactElement> {
+  const t = await getTranslations({ locale, namespace: 'marketing.faq' })
+  // Safe per the same reasoning as `hero.tsx`'s `t.raw()` call — see there.
+  const items = t.raw('items') as readonly FaqItem[]
+
   return (
     <section className="px-4 py-28 md:py-32">
       <div className="mx-auto grid max-w-[1180px] gap-12 lg:grid-cols-12">
         <Reveal className="lg:col-span-4">
           <h2 className="text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.4rem]">
-            The things people ask before saying yes.
+            {t('heading')}
           </h2>
         </Reveal>
 
         <div className="lg:col-span-7 lg:col-start-6">
-          {FAQ_ITEMS.map(({ question, answer }, index) => (
+          {items.map(({ question, answer }, index) => (
             <Reveal key={question} delay={index * 0.04}>
               <details className="group border-b border-[var(--l-hairline)] py-6 last:border-b-0">
                 <summary className="flex cursor-pointer list-none items-start justify-between gap-6 text-[17px] font-medium tracking-tight [&::-webkit-details-marker]:hidden">
@@ -34,7 +44,7 @@ export function Faq(): React.ReactElement {
 
           <Reveal delay={0.2}>
             <div className="mt-12">
-              <BookMeetingButton size="lg" />
+              <BookMeetingButton locale={locale} size="lg" />
             </div>
           </Reveal>
         </div>

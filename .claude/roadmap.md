@@ -5364,3 +5364,165 @@ string got a real English and a real Turkish translation
    mid-warmup client.
 4. Trigger a real report generation and confirm the warmup email/panel
    framing appears when `emailsSent` is 0.
+
+## Landing Turkish i18n + language switcher — Tasks 1–6 — 2026-08-13
+
+Implemented from `docs/superpowers/specs/2026-08-13-landing-turkish-i18n-design.md`
++ `docs/superpowers/plans/2026-08-13-landing-turkish-i18n.md`, tasks 1–6 (the
+detection/routing/API plumbing + full bilingual content + locale-aware SEO;
+the actual `/tr` route and landing-component translation wiring — tasks 7+ —
+not yet done). Executed inline in-session (TDD steps from the plan: write
+failing test → verify fail → implement → verify pass), commits skipped per
+instruction — nothing has been committed yet, working tree only.
+
+1. **`src/lib/i18n/resolve-locale.ts`**: `isSupportedLocale` and
+   `parseAcceptLanguage` exported (were module-private) for reuse by the new
+   marketing-locale resolver, with 6 new direct unit tests.
+2. **New `src/lib/i18n/resolve-marketing-locale.ts`**: `resolveMarketingLocale`
+   (cookie → Vercel geo-IP `x-vercel-ip-country: TR` → `Accept-Language` →
+   `en` fallback, in that priority) + the `marketing_locale` cookie name
+   constant, for anonymous visitors only — deliberately not reusing the
+   session-based `resolveLocale`.
+3. **`middleware.ts`**: redirects `pathname === '/'` to `/tr` when
+   `resolveMarketingLocale` resolves to `'tr'`; `/tr` itself is never
+   redirected away from. `src/lib/auth/public-paths.ts` gained `/tr` as an
+   exact public path.
+4. **New `src/app/api/locale/route.ts`**: `GET /api/locale?locale=en|tr` —
+   validates with the existing `localeSchema`, sets the `marketing_locale`
+   cookie (1yr, httpOnly, sameSite=lax) and 307s to `/` or `/tr`; invalid/
+   missing locale → 400, no cookie set. This is the target the footer
+   language switcher (task 7) will link to.
+5. **`src/messages/en.json` / `tr.json`**: new top-level `marketing`
+   namespace — nav, footer, hero, outcomePanel, outcomes, theGrind,
+   howItWorks, capabilities, safeguards, privacy, faq (items as `t.raw()`
+   arrays), closingCta. Full real Turkish translation throughout, no
+   English fallback text. No code reads these keys yet (task 7+) — pure
+   data addition.
+6. **SEO**: `src/lib/seo/site.ts` gained `LANDING_TITLE_TR` /
+   `LANDING_DESCRIPTION_TR` / `SITE_SUMMARY_TR`. `src/lib/seo/json-ld.ts`'s
+   `buildLandingJsonLd()` now takes required `pagePath`/`locale`/`summary`
+   instead of implicitly always building English data for `/` — breaking
+   change, `src/app/(marketing)/page.tsx`'s call site updated in the same
+   batch (`pagePath: '/', locale: 'en', summary: SITE_SUMMARY`) purely to
+   keep typecheck green; its full `/tr`-aware rework is still task 7.
+   `src/app/sitemap.ts` gained a `/tr` entry.
+
+**Verified:** `pnpm typecheck` clean, `pnpm lint` clean (only 9 pre-existing
+warnings, none in touched files), full `pnpm test` — 218 files / 2379 tests,
+all passing. `en.json`/`tr.json` key-parity + non-empty-string checks pass.
+
+**Not done yet (plan tasks 7+):** the actual `/tr` route + shared
+`LandingPage` composition, converting every landing component
+(`Hero`…`ClosingCta`, `SiteNav`, `SiteFooter`, `BookMeetingButton`) to
+`getTranslations`, the footer language switcher UI, and hreflang/canonical
+metadata on `/` and `/tr`.
+
+## Landing Turkish i18n + language switcher — Tasks 7–9 — 2026-08-13
+
+Continuation of the entry above — plan tasks 7–9: the `/tr` route stands up
+and renders end-to-end, chrome (nav/footer/CTA button) plus hero, outcomes,
+and the-grind are now fully translated. Executed inline in-session, commits
+skipped per instruction — nothing committed yet, working tree only.
+
+1. **Task 7 — routing + chrome skeleton.** `src/components/landing/constants.ts`:
+   `NAV_LINKS` now carries `labelKey` instead of a hardcoded English `label`.
+   `book-meeting-button.tsx`, `site-nav.tsx` (`copy: SiteNavCopy` prop,
+   pre-resolved server-side — the component stays `'use client'` but never
+   calls `getTranslations` itself, keeping next-intl's runtime out of the
+   client bundle), `site-footer.tsx` (gained `locale` + `showLanguageSwitcher`,
+   renders plain `<a href="/api/locale?locale=…">` links, no client JS) all
+   fully converted. New `src/components/landing/landing-page.tsx` — the
+   shared `<LandingPage locale>` composition (nav copy + FAQ-sourced JSON-LD
+   + all 9 sections + footer) now used by both routes.
+   `src/app/(marketing)/page.tsx` trimmed to metadata + auth guard +
+   `<LandingPage locale="en" />`; new `src/app/(marketing)/tr/page.tsx`
+   mirrors it with Turkish metadata (`LANDING_TITLE_TR`/`_DESCRIPTION_TR`)
+   and `locale="tr"` — inherits the route group's existing
+   `loading.tsx`/`error.tsx`, no new ones needed. `legal/page.tsx` and
+   `legal/[slug]/page.tsx` pass `locale="en"` to `SiteFooter`, no switcher,
+   otherwise byte-identical. All 9 body-section components
+   (`Hero`…`ClosingCta`) gained a `locale: AppLocale` prop and thread it to
+   their own `BookMeetingButton` call.
+   Out-of-plan fix needed to keep `pnpm typecheck` green: the plan's file
+   list missed `src/components/legal/legal-chrome.tsx`'s `LegalHeader`,
+   which also calls `BookMeetingButton` — updated to `locale="en"`, same
+   reasoning as the two legal pages.
+2. **Task 8 — Hero + OutcomePanel.** `outcome-panel.tsx`: hardcoded
+   `MEETING_POOL` module constant and English strings replaced by a
+   `copy: OutcomePanelCopy` prop (new exported `BookedMeeting`/
+   `OutcomePanelCopy` types); the rolling-timer logic itself (`poolAt`,
+   `useRollingMeetings`) now takes the pool as a parameter instead of
+   closing over a module constant. `hero.tsx`: resolves both
+   `marketing.hero` and `marketing.outcomePanel` via `getTranslations`
+   (`buildOutcomePanelCopy` helper), passes the resolved copy down.
+3. **Task 9 — Outcomes + TheGrind.** Both rewritten to read
+   `marketing.outcomes`/`marketing.theGrind` via `getTranslations`,
+   `t.raw('items')`/`t.raw('costs')` for the array content, glyphs kept as a
+   fixed-order local array matched to message index (not stored in
+   messages — icons aren't translatable content).
+
+**Verified:** `pnpm typecheck` clean, `pnpm lint` clean (same 9 pre-existing
+warnings, none in touched files), full `pnpm test` — 218 files / 2379 tests
+unchanged and all passing, and `pnpm build` succeeds — `/tr` appears in the
+route list alongside `/`, confirming the new route actually compiles and
+prerenders correctly (this is the step the plan calls out as the one that
+would catch a missed prop or bad import that typecheck/lint alone might
+not).
+
+**Not done yet (plan tasks 10–13):** HowItWorks, Capabilities, Safeguards,
+Privacy, Faq (+ deleting `faq-items.ts`), and ClosingCta still render
+hardcoded English body copy on `/tr` — chrome and the first three sections
+are Turkish, the rest of the page is not yet.
+
+## Landing Turkish i18n + language switcher — Tasks 10–13, feature complete — 2026-08-13
+
+Continuation of the two entries above — plan tasks 10–13, completing the
+whole plan (77/77 checkboxes). Every section on `/tr` now renders in
+Turkish; `/` is untouched. Executed inline in-session, commits skipped per
+instruction — nothing committed yet, working tree only.
+
+1. **Task 10 — HowItWorks + Capabilities.** Both rewritten to read
+   `marketing.howItWorks`/`marketing.capabilities` via `getTranslations`,
+   `t.raw('movements')`/`t.raw('reliefs')` for array content, `t.rich()` for
+   the inline `<link>` to `#outcomes` in HowItWorks's description. Glyphs
+   stay a fixed-order local array matched to message index, same pattern as
+   Task 9.
+2. **Task 11 — Safeguards + Privacy.** Same pattern:
+   `marketing.safeguards`/`marketing.privacy`, `t.raw('promises')`/
+   `t.raw('commitments')`, `t.rich()` for their reciprocal inline links
+   (`#privacy` ↔ `#safeguards`).
+3. **Task 12 — Faq.** `faq.tsx` rewritten to read `marketing.faq` via
+   `getTranslations`/`t.raw('items')`.
+   **Deviation from the plan:** the plan's Step 1 ("confirm nothing else
+   imports `faq-items.ts`") assumed only `faq.tsx` did. In this codebase
+   `src/app/llms.txt/route.ts` and `src/lib/webmcp/marketing-tools.ts`
+   (+ `faq-match.ts`'s `QuestionAnswer` type) also depend on it — both are
+   English-only, agent/crawler-facing machine surfaces, not human
+   client-facing UI. The design doc explicitly keeps `llms.txt` "untouched
+   — out of scope", and the project's own rule is to translate client-facing
+   places only, not machine/operator-facing ones. So `faq-items.ts` was
+   **kept**, unlike the plan's Step 3 ("delete `faq-items.ts`") — it now
+   backs those two English-only consumers while the visible `/tr` accordion
+   reads from the message catalog instead. Nothing else in the plan's
+   Task 12 changed.
+4. **Task 13 — ClosingCta + final verification.** Rewritten to read
+   `marketing.closingCta` via `getTranslations`, `t.rich()` for the
+   `<link>` to `/login` in the footer note.
+
+**Verified:** `pnpm typecheck` clean, `pnpm lint` clean (same 9 pre-existing
+warnings, none in touched files), full `pnpm test` — 218 files / 2379 tests,
+all passing, `pnpm build` succeeds (`/tr` in the route list, same as the
+prior checkpoint).
+
+**Not independently re-verified in a browser** (no `pnpm dev` session run
+in this environment) — the plan's Step 4 manual-check items (Turkish
+accordion + matching `FAQPage` JSON-LD text, footer switcher round-trip,
+`curl` geo-redirect, `/sitemap.xml` listing both URLs, hreflang tags in
+page source) rely on typecheck/lint/test/build passing as a proxy; a real
+browser/curl pass against `pnpm dev` would still be worth doing before
+shipping to production.
+
+**Out of scope, unchanged, per the design doc's own phasing (§2):** the 7
+legal documents under `/legal/*` stay English-only — not a gap, a
+deliberate decision (mistranslating GDPR/CCPA-grade legal text needs a
+qualified Turkish-speaking legal reviewer, not a coding-agent pass).

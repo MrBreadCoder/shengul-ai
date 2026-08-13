@@ -1,7 +1,21 @@
-import { type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
+import { resolveMarketingLocale } from '@/lib/i18n/resolve-marketing-locale'
 import { updateSession } from '@/lib/supabase/middleware'
 
+/**
+ * The marketing home page is the only route this project serves in more
+ * than one language at its own URL (`/tr` — see the landing i18n design
+ * doc). A visitor requesting the unprefixed `/` who resolves to Turkish is
+ * redirected there before anything else runs; `/tr` itself is never
+ * redirected away from, and every other path is untouched.
+ */
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+  if (pathname === '/' && resolveMarketingLocale(request) === 'tr') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/tr'
+    return NextResponse.redirect(url)
+  }
   return updateSession(request)
 }
 

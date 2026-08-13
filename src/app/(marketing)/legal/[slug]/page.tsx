@@ -68,7 +68,7 @@ export default async function LegalPage({ params }: LegalPageProps): Promise<Rea
       <main>
         <LegalDocumentView document={document} />
       </main>
-      <SiteFooter />
+      <SiteFooter locale="en" />
     </div>
   )
 }
