@@ -1,6 +1,8 @@
 import type { Icon } from '@phosphor-icons/react'
 import { ChartLineUp, Power, ShieldCheck } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
@@ -35,7 +37,17 @@ export function Safeguards(): React.ReactElement {
         <div className="rounded-[22px] border border-[var(--l-hairline)] bg-[var(--l-bg)] px-6 py-14 sm:px-12 sm:py-16">
           <Reveal>
             <h2 className="max-w-[24ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-              Protect and grow your email reputation.
+              Protect and grow your{' '}
+              <Highlighter
+                action="box"
+                color={LANDING_HIGHLIGHT_COLOR}
+                strokeWidth={2}
+                padding={6}
+                startDelay={REVEAL_DURATION_MS}
+              >
+                email reputation
+              </Highlighter>
+              .
             </h2>
             <p className="mt-5 max-w-[58ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
               Your emails shouldn&rsquo;t end up in spam. Sending too many at once is what causes

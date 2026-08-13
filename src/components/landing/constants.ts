@@ -20,3 +20,15 @@ export const NAV_LINKS: readonly NavLink[] = [
 
 /** Single motion curve for the whole page. No linear, no ease-in-out. */
 export const LANDING_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1]
+
+/**
+ * Duration of the `Reveal` entrance transition, in ms. Exported so anything
+ * that draws over already-revealed content (e.g. `Highlighter`) can wait for
+ * the transform to settle before taking its position snapshot.
+ */
+export const REVEAL_DURATION_MS = 750
+
+/** Marker stroke color for `Highlighter` on the landing page — the page is
+ *  deliberately monochrome (see hero), so annotations use translucent white
+ *  rather than a new hue. */
+export const LANDING_HIGHLIGHT_COLOR = 'rgba(255, 255, 255, 0.45)'

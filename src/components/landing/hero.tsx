@@ -1,7 +1,13 @@
 import { ArrowDown } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { OutcomePanel } from './outcome-panel'
 import { Reveal } from './reveal'
+
+/** Reveal on this block has a 0.06s stagger delay — wait for that plus the
+ *  reveal transition itself before the highlighter snapshots its position. */
+const HEADLINE_HIGHLIGHT_DELAY_MS = REVEAL_DURATION_MS + 60
 
 /**
  * Asymmetric split hero: the promise on the left, the morning it produces on
@@ -29,14 +35,25 @@ export function Hero(): React.ReactElement {
 
           <Reveal delay={0.06}>
             <h1 className="mt-7 text-[2.75rem] leading-[1.02] font-medium tracking-tighter text-balance sm:text-6xl lg:text-[4.25rem]">
-              We book your meetings. You skip the outbound work.
+              More{' '}
+              <Highlighter
+                action="underline"
+                color={LANDING_HIGHLIGHT_COLOR}
+                strokeWidth={3}
+                padding={4}
+                startDelay={HEADLINE_HIGHLIGHT_DELAY_MS}
+              >
+                qualified meetings
+              </Highlighter>
+              . Less manual prospecting.
             </h1>
           </Reveal>
 
           <Reveal delay={0.12}>
-            <p className="mt-6 max-w-[46ch] text-[15px] leading-relaxed text-[var(--l-muted)] sm:text-base">
-              Tell us who you want to reach. We find them, email them, and pass you the ones who
-              book a call.
+            <p className="mt-6 max-w-[50ch] text-[15px] leading-relaxed text-[var(--l-muted)] sm:text-base">
+              Shengul AI finds your ideal prospects, researches them, creates personalized
+              outreach, follows up automatically, and turns outbound into a predictable sales
+              channel.
             </p>
           </Reveal>
 

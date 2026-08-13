@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
-import { LANDING_EASE } from './constants'
+import { LANDING_EASE, REVEAL_DURATION_MS } from './constants'
 
 interface RevealProps {
   children: ReactNode
@@ -28,7 +28,7 @@ export function Reveal({ children, delay = 0, className }: RevealProps): React.R
       initial={{ opacity: 0, y: 24 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.2 }}
-      transition={{ duration: 0.75, delay, ease: LANDING_EASE }}
+      transition={{ duration: REVEAL_DURATION_MS / 1000, delay, ease: LANDING_EASE }}
     >
       {children}
     </motion.div>

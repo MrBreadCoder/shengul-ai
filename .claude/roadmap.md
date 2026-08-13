@@ -5204,3 +5204,40 @@ shaped precedents (`ALTER TYPE ... ADD VALUE`, the `find_stuck_cases()`
 `UNION ALL` structure) but `supabase db push`/`migration up` needs to run
 for real before the first Gemini-overload case actually exercises this
 path in production.
+
+## Landing hero copy + live-animated outcome panel — 2026-08-13
+
+Requested directly (no spec/plan doc — small, scoped UI change): new hero
+headline/subtext, and the hero's visual (`OutcomePanel`) made to feel "live"
+rather than a static screenshot. User picked the "meetings roll in" option
+of 3 proposed via `AskUserQuestion` (dot pulse only / cycling row highlight
+/ meetings roll in) over `animate-pulse`-only or a pure row-highlight sweep.
+
+- `src/components/landing/hero.tsx`: headline → "More qualified meetings.
+  Less manual prospecting."; subtext → "Shengul AI finds your ideal
+  prospects, researches them, creates personalized outreach, follows up
+  automatically, and turns outbound into a predictable sales channel."
+  (widened `max-w-[46ch]` → `max-w-[50ch]`, the new subtext is longer).
+- `src/components/landing/outcome-panel.tsx` converted to a client
+  component (`useRollingMeetings` hook): an 8-entry illustrative
+  `MEETING_POOL` (was 3, hardcoded) rotates through a 3-row visible window
+  on a 4.5s interval — new row slides in with a brief monochrome highlight
+  flash + "New" tag, oldest row slides out via `motion/react`
+  `AnimatePresence` + `layout`. The "meetings booked" counter ticks up
+  through the pool's 5 extra entries (68→73) then holds, so the number
+  never runs away on a long-open tab. Added a pulsing "Live" badge next to
+  "This month", monochrome (`--l-accent`) to match the page's zero-chroma
+  palette — the existing "Example figures" honesty label is untouched and
+  still visible. `prefers-reduced-motion` (`useReducedMotion`, same
+  contract as `Reveal`) disables the interval and the highlight/badge
+  entirely, rendering the original static first-three-rows/68 view.
+- Not a DB-backed or business-logic change (illustrative marketing data,
+  same as before) — no new tests added, consistent with this component's
+  prior "Critical paths only" status and the 2026-08-07 landing-copy-
+  simplification precedent (no tests for landing-page-only changes).
+
+Verified: `tsc --noEmit` clean (project-wide), `eslint` clean on both
+touched files and the full `landing/` directory. Not verified: no manual
+in-browser render — no dev server in this environment; the 4.5s interval,
+row roll animation, and reduced-motion fallback are unexercised by any
+automated check.

@@ -1,6 +1,8 @@
 import { Clock, Eye, Newspaper, User } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { cn } from '@/lib/utils'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { Reveal } from './reveal'
 
 /** The three jobs that stop landing on your desk. */
@@ -56,7 +58,17 @@ export function Capabilities(): React.ReactElement {
             <Tile isFeature className="h-full">
               <Clock weight="light" aria-hidden className="mb-6 size-6 text-[var(--l-muted)]" />
               <h3 className="max-w-[16ch] text-xl font-medium tracking-tight sm:text-2xl">
-                Get two hours back every day, and meetings on your calendar.
+                Get{' '}
+                <Highlighter
+                  action="underline"
+                  color={LANDING_HIGHLIGHT_COLOR}
+                  strokeWidth={2.5}
+                  padding={3}
+                  startDelay={REVEAL_DURATION_MS}
+                >
+                  two hours back every day
+                </Highlighter>
+                , and meetings on your calendar.
               </h3>
               <p className="mt-4 max-w-[44ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
                 The time you used to spend on lists and rewritten emails now goes to people who

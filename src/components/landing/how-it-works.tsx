@@ -1,6 +1,8 @@
 import type { Icon } from '@phosphor-icons/react'
 import { CalendarCheck, ChatsCircle, Crosshair, PenNib } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { InlineLink } from './inline-link'
 import { Reveal } from './reveal'
 
@@ -45,7 +47,17 @@ export function HowItWorks(): React.ReactElement {
           <div className="lg:sticky lg:top-32">
             <Reveal>
               <h2 className="text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-                Four steps. You only do two of them.
+                Four steps. You only do{' '}
+                <Highlighter
+                  action="circle"
+                  color={LANDING_HIGHLIGHT_COLOR}
+                  strokeWidth={2}
+                  padding={5}
+                  startDelay={REVEAL_DURATION_MS}
+                >
+                  two of them
+                </Highlighter>
+                .
               </h2>
               <p className="mt-5 max-w-[38ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
                 Nothing to learn, nothing to check every morning. You start it and show up to the

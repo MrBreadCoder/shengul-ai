@@ -5,8 +5,14 @@ import {
   MagnifyingGlass,
   PaperPlaneTilt,
 } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { Reveal } from './reveal'
+
+/** These headlines sit in `Reveal` blocks with no extra stagger delay — wait
+ *  out the reveal transition before the highlighter snapshots its position. */
+const HEADLINE_HIGHLIGHT_DELAY_MS = REVEAL_DURATION_MS
 
 interface Outcome {
   readonly value: string
@@ -61,7 +67,16 @@ export function Outcomes(): React.ReactElement {
       <div className="mx-auto max-w-[1180px]">
         <Reveal>
           <h2 className="max-w-[20ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            Four numbers we track. One you close.
+            Four numbers we track.{' '}
+            <Highlighter
+              action="circle"
+              color={LANDING_HIGHLIGHT_COLOR}
+              strokeWidth={2}
+              padding={6}
+              startDelay={HEADLINE_HIGHLIGHT_DELAY_MS}
+            >
+              One you close.
+            </Highlighter>
           </h2>
           <p className="mt-5 max-w-[58ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
             Everything here is meant to grow that fourth number. These are example figures for one
@@ -87,7 +102,18 @@ export function Outcomes(): React.ReactElement {
         <Reveal delay={0.2}>
           <div className="mt-16 rounded-[28px] border border-[var(--l-hairline)] bg-[color-mix(in_oklch,white_3%,transparent)] p-1.5">
             <div className="rounded-[22px] border border-[var(--l-hairline)] bg-[var(--l-surface)] px-6 py-8 sm:px-10 sm:py-10">
-              <p className="text-lg font-medium tracking-tight">The fifth number is yours.</p>
+              <p className="text-lg font-medium tracking-tight">
+                The fifth number is{' '}
+                <Highlighter
+                  action="highlight"
+                  color={LANDING_HIGHLIGHT_COLOR}
+                  padding={2}
+                  startDelay={REVEAL_DURATION_MS + 200}
+                >
+                  yours
+                </Highlighter>
+                .
+              </p>
               <p className="mt-3 max-w-[64ch] text-[15px] leading-relaxed text-[var(--l-muted)]">
                 {REVENUE_EXAMPLE.meetings} meetings, a {REVENUE_EXAMPLE.averageDeal} average deal,
                 and a {REVENUE_EXAMPLE.closeRate} close rate adds up to{' '}

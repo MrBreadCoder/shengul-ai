@@ -1,5 +1,7 @@
 import { X } from '@phosphor-icons/react/dist/ssr'
+import { Highlighter } from '@/components/ui/highlighter'
 import { BookMeetingButton } from './book-meeting-button'
+import { LANDING_HIGHLIGHT_COLOR, REVEAL_DURATION_MS } from './constants'
 import { Reveal } from './reveal'
 
 /** What the four numbers cost when you produce them by hand. */
@@ -16,7 +18,17 @@ export function TheGrind(): React.ReactElement {
       <div className="mx-auto max-w-[1180px]">
         <Reveal>
           <h2 className="max-w-[24ch] text-[2rem] leading-[1.08] font-medium tracking-tight text-balance sm:text-[2.6rem]">
-            Doing this yourself takes hours and rarely pays off.
+            Doing this yourself takes hours and{' '}
+            <Highlighter
+              action="underline"
+              color={LANDING_HIGHLIGHT_COLOR}
+              strokeWidth={3}
+              padding={4}
+              startDelay={REVEAL_DURATION_MS}
+            >
+              rarely pays off
+            </Highlighter>
+            .
           </h2>
         </Reveal>
 
