@@ -63,7 +63,8 @@
     "warmupBanner": {
       "title": "Building your sending reputation",
       "progress": "{gated} of {total} mailboxes still warming up",
-      "closest": "Closest to ready: day {elapsed} of {gate}",
+      "dayLabel": "Day",
+      "gateDaysCaption": "{gate}-day warmup",
       "reputation": "Reputation score: {score}",
       "messagesExchanged": "{count} messages exchanged so far",
       "viewDetails": "View mailbox details"

@@ -63,7 +63,8 @@
     "warmupBanner": {
       "title": "E-posta itibarınız oluşturuluyor",
       "progress": "{total} kutudan {gated} tanesi hâlâ ısınma sürecinde",
-      "closest": "Hazıra en yakın: {gate} günün {elapsed}. günü",
+      "dayLabel": "Gün",
+      "gateDaysCaption": "{gate} günlük ısınma",
       "reputation": "İtibar puanı: {score}",
       "messagesExchanged": "Şu ana kadar {count} e-posta alışverişi yapıldı",
       "viewDetails": "Kutu detaylarını görüntüle"

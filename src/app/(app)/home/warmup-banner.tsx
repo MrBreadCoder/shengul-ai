@@ -17,15 +17,31 @@ export async function WarmupBanner({ mailboxes, gated }: WarmupBannerProps): Pro
   const exchanged = totalMessagesExchanged(gated)
   return (
     <div className="border-hairline bg-surface animate-rise rounded-lg border p-5">
-      <p className="text-sm font-medium">{t('warmupBanner.title')}</p>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {t('warmupBanner.progress', { gated: gated.length, total: mailboxes.length })}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {t('warmupBanner.closest', { elapsed: closest.elapsedDays, gate: closest.gateDays })}
-        {closest.reputationScore !== null ? ' · ' + t('warmupBanner.reputation', { score: closest.reputationScore }) : null}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm">{t('warmupBanner.messagesExchanged', { count: exchanged })}</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{t('warmupBanner.title')}</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {t('warmupBanner.progress', { gated: gated.length, total: mailboxes.length })}
+          </p>
+          {closest.reputationScore !== null ? (
+            <p className="text-muted-foreground mt-1 text-sm">
+              {t('warmupBanner.reputation', { score: closest.reputationScore })}
+            </p>
+          ) : null}
+          <p className="text-muted-foreground mt-1 text-sm">{t('warmupBanner.messagesExchanged', { count: exchanged })}</p>
+        </div>
+        {/* The day counter is the headline number here — it's the one thing
+            a client actually wants to check at a glance ("how much longer
+            until outreach starts"), so it gets StatTile-sized digits instead
+            of sitting inline with the rest of the copy. */}
+        <div className="shrink-0 text-right">
+          <p className="text-muted-foreground text-xs">{t('warmupBanner.dayLabel')}</p>
+          <p className="tnum text-5xl leading-none font-semibold tracking-tight">{closest.elapsedDays}</p>
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            {t('warmupBanner.gateDaysCaption', { gate: closest.gateDays })}
+          </p>
+        </div>
+      </div>
       <Link href="/settings" className="text-primary mt-3 inline-block text-xs underline underline-offset-2">
         {t('warmupBanner.viewDetails')}
       </Link>
