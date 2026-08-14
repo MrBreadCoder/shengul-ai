@@ -363,6 +363,8 @@ function withinCutoff(datePosted: string, now: Date): boolean {
   const posted = new Date(datePosted)
   if (Number.isNaN(posted.getTime())) return false
   const ageDays = (now.getTime() - posted.getTime()) / (1000 * 60 * 60 * 24)
+  // ageDays >= 0 rejects a future-dated post outright (clock skew or bad
+  // upstream data) rather than silently treating it as maximally "fresh."
   return ageDays >= 0 && ageDays <= MAX_POST_AGE_DAYS
 }
 
@@ -482,7 +484,7 @@ const agentResults = await Promise.allSettled(
 const socialCandidates = await collectSocialKnowledge(
   { clientId: input.clientId, caseId: input.caseId },
   input.companySocials,
-  input.leads.filter((l): l is ResearchLead & { id: string } => l.id !== undefined).map((l) => ({ leadId: l.id, linkedinUrl: l.linkedinUrl, twitterUrl: l.twitterUrl })),
+  input.leads.map((l) => ({ leadId: l.id, linkedinUrl: l.linkedinUrl, twitterUrl: l.twitterUrl })),
 )
 
 const entries: KnowledgeCandidate[] = socialCandidates.map((c) => ({ ...c }))
@@ -498,7 +500,15 @@ for (let i = 0; i < agentResults.length; i += 1) {
 }
 ```
 
-(`collectSocialKnowledge` itself never rejects — §4 — so it sits outside the `allSettled`/failure-counting machinery entirely; `allFailed`/case-status logic below is unchanged and still keyed only on agent roles, matching today's behavior when social scraping finds nothing.)
+(`collectSocialKnowledge` never rejects — §4 — so it sits outside the `allSettled`/failure-counting machinery; `input.leads.map(...)` needs no filter/type-guard here because `ResearchLead.id` is required per §6, not optional.)
+
+**Correctness fix caught in spec self-review:** the original code's early-return guard was `const allFailed = failed === roles.length`, which — unchanged — would discard any social candidates found on a run where every *agent* role happened to fail, even though `entries` (built above) already contains real, insertable social data. The guard's actual intent (per its own comment, research.ts:95-99) is "don't mark ready with an empty/misleading dossier," which social-only success doesn't violate. Fixed condition:
+
+```ts
+const allFailed = failed === roles.length && socialCandidates.length === 0
+```
+
+This preserves today's exact behavior for the pure-agent case (social finds nothing → same as before) while correctly shipping a partial dossier when agents fail but social scraping succeeds. Every other line of the `allFailed` branch and the success path below it is unchanged.
 
 `toRows` gains the two new columns:
 
