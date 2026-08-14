@@ -208,4 +208,42 @@ describe('research route model-overload handling', () => {
 
     expect(handleModelOverloadMock).toHaveBeenCalledWith(expect.objectContaining({ retryCount: 2 }))
   })
+
+  it('should derive companySocials and per-lead id/twitterUrl from leads[0].raw and each lead\'s raw', async () => {
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com' })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: 'v', status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([
+      {
+        id: 'lead1', full_name: 'Jane', title: 'CTO', linkedin_url: 'https://linkedin.com/in/janedoe',
+        raw: { organizationLinkedinUrl: 'https://linkedin.com/company/acme', organizationTwitterUrl: 'https://x.com/acme', twitterUrl: 'https://x.com/janedoe' },
+      },
+    ])
+    runResearchMock.mockResolvedValue({ caseId: CASE_ID, knowledgeCount: 0 })
+
+    await POST(req({ caseId: CASE_ID }))
+
+    expect(runResearchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        companySocials: { linkedinUrl: 'https://linkedin.com/company/acme', twitterUrl: 'https://x.com/acme' },
+        leads: [{ id: 'lead1', fullName: 'Jane', title: 'CTO', linkedinUrl: 'https://linkedin.com/in/janedoe', twitterUrl: 'https://x.com/janedoe' }],
+      }),
+    )
+  })
+
+  it('should default companySocials to all-null when there are no leads on the case', async () => {
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'new', company_name: 'Acme', company_domain: 'acme.com' })
+    getCampaignForCaseMock.mockResolvedValue({ id: 'camp1', value_prop: null, status: 'active' })
+    listActiveLeadsMock.mockResolvedValue([])
+    runResearchMock.mockResolvedValue({ caseId: CASE_ID, knowledgeCount: 0 })
+
+    await POST(req({ caseId: CASE_ID }))
+
+    expect(runResearchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ companySocials: { linkedinUrl: null, twitterUrl: null }, leads: [] }),
+    )
+  })
 })

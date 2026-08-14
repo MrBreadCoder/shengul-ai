@@ -50,6 +50,7 @@ export interface ApolloSearchCandidate {
   organizationName: string | null
   organizationDomain: string | null
   linkedinUrl: string | null
+  twitterUrl: string | null
 }
 
 export interface ApolloEnrichedPerson {
@@ -60,6 +61,7 @@ export interface ApolloEnrichedPerson {
   email: string | null
   emailStatus: string | null
   linkedinUrl: string | null
+  twitterUrl: string | null
   organizationName: string | null
   organizationDomain: string | null
   organizationIndustry: string | null
@@ -69,4 +71,10 @@ export interface ApolloEnrichedPerson {
   organizationCity: string | null
   organizationState: string | null
   organizationCountry: string | null
+  organizationLinkedinUrl: string | null
+  organizationTwitterUrl: string | null
+  organizationRevenue: number | null
+  organizationHeadcountGrowth6Month: number | null
+  organizationHeadcountGrowth12Month: number | null
+  organizationHeadcountGrowth24Month: number | null
 }

@@ -12,7 +12,7 @@ import { isAppError } from '@/lib/errors/app-error'
 import { isModelOverloadedError } from '@/lib/llm/client'
 import { handleModelOverload } from '@/lib/pipeline/overload-retry'
 import { logError } from '@/lib/events/log-event'
-import { parseCompanyFirmographicsFromRaw } from '@/lib/apollo/format-company-summary'
+import { parseCompanyFirmographicsFromRaw, parseCompanySocialsFromRaw, parsePersonSocialsFromRaw } from '@/lib/apollo/format-company-summary'
 
 export const runtime = 'nodejs'
 
@@ -53,6 +53,7 @@ export async function POST(request: Request) {
     // Every active lead on a case shares one company, so any lead's `raw`
     // carries the same Apollo org match — the first lead is enough.
     const companyFirmographics = leads[0] ? parseCompanyFirmographicsFromRaw(leads[0].raw) : null
+    const companySocials = leads[0] ? parseCompanySocialsFromRaw(leads[0].raw) : { linkedinUrl: null, twitterUrl: null }
     // Missing client row never blocks research — same "degrade, don't
     // fail" stance write.ts takes for the same lookup — the agent just gets
     // less to filter against (sellerContextLine omits itself when every
@@ -69,7 +70,11 @@ export async function POST(request: Request) {
           companyName: kase.company_name,
           companyDomain: kase.company_domain,
           companyFirmographics,
-          leads: leads.map((l) => ({ fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url })),
+          companySocials,
+          leads: leads.map((l) => {
+            const { twitterUrl } = parsePersonSocialsFromRaw(l.raw)
+            return { id: l.id, fullName: l.full_name, title: l.title, linkedinUrl: l.linkedin_url, twitterUrl }
+          }),
           seller: {
             name: client?.name ?? null,
             companyInfo: client?.company_info ?? null,

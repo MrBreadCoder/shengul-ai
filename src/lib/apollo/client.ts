@@ -34,6 +34,12 @@ const organizationSchema = z.object({
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
   country: z.string().nullable().optional(),
+  linkedin_url: z.string().nullable().optional(),
+  twitter_url: z.string().nullable().optional(),
+  organization_revenue: z.number().nullable().optional(),
+  organization_headcount_six_month_growth: z.number().nullable().optional(),
+  organization_headcount_twelve_month_growth: z.number().nullable().optional(),
+  organization_headcount_twenty_four_month_growth: z.number().nullable().optional(),
 }).nullable().optional()
 
 function domainFromOrg(org: z.infer<typeof organizationSchema>): string | null {
@@ -56,6 +62,7 @@ const searchPersonSchema = z.object({
   last_name_obfuscated: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
   linkedin_url: z.string().nullable().optional(),
+  twitter_url: z.string().nullable().optional(),
   organization: organizationSchema,
 }).passthrough()
 
@@ -81,6 +88,7 @@ export async function searchPeople(
     organizationName: p.organization?.name ?? null,
     organizationDomain: domainFromOrg(p.organization),
     linkedinUrl: p.linkedin_url ?? null,
+    twitterUrl: p.twitter_url ?? null,
   }))
   return { totalEntries: res.total_entries ?? candidates.length, candidates }
 }
@@ -91,6 +99,7 @@ const enrichedPersonSchema = z.object({
   last_name: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
   linkedin_url: z.string().nullable().optional(),
+  twitter_url: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
   email_status: z.string().nullable().optional(),
   contact_emails: z.array(z.object({
@@ -153,6 +162,7 @@ export async function bulkMatchPeople(details: BulkMatchDetail[]): Promise<Apoll
       email,
       emailStatus,
       linkedinUrl: p.linkedin_url ?? null,
+      twitterUrl: p.twitter_url ?? null,
       organizationName: p.organization?.name ?? null,
       organizationDomain: domainFromOrg(p.organization),
       organizationIndustry: p.organization?.industry ?? null,
@@ -162,6 +172,12 @@ export async function bulkMatchPeople(details: BulkMatchDetail[]): Promise<Apoll
       organizationCity: p.organization?.city ?? null,
       organizationState: p.organization?.state ?? null,
       organizationCountry: p.organization?.country ?? null,
+      organizationLinkedinUrl: p.organization?.linkedin_url ?? null,
+      organizationTwitterUrl: p.organization?.twitter_url ?? null,
+      organizationRevenue: p.organization?.organization_revenue ?? null,
+      organizationHeadcountGrowth6Month: p.organization?.organization_headcount_six_month_growth ?? null,
+      organizationHeadcountGrowth12Month: p.organization?.organization_headcount_twelve_month_growth ?? null,
+      organizationHeadcountGrowth24Month: p.organization?.organization_headcount_twenty_four_month_growth ?? null,
     }
   })
 }

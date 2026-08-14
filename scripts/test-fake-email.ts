@@ -161,6 +161,8 @@ function buildFakeKnowledge(): KnowledgeRow[] {
     case_id: 'fake-case-0000-0000-0000-000000000000',
     created_by: 'agent' as const,
     created_at: new Date().toISOString(),
+    lead_id: null,
+    event_date: null,
   }
   return [
     {

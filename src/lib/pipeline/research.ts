@@ -10,6 +10,7 @@ import { publishJson } from '@/lib/qstash/client'
 import { type LlmCallContext } from '@/lib/llm/client'
 import { isAppError } from '@/lib/errors/app-error'
 import type { CompanyFirmographics } from '@/lib/apollo/format-company-summary'
+import { collectSocialKnowledge, type CompanySocialTarget } from '@/lib/pipeline/social-knowledge'
 
 const ACTOR = 'research_agent'
 
@@ -21,6 +22,7 @@ export interface RunResearchInput {
   // Apollo's org match for this case, if discovery captured one — handed to
   // the company research agent as an unverified claim to check, not a fact.
   companyFirmographics: CompanyFirmographics | null
+  companySocials: CompanySocialTarget
   leads: ResearchLead[]
   // Who the research is for and what they sell — passed straight through to
   // every agent call so it can judge fact relevance instead of just ranking
@@ -33,6 +35,10 @@ export interface ResearchSummary {
   caseId: string
   knowledgeCount: number
 }
+
+// Unifies agent-produced entries (never attributed/dated) with social-scrape
+// candidates (always attributed/dated) so toRows can map both through one path.
+type KnowledgeCandidate = AgentDossierEntry & { leadId: string | null; eventDate: string | null }
 
 // Person-level research disabled (2026-08-11): for our current ICP (school
 // finance/business/procurement admin staff) the agent almost never finds a
@@ -61,7 +67,7 @@ function buildRoles(input: RunResearchInput): ResearchAgentRole[] {
   return [company, ...people]
 }
 
-function toRows(input: RunResearchInput, entries: AgentDossierEntry[]): KnowledgeInsert[] {
+function toRows(input: RunResearchInput, entries: KnowledgeCandidate[]): KnowledgeInsert[] {
   return entries.map((entry) => ({
     client_id: input.clientId,
     case_id: input.caseId,
@@ -70,6 +76,8 @@ function toRows(input: RunResearchInput, entries: AgentDossierEntry[]): Knowledg
     source_url: entry.sourceUrl,
     citation: entry.citation,
     created_by: 'agent',
+    lead_id: entry.leadId,
+    event_date: entry.eventDate,
   }))
 }
 
@@ -105,24 +113,32 @@ export async function runResearchForCase(
   const roles = buildRoles(input)
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
 
-  const results = await Promise.allSettled(
+  const agentResults = await Promise.allSettled(
     roles.map((role) => runResearchAgent(context, deps, { role, seller: input.seller })),
   )
+  const socialCandidates = await collectSocialKnowledge(
+    { clientId: input.clientId, caseId: input.caseId },
+    input.companySocials,
+    input.leads.map((l) => ({ leadId: l.id, linkedinUrl: l.linkedinUrl, twitterUrl: l.twitterUrl })),
+  )
 
-  const entries: AgentDossierEntry[] = []
+  const entries: KnowledgeCandidate[] = socialCandidates.map((c) => ({ ...c }))
   let failed = 0
-  for (let i = 0; i < results.length; i += 1) {
-    const result = results[i]
+  for (let i = 0; i < agentResults.length; i += 1) {
+    const result = agentResults[i]
     if (result && result.status === 'fulfilled') {
-      entries.push(...result.value)
+      entries.push(...result.value.map((e) => ({ ...e, leadId: null, eventDate: null })))
     } else if (result) {
       failed += 1
-      // roles[i] is guaranteed to exist: results has one entry per role.
+      // roles[i] is guaranteed to exist: agentResults has one entry per role.
       await logAgentFailure(input, roles[i]!, result.reason)
     }
   }
 
-  const allFailed = failed === roles.length
+  // failed === roles.length alone would discard real social-only results —
+  // the guard's actual intent is "don't mark ready with an empty/misleading
+  // dossier," which social-only success doesn't violate.
+  const allFailed = failed === roles.length && socialCandidates.length === 0
   if (allFailed) {
     await logEventSafe({
       clientId: input.clientId,

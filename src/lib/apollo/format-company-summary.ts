@@ -42,6 +42,27 @@ export function parseCompanyFirmographicsFromRaw(raw: Json): CompanyFirmographic
   }
 }
 
+const rawCompanySocialsSchema = z.object({
+  organizationLinkedinUrl: z.string().nullable().optional(),
+  organizationTwitterUrl: z.string().nullable().optional(),
+}).passthrough()
+
+export function parseCompanySocialsFromRaw(raw: Json): { linkedinUrl: string | null; twitterUrl: string | null } {
+  const parsed = rawCompanySocialsSchema.safeParse(raw)
+  if (!parsed.success) return { linkedinUrl: null, twitterUrl: null }
+  return { linkedinUrl: parsed.data.organizationLinkedinUrl ?? null, twitterUrl: parsed.data.organizationTwitterUrl ?? null }
+}
+
+const rawPersonSocialsSchema = z.object({
+  twitterUrl: z.string().nullable().optional(),
+}).passthrough()
+
+export function parsePersonSocialsFromRaw(raw: Json): { twitterUrl: string | null } {
+  const parsed = rawPersonSocialsSchema.safeParse(raw)
+  if (!parsed.success) return { twitterUrl: null }
+  return { twitterUrl: parsed.data.twitterUrl ?? null }
+}
+
 function ensureSentence(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`
 }

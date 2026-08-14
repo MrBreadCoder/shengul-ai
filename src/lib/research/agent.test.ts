@@ -54,7 +54,7 @@ describe('runResearchAgent', () => {
       seller,
       role: {
         kind: 'person',
-        lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null },
+        lead: { id: 'lead1', fullName: 'Jane Doe', title: 'CTO', linkedinUrl: null, twitterUrl: null },
         companyName: 'Acme',
         companyDomain: 'acme.com',
       },
@@ -125,7 +125,7 @@ describe('runResearchAgent', () => {
       seller,
       role: {
         kind: 'person',
-        lead: { fullName: 'Jane Doe', title: 'CTO', linkedinUrl: 'https://linkedin.com/in/janedoe' },
+        lead: { id: 'lead1', fullName: 'Jane Doe', title: 'CTO', linkedinUrl: 'https://linkedin.com/in/janedoe', twitterUrl: null },
         companyName: 'Acme',
         companyDomain: 'acme.com',
       },

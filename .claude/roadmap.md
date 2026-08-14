@@ -6057,3 +6057,174 @@ filtering, and `AppError` handling.
 
 **Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
 `vitest run src/lib/pipeline` — 18 files, 258 tests, all green (1 new).
+
+## Person + company social scraping (LinkedIn/X) — Tasks 1–6 — 2026-08-14
+
+**Trigger:** implementing `docs/superpowers/plans/2026-08-14-social-scraping.md`
+(spec: `docs/superpowers/specs/2026-08-14-social-scraping-design.md`) —
+acquisition + the minimal `write.ts` consumption fix for genuinely fresh,
+per-lead facts sourced from Bright Data LinkedIn/X post scraping, keyed to
+Apollo-verified profile URLs so attribution is safe by construction.
+Executed inline in this session (no subagent dispatch), commits skipped
+per instruction — working tree is uncommitted.
+
+Tasks 1–6 done; **Tasks 7–9 (wiring into `research.ts`/`provider.ts`,
+`route.ts` passthrough, and final full-suite verification) remain.**
+
+- **Task 1** — `supabase/migrations/0044_case_knowledge_attribution.sql`:
+  adds `case_knowledge.lead_id` (nullable FK → `leads`, `on delete set
+  null`) and `.event_date` (nullable timestamptz), plus a partial index on
+  `lead_id`. `src/types/database.ts`'s `case_knowledge` Row/Insert widened
+  to match. Local migration apply/diff couldn't be verified in this
+  environment — no Docker daemon running (`pnpm supabase db diff` fails at
+  "Cannot connect to the Docker daemon"); the SQL follows the same FK/index
+  conventions as every prior migration in this repo, but a `pnpm supabase
+  db reset` check is still owed before this ships.
+  - Fixed 2 typecheck breaks the new required Row fields caused that the
+    plan hadn't accounted for: `scripts/test-fake-email.ts`'s
+    `buildFakeKnowledge` fixture and `write.test.ts`'s `knowledgeRow()`
+    helper both construct full `KnowledgeRow` literals — added `lead_id:
+    null, event_date: null` to both.
+- **Task 2 (the safety fix)** — `write.ts`'s `runWriteForCase` now filters
+  `case_knowledge` per lead before prompting: `(k.lead_id ?? null) === null
+  || k.lead_id === lead.id`. This is the fix that makes storing
+  `lead_id`-tagged rows safe — a person-level fact can no longer leak into
+  another lead's dossier. Regression test: two leads sharing one case, one
+  `lead_id`-tagged row each plus one company-wide row → each lead's prompt
+  gets the company row and only its own person row.
+- **Task 3** — Apollo schema widening at zero extra cost: `client.ts`'s
+  `organizationSchema`/`searchPersonSchema`/`enrichedPersonSchema` now
+  capture `twitter_url` (person + org), `linkedin_url` (org), and org
+  revenue/headcount-growth (6/12/24-month). `ApolloSearchCandidate`/
+  `ApolloEnrichedPerson` (`types.ts`) gained the matching camelCase fields.
+- **Task 4** — `format-company-summary.ts` gained
+  `parseCompanySocialsFromRaw`/`parsePersonSocialsFromRaw`, same safe-parse
+  /never-throws pattern as the existing `parseCompanyFirmographicsFromRaw`.
+- **Task 5** — new `src/lib/research/social-scrape.ts`: thin Bright Data
+  Datasets v3 client (`discoverLinkedInPersonPosts`/`CompanyPosts`,
+  `discoverXPersonPosts`/`CompanyPosts`) — trigger → poll (180s timeout,
+  5s interval) → download snapshot, Zod-validated throughout, every path
+  mapped to `AppError`.
+- **Task 6** — new `src/lib/pipeline/social-knowledge.ts`:
+  `collectSocialKnowledge` — deterministic, LLM-free cutoff (hard 90-day
+  discard) + mapping from `ScrapedPost` to a `case_knowledge`-shaped
+  candidate, correctly `leadId`-tagged per source. One failing source is
+  logged (`logEventSafe`) and dropped, never fails the whole collection
+  (`Promise.all` over per-source `safeDiscover` wrappers that never
+  reject).
+
+**Two test bugs found and fixed in the plan's own test code** (both in
+`social-scrape.test.ts`, both real, not hypothetical — reproduced then
+fixed):
+1. `'should poll again when status is running, then succeed once ready'`
+   used real timers with one real 5s `setTimeout` wait — landed exactly at
+   vitest's default 5000ms test timeout and failed. Fixed with
+   `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync(5_000)`, matching
+   the pattern the plan already used for the adjacent timeout test.
+2. The `EXTERNAL_TIMEOUT` test attached `expect(resultPromise).rejects...`
+   only after the timer-advancing loop — the promise can reject mid-loop,
+   before any handler is attached, which raised an unhandled-rejection
+   warning even though the test itself passed. Fixed by binding the
+   `.rejects` assertion to a variable before advancing timers, then
+   awaiting it after.
+
+Also fixed one pre-existing `toEqual` (exact-shape) test each in
+`client.test.ts` (`searchPeople` candidate mapping, `bulkMatchPeople`
+matches-wrapper case) that the schema widening would otherwise have broken
+by omission, and one invalid TS tuple-index cast
+(`[unknown, {prompt:string}][2]` → `[unknown, {prompt:string}][]`) in the
+`write.test.ts` regression test as given in the plan/spec.
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean (0 errors, only
+pre-existing unrelated warnings); full `vitest run` — 221 files, 2480
+tests, all green (26 new: 1 in `write.test.ts`, 3 in `client.test.ts`, 5 in
+`format-company-summary.test.ts`, 9 in new `social-scrape.test.ts`, 8 in
+new `social-knowledge.test.ts`). Migration apply itself not verified (no
+local Docker) — flagged above.
+
+## Person + company social scraping (LinkedIn/X) — Tasks 7–9, feature complete — 2026-08-14
+
+**Trigger:** continuation of the above — same plan/spec, remaining tasks
+(wiring + final verification). Executed inline in this session, commits
+still skipped per instruction — working tree remains uncommitted end to
+end for this feature.
+
+- **Task 7** — `provider.ts`'s `ResearchLead` widened with `id`/
+  `twitterUrl`. `research.ts`: `RunResearchInput` gained `companySocials`;
+  new `KnowledgeCandidate` type (`AgentDossierEntry & { leadId, eventDate
+  }`) unifies agent-produced entries (always `null`/`null`) with social
+  candidates (always attributed/dated) through one `toRows` path.
+  `runResearchForCase` now runs `collectSocialKnowledge` alongside the
+  agent-role `Promise.allSettled`, and the `allFailed` guard was corrected
+  to `failed === roles.length && socialCandidates.length === 0` — the
+  original `failed === roles.length` alone would have discarded genuine
+  social-only results on a run where every *agent* role failed. Fixed the
+  same two now-stale `agent.test.ts` lead fixtures the widened
+  `ResearchLead` broke (`id`/`twitterUrl` added).
+- **Task 8** — `route.ts` now derives `companySocials` via
+  `parseCompanySocialsFromRaw(leads[0].raw)` (same "first lead's raw is
+  enough, every lead on a case shares one company" pattern already used
+  for `companyFirmographics`) and each lead's `twitterUrl` via
+  `parsePersonSocialsFromRaw(l.raw)`, threading `id` straight off the
+  `LeadRow`.
+- **Task 9** — full-suite verification: `tsc --noEmit` clean, `eslint` 0
+  errors, `vitest run` — **221 files, 2486 tests, all green** (6 new: 4 in
+  `research.test.ts`, 2 in `route.test.ts`).
+
+**Still open, not fixable from this environment:** Task 1's migration
+(`0044_case_knowledge_attribution.sql`) has never been applied against a
+real Postgres instance — this sandbox has no Docker daemon
+(`pnpm supabase db diff` fails at "Cannot connect to the Docker daemon").
+The SQL matches every other migration's FK/index conventions in this repo
+and the full test suite (which mocks the DB layer) is green, but an actual
+`pnpm supabase db reset` (or equivalent apply on whatever environment this
+deploys to next) is still owed before this ships. Nothing else from the
+plan remains — all 9 tasks' code and tests are in place, uncommitted.
+
+## Code-review fixes on the social-scraping feature — 2026-08-15
+
+**Trigger:** 4 findings from a code review of the branch above (0044 was
+already applied to the target DB by the user by this point, so DB fixes go
+in a new migration rather than editing 0044).
+
+- **`database.ts`** — `case_knowledge.Relationships` was missing the
+  `case_knowledge_lead_id_fkey` entry 0044 added (`lead_id -> leads.id`),
+  so typed Supabase joins on that FK weren't possible. Added, matching the
+  existing entries' shape.
+- **`social-scrape.ts`** — `progressResponseSchema` only accepted Bright
+  Data's generic Monitor Progress enum (`starting`/`running`/`ready`/
+  `failed`). Confirmed via the Bright Data docs MCP that the per-dataset
+  async guides (LinkedIn, ChatGPT) document a second, different enum
+  (`collecting`/`digesting`/`ready`/`failed`) for the *same*
+  `GET /datasets/v3/progress/{id}` endpoint this module polls — Bright
+  Data's own docs disagree with each other. Extended the enum to accept
+  both vocabularies (safe: only `ready`/`failed` are special-cased, every
+  other value already meant "keep polling"). Added a polling test covering
+  `collecting` → `digesting` → `ready`.
+- **New migration `0045_case_knowledge_lead_attribution_integrity.sql`**
+  (0044 already applied by the user, not edited): (1) 0044's `lead_id` FK
+  had no check that the referenced lead's `case_id`/`client_id` actually
+  matched the `case_knowledge` row — a lead from a different case (or
+  client) could be attributed, and `write.ts`'s `k.lead_id === lead.id`
+  filter would just silently never match instead of failing loudly. Added
+  a `before insert or update` trigger (`security definer`, matching this
+  repo's existing cross-table-validation convention e.g.
+  `set_default_email_style`) that rejects any mismatch via
+  `is distinct from` — plain `<>` would have gone `null` (falsy in
+  plpgsql `if`) whenever the lead lookup came back empty, silently
+  admitting the bad row. (2) `lead_id`'s `on delete set null` meant
+  deleting a lead didn't remove its attributed fact, it nulled the
+  attribution — and `write.ts` treats null `lead_id` as "company-wide,"
+  so the fact would silently resurface as shown to every lead in the case.
+  Dropped and re-added the FK as `on delete cascade` instead. Added
+  `src/lib/db/case-knowledge-attribution.integration.test.ts` (follows the
+  existing `rls.integration.test.ts` live-Supabase pattern) covering:
+  same-case attribution accepted, cross-case attribution rejected, and
+  lead deletion cascading the knowledge row rather than nulling it.
+- Verified: `tsc --noEmit` clean, `eslint` 0 errors on changed files,
+  `vitest run` — **221 files, 2487 tests, all green** (2 new: 1 polling
+  test in `social-scrape.test.ts`, plus the new integration test file
+  which vitest's default config correctly does not collect —
+  `vitest.integration.config.ts` only runs `*.integration.test.ts` files
+  and needs a live Supabase instance to execute, same limitation as
+  0044's own migration noted above).

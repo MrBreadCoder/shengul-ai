@@ -285,6 +285,33 @@ describe('runWriteForCase', () => {
 
     expect(getDefaultEmailStyleMock).toHaveBeenCalled()
   })
+
+  it('should only include a lead_id-tagged knowledge row in the prompt for the lead it belongs to', async () => {
+    const leadA = { ...lead, id: 'lead-a', full_name: 'Jane Doe', email: 'jane@acme.com' }
+    const leadB = { ...lead, id: 'lead-b', full_name: 'Sam Lee', email: 'sam@acme.com' }
+    listActiveLeadsMock.mockResolvedValue([leadA, leadB])
+    listKnowledgeMock.mockResolvedValue([
+      { kind: 'company', content: 'Acme builds workflow automation.', lead_id: null },
+      { kind: 'news', content: "Jane's LinkedIn post about hiring", lead_id: 'lead-a' },
+      { kind: 'news', content: "Sam's LinkedIn post about a new role", lead_id: 'lead-b' },
+    ])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await runWriteForCase({} as never, input)
+
+    expect(generateJsonMock).toHaveBeenCalledTimes(2)
+    // Non-null: toHaveBeenCalledTimes(2) above guarantees both indices exist.
+    const [janeCall, samCall] = generateJsonMock.mock.calls as [unknown, { prompt: string }][]
+    expect(janeCall![1].prompt).toContain("Jane's LinkedIn post about hiring")
+    expect(janeCall![1].prompt).not.toContain("Sam's LinkedIn post about a new role")
+    expect(janeCall![1].prompt).toContain('Acme builds workflow automation.')
+    expect(samCall![1].prompt).toContain("Sam's LinkedIn post about a new role")
+    expect(samCall![1].prompt).not.toContain("Jane's LinkedIn post about hiring")
+    expect(samCall![1].prompt).toContain('Acme builds workflow automation.')
+  })
 })
 
 describe('buildSystemPrompt', () => {
@@ -310,6 +337,7 @@ function knowledgeRow(kind: KnowledgeRow['kind'], content: string): KnowledgeRow
   return {
     id: `k-${kind}`, client_id: 'c1', case_id: 'case1', kind, content,
     source_url: null, citation: null, created_by: 'agent', created_at: '2026-01-01T00:00:00Z',
+    lead_id: null, event_date: null,
   }
 }
 

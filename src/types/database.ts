@@ -300,6 +300,8 @@ export interface Database {
           citation: string | null
           created_by: Database['public']['Enums']['author_kind']
           created_at: string
+          lead_id: string | null
+          event_date: string | null
         }
         Insert: {
           id?: string
@@ -311,6 +313,8 @@ export interface Database {
           citation?: string | null
           created_by?: Database['public']['Enums']['author_kind']
           created_at?: string
+          lead_id?: string | null
+          event_date?: string | null
         }
         Update: Partial<Database['public']['Tables']['case_knowledge']['Insert']>
         Relationships: [
@@ -326,6 +330,13 @@ export interface Database {
             columns: ['case_id']
             isOneToOne: false
             referencedRelation: 'cases'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'case_knowledge_lead_id_fkey'
+            columns: ['lead_id']
+            isOneToOne: false
+            referencedRelation: 'leads'
             referencedColumns: ['id']
           },
         ]

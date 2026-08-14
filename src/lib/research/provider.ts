@@ -5,12 +5,14 @@ export interface WebSnippet {
 }
 
 export interface ResearchLead {
+  id: string
   fullName: string
   title: string | null
   // Apollo's own profile match for this person — a known, precise scrape
   // target, not a claim to trust. See agent.ts's gather prompt: the agent is
   // told to confirm this is the right person before treating it as a source.
   linkedinUrl: string | null
+  twitterUrl: string | null
 }
 
 export interface WebResearch {

@@ -285,7 +285,13 @@ export async function runWriteForCase(
   let sent = 0
   let drafted = 0
   for (const lead of leads) {
-    const outcome = await processLead(supabase, input, lead, knowledge, client)
+    // `k.lead_id ?? null` (not a bare `=== null` check) treats a row that
+    // omits the field entirely the same as one that explicitly has it null —
+    // both existing test fixtures and any case_knowledge row inserted before
+    // this migration lack the key outright, and both mean "company-wide
+    // fact," never "silently excluded."
+    const leadKnowledge = knowledge.filter((k) => (k.lead_id ?? null) === null || k.lead_id === lead.id)
+    const outcome = await processLead(supabase, input, lead, leadKnowledge, client)
     if (outcome === 'sent') sent += 1
     if (outcome === 'drafted') drafted += 1
   }

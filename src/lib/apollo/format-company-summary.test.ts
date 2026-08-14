@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatCompanySummary, type CompanyFirmographics } from './format-company-summary'
+import { formatCompanySummary, parseCompanySocialsFromRaw, parsePersonSocialsFromRaw, type CompanyFirmographics } from './format-company-summary'
 
 const empty: CompanyFirmographics = {
   industry: null, employeeCount: null, foundedYear: null, description: null,
@@ -74,5 +74,37 @@ describe('formatCompanySummary', () => {
     const result = formatCompanySummary('Acme Corp', firmographics)
 
     expect(result).toBe('Acme Corp — Acme builds workflow automation.')
+  })
+})
+
+describe('parseCompanySocialsFromRaw', () => {
+  it('should map organizationLinkedinUrl and organizationTwitterUrl when present', () => {
+    const result = parseCompanySocialsFromRaw({
+      organizationLinkedinUrl: 'https://linkedin.com/company/acme',
+      organizationTwitterUrl: 'https://x.com/acme',
+    })
+    expect(result).toEqual({ linkedinUrl: 'https://linkedin.com/company/acme', twitterUrl: 'https://x.com/acme' })
+  })
+
+  it('should return all-null when the fields are absent', () => {
+    const result = parseCompanySocialsFromRaw({ organizationName: 'Acme' })
+    expect(result).toEqual({ linkedinUrl: null, twitterUrl: null })
+  })
+
+  it('should return all-null (not throw) for a non-object raw value', () => {
+    const result = parseCompanySocialsFromRaw(null)
+    expect(result).toEqual({ linkedinUrl: null, twitterUrl: null })
+  })
+})
+
+describe('parsePersonSocialsFromRaw', () => {
+  it('should map twitterUrl when present', () => {
+    const result = parsePersonSocialsFromRaw({ twitterUrl: 'https://x.com/janedoe' })
+    expect(result).toEqual({ twitterUrl: 'https://x.com/janedoe' })
+  })
+
+  it('should return null when absent', () => {
+    const result = parsePersonSocialsFromRaw({ firstName: 'Jane' })
+    expect(result).toEqual({ twitterUrl: null })
   })
 })

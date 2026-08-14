@@ -43,6 +43,7 @@ describe('searchPeople', () => {
     expect(candidates).toEqual([{
       apolloId: 'p1', firstName: 'Jo', lastNamePreview: 'Do***e', title: 'VP Sales',
       organizationName: 'Acme', organizationDomain: 'acme.com', linkedinUrl: 'https://linkedin.com/in/jo',
+      twitterUrl: null,
     }])
   })
 
@@ -60,6 +61,16 @@ describe('searchPeople', () => {
     mockFetchJson.mockResolvedValueOnce({ total_entries: 0 })
     const { candidates } = await searchPeople({})
     expect(candidates).toEqual([])
+  })
+
+  it('should map twitter_url onto the search candidate', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      total_entries: 1,
+      people: [{ id: 'p8', first_name: 'Al', twitter_url: 'https://x.com/al', organization: { name: 'Beta' } }],
+    })
+    const { candidates } = await searchPeople({})
+    // the mocked response above contains exactly one person
+    expect(candidates[0]!.twitterUrl).toBe('https://x.com/al')
   })
 })
 
@@ -98,10 +109,56 @@ describe('bulkMatchPeople', () => {
     const result = await bulkMatchPeople([{ id: 'p1' }])
     expect(result).toEqual([{
       apolloId: 'p1', firstName: 'Jo', lastName: 'Doe', title: null, email: 'jo@acme.com',
-      emailStatus: 'Verified', linkedinUrl: null, organizationName: 'Acme', organizationDomain: 'acme.com',
+      emailStatus: 'Verified', linkedinUrl: null, twitterUrl: null, organizationName: 'Acme', organizationDomain: 'acme.com',
       organizationIndustry: null, organizationEmployeeCount: null, organizationFoundedYear: null,
       organizationDescription: null, organizationCity: null, organizationState: null, organizationCountry: null,
+      organizationLinkedinUrl: null, organizationTwitterUrl: null, organizationRevenue: null,
+      organizationHeadcountGrowth6Month: null, organizationHeadcountGrowth12Month: null, organizationHeadcountGrowth24Month: null,
     }])
+  })
+
+  it('should map twitter_url and organization social/growth fields from the enriched response', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      matches: [{
+        id: 'p6',
+        twitter_url: 'https://x.com/janedoe',
+        organization: {
+          name: 'Acme', primary_domain: 'acme.com',
+          linkedin_url: 'https://linkedin.com/company/acme',
+          twitter_url: 'https://x.com/acme',
+          organization_revenue: 1_200_000,
+          organization_headcount_six_month_growth: 0.05,
+          organization_headcount_twelve_month_growth: 0.12,
+          organization_headcount_twenty_four_month_growth: 0.30,
+        },
+      }],
+    })
+    const result = await bulkMatchPeople([{ id: 'p6' }])
+    // the mocked response above contains exactly one person
+    expect(result[0]).toMatchObject({
+      twitterUrl: 'https://x.com/janedoe',
+      organizationLinkedinUrl: 'https://linkedin.com/company/acme',
+      organizationTwitterUrl: 'https://x.com/acme',
+      organizationRevenue: 1_200_000,
+      organizationHeadcountGrowth6Month: 0.05,
+      organizationHeadcountGrowth12Month: 0.12,
+      organizationHeadcountGrowth24Month: 0.30,
+    })
+  })
+
+  it('should return null for twitter_url and organization social/growth fields when absent', async () => {
+    mockFetchJson.mockResolvedValueOnce({ matches: [{ id: 'p7' }] })
+    const result = await bulkMatchPeople([{ id: 'p7' }])
+    // the mocked response above contains exactly one person
+    expect(result[0]).toMatchObject({
+      twitterUrl: null,
+      organizationLinkedinUrl: null,
+      organizationTwitterUrl: null,
+      organizationRevenue: null,
+      organizationHeadcountGrowth6Month: null,
+      organizationHeadcountGrowth12Month: null,
+      organizationHeadcountGrowth24Month: null,
+    })
   })
 
   it('should map organization firmographics from the enriched response', async () => {

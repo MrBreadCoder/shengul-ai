@@ -4,7 +4,7 @@ These rules apply to every response. No need to remind Claude — they are alway
 Derived from engineering practices at Google, Stripe, Meta, Netflix, and Amazon.
 
 ---
-# PRINCIPLES.md - SuperClaude Framework Core Principles
+#  - SuperClaude Framework Core Principles
 
 **Primary Directive**: "Evidence > assumptions | Code > documentation | Efficiency > verbosity"
 
