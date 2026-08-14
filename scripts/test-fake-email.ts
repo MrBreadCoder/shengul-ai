@@ -210,6 +210,10 @@ function buildFakeInput(): RunWriteInput {
     bookingLink: 'https://cal.com/vantagerobotics/intro',
     mailboxIds: [],
     companyName: 'Northwind Logistics',
+    signatureName: null,
+    signatureTitle: null,
+    signaturePhone: null,
+    signatureAddress: null,
   }
 }
 

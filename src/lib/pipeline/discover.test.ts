@@ -382,6 +382,37 @@ describe('runDiscoveryForCampaign', () => {
     expect(mockBulkMatchPeople.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: 'p1' })])
   })
 
+  it('should park (not activate) a breadth pick whose enrich-time company resolves onto an already-full existing company', async () => {
+    // Regression test: runBreadthSearch dedupes new-company picks against
+    // each candidate's PRE-enrich organizationDomain/organizationName — the
+    // only company signal a search result carries. Apollo's bulk_match
+    // enrich call can resolve a candidate to a *different* company than the
+    // search result implied (see the enriched() helper's domain-override
+    // param above). Here candidate p9 looks brand-new at search time
+    // ('other.com'), but enrich resolves it onto 'acme.com', an existing
+    // company already sitting at its contactsPerCompany cap (1 verified
+    // lead). The row must be parked, not inserted active, must not count
+    // toward summary.verified, and must never reach groupVerifiedLead.
+    mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
+    mockSearchPeople
+      .mockResolvedValueOnce({ totalEntries: 1, candidates: [candidate('p9', 'other.com')] }) // round 1 breadth, page 1: looks brand-new pre-enrich
+      .mockResolvedValueOnce({ totalEntries: 0, candidates: [] }) // round 1 breadth, page 2: empty, stop
+    mockBulkMatchPeople.mockImplementation(async (details: { id: string }[]) =>
+      details.map((d) => enriched(d.id, 'verified', 'acme.com')), // resolves onto the already-full existing company
+    )
+    mockInsertLeads.mockImplementation(async (_supabase: unknown, rows: { source_id: string | null | undefined; status?: string }[]) =>
+      insertedRows(rows),
+    )
+
+    const summary = await runDiscoveryForCampaign({} as never, { id: 'camp1', clientId: 'client1', name: 'Test Campaign', valueProp: 'We help teams do X.', dailyTarget: 5, contactsPerCompany: 1, icp })
+
+    expect(summary.breadthCandidates).toBe(1)
+    expect(summary.depthCandidates).toBe(0)
+    expect(summary.verified).toBe(0)
+    expect(mockInsertLeads.mock.calls[0]![1]).toEqual([expect.objectContaining({ source_id: 'p9', status: 'parked' })])
+    expect(mockGroupVerifiedLead).not.toHaveBeenCalled()
+  })
+
   it('should target a company from an earlier day that already has exactly 1 verified lead, starting with depth in round 1', async () => {
     mockGetVerifiedLeadCompanies.mockResolvedValue([{ companyDomain: 'acme.com', companyName: 'Acme', caseStatus: 'new' }])
     mockSearchPeople

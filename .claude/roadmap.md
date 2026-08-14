@@ -5941,3 +5941,119 @@ correctness fix.
 full `vitest run` — 219 files, 2422 tests, all green (2423 including the
 new regression test, which was confirmed RED against the pre-fix formula
 before being confirmed GREEN against the fix).
+
+## Per-campaign contact signature override — 2026-08-14
+
+**Trigger:** Shengul asked to set a different contact signature per
+campaign — today `clients.signature_name/signature_title/phone/address`
+(2026-08-07 design) apply uniformly to every campaign under a client, which
+that design explicitly scoped out ("per-campaign override" was listed as
+out of scope).
+
+**Shipped feature (brainstorming → bounded path, approved in chat, no spec
+doc):** per-field campaign-level override of the client signature, same
+null-means-inherit convention `campaigns.discover_time`/`discover_timezone`
+already use — an operator can override just the phone number for one
+campaign while name/title/address still fall back to the client.
+
+- Migration `0043_campaign_signature_override.sql`: four nullable columns
+  on `campaigns` — `signature_name`, `signature_title`, `phone`, `address`.
+- `resolveSignatureContext(client, campaignOverrides)` (new, in
+  `signature.ts`): resolves each of the four fields independently,
+  campaign override first, then the client's value, then null. Replaces
+  the inline signature-context object that was duplicated in `write.ts`
+  and `followup.ts`.
+- `write.ts`: `RunWriteInput` gained `signatureName`/`signatureTitle`/
+  `signaturePhone`/`signatureAddress`, threaded from the campaign row
+  already fetched in `/api/pipeline/write/route.ts` (and the three scripts
+  that build `RunWriteInput` directly: `regenerate-sample-emails.ts`,
+  `rewrite-draft-emails.ts`, `test-fake-email.ts`). `followup.ts` reads the
+  new columns straight off the `campaign` row already in scope in
+  `runFollowupStep` — no extra fetch needed there.
+- `campaignSettingsSchema` gained the same four fields (`nullablePhoneSchema`
+  — new sibling of `phoneSchema` for schemas that submit an explicit `null`
+  instead of an empty string to clear a field; local `nullableTextSchema`
+  helper for the other three, trimmed + length-capped at 120/120/200 chars).
+  Wired through `CampaignSettingsPatch`, `insertCampaign`, and
+  `updateCampaignSettings` in both campaign API routes.
+- UI: new "Contact signature override" fieldset in
+  `campaign-settings-fields.tsx` (shared by new-campaign and edit-campaign
+  forms) — four inputs, each hinted "leave blank to inherit the client's
+  default." New `campaigns.newCampaignForm.signature*`/`phone*`/`address*`
+  i18n keys in both `en.json` and `tr.json` (existing pages in this
+  directory are already bilingual, so kept both in sync rather than
+  English-only).
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
+full `vitest run` — 219 files, 2447 tests, all green (25 new: 5
+`resolveSignatureContext` cases, 6 `nullablePhoneSchema` cases, 6
+`campaignSettingsSchema` cases, 2 `write.ts` campaign-override cases, 1
+`followup.ts` campaign-override case, 1 `write/route.ts` passthrough case,
+2 POST `/api/campaigns` cases, 2 PATCH `/api/campaigns/[campaignId]` cases).
+
+## Code review fixes: contactsPerCompany capacity enforcement + live-discovery script hardening — 2026-08-14
+
+**Trigger:** three externally-supplied code-review findings (untrusted —
+verified each against current code before touching anything).
+
+**Fix 1 — `contactsPerCompany` never enforced against the RESOLVED
+company key (`discover.ts`, confirmed real, empirically reproduced):** the
+2026-08-13 "company-key desync" fix (Fix 2 above) made `applyEnrichResult`
+key its in-memory *targeting* bookkeeping off each row's persisted
+`company_domain`/`company_name` instead of the pre-enrich search
+candidate's — but it never added a capacity *check* at that same point. A
+breadth candidate whose search-time org fields looked brand-new (passing
+`runBreadthSearch`'s `companyPickCounts` dedup) can still resolve, post
+`bulk_match` enrich, onto a company that already has `contactsPerCompany`
+verified leads (Apollo's enrich response is not guaranteed to echo the
+search result's org fields back unchanged). That row was inserted `active`
+regardless, silently exceeding the per-company cap, and
+`breadthVerifiedSoFar` credited it as if it had opened a genuinely new
+company (further throwing off the breadth-reserve math from the 2026-08-13
+depth-starvation fix). Fixed by moving capacity enforcement into
+`applyEnrichResult` itself, the one place the true resolved key is known:
+each row's resolved key is checked against `verifiedCompanyCounts` there,
+before `insertLeads` — a row landing on an already-full company is
+downgraded to `status: 'parked'` instead of inserted `active`, and only
+counted toward `verifiedSoFar`/`breadthVerifiedSoFar` (and only credited as
+a "new company" for the breadth reserve) once accepted. `applyEnrichResult`
+now takes an explicit `phase: 'breadth' | 'depth'` argument from its two
+call sites instead of the caller separately re-adding
+`breadthEnriched.verifiedCount` afterward. Also dropped `EnrichResult.
+verifiedCount`, which became dead once `applyEnrichResult` started
+computing the (now capacity-aware) accepted count itself.
+
+Added a regression test (`discover.test.ts`): a breadth pick whose
+search-time domain looks brand-new but whose `bulk_match` response
+resolves onto an existing, already-at-cap company (`contactsPerCompany: 1`)
+using the `enriched()` helper's pre-existing (previously unused) domain-
+override param. Verified this is a real regression guard, not
+green-by-construction: manually reverted the `discover.ts` fix with the
+test still in place, confirmed it fails (`summary.verified` came back `1`
+instead of `0`), then restored the fix and confirmed green again.
+
+**Fix 2 — `run-discovery-live.ts` could race the scheduled discovery cron
+(confirmed real):** this script deliberately bypasses `/api/pipeline/
+discover`'s `campaign.status === 'active'` gate so it can be run manually
+against a campaign for testing — but it placed no floor under which
+statuses that's safe for. `discover-fanout` only ever fires campaigns with
+`status: 'active'` (`listCampaignsDueForDiscovery`), so running this script
+against an already-active campaign risks two concurrent
+`runDiscoveryForCampaign` calls racing on the same campaign's
+`contactsPerCompany` capacity and known-lead state. Fixed by requiring
+`campaign.status === 'paused'` before proceeding (throws `AppError`
+otherwise) — the one status guaranteed never to be picked up by the cron.
+
+**Fix 3 — `run-discovery-live.ts`'s before/after `snapshot()` didn't
+paginate (confirmed real):** it read `leads`/`cases` for the campaign in a
+single unpaged `select`, which PostgREST silently caps (typically 1000
+rows) — the same ceiling `src/lib/supabase/list-auth-users.ts` already
+works around for the auth-users case. A long-running campaign can exceed
+that cap, which would make the script's before/after diff (its whole
+purpose) silently miss rows past the first page. Fixed by paging both
+queries to completion (`order('id') + range()`, looping until a
+short page), preserving the original selected fields, `campaign_id`
+filtering, and `AppError` handling.
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean on every touched file;
+`vitest run src/lib/pipeline` — 18 files, 258 tests, all green (1 new).

@@ -1,6 +1,20 @@
 import { z } from 'zod'
 import { apolloPersonSeniorities, apolloContactEmailStatuses, APOLLO_MAX_EMPLOYEE_COUNT } from './types'
 import { timeOfDaySchema, timezoneSchema } from '@/lib/validation/schedule'
+import { nullablePhoneSchema } from '@/lib/validation/phone'
+
+// Trimmed, length-capped, nullable. Every field on this schema submits an
+// explicit `null` to mean "not set" (same convention as bookingLink/
+// discoverTime below), so — unlike the client PATCH route's equivalent
+// helper — this doesn't need an empty-string-to-null transform.
+function nullableTextSchema(maxLength: number) {
+  return z
+    .string()
+    .trim()
+    .refine((value) => value.length > 0, { message: 'must not be empty' })
+    .refine((value) => value.length <= maxLength, { message: `must be ${maxLength} characters or fewer` })
+    .nullable()
+}
 
 // Shared between POST /api/campaigns (create) and PATCH /api/campaigns/[campaignId]
 // (edit) — every field a campaign's settings form submits, except clientId
@@ -33,6 +47,13 @@ export const campaignSettingsSchema = z.object({
   // opened and saved. Ownership (does each id belong to this campaign's
   // client) is checked by the route, not here — this schema has no DB access.
   mailboxIds: z.array(z.string().uuid()).default([]),
+  // Per-campaign override of the owning client's signature fields — null
+  // means inherit the client's value, independently per field. See
+  // resolveSignatureContext in src/lib/pipeline/signature.ts.
+  signatureName: nullableTextSchema(120).default(null),
+  signatureTitle: nullableTextSchema(120).default(null),
+  phone: nullablePhoneSchema.default(null),
+  address: nullableTextSchema(200).default(null),
 })
 
 export type CampaignSettingsInput = z.infer<typeof campaignSettingsSchema>

@@ -71,6 +71,14 @@ export interface CampaignSettingsDefaults {
   discoverTime: string
   discoverTimezone: string
   mailboxIds: readonly string[]
+  // Per-campaign signature overrides — empty string means "no override,
+  // inherit the client's value", same convention as discoverTime/
+  // discoverTimezone above. See resolveSignatureContext in
+  // src/lib/pipeline/signature.ts.
+  signatureName: string
+  signatureTitle: string
+  phone: string
+  address: string
 }
 
 interface CampaignSettingsFieldsProps {
@@ -214,6 +222,58 @@ export function CampaignSettingsFields({ defaultValues, mailboxes }: CampaignSet
           </select>
         </Field>
       </div>
+
+      <fieldset className="border-hairline flex flex-col gap-5 border-t pt-5">
+        <legend className="sr-only">{t('newCampaignForm.signatureLegend')}</legend>
+        <p className="text-xs font-medium">{t('newCampaignForm.signatureLegend')}</p>
+        <p className="text-faint text-[11px]">{t('newCampaignForm.signatureHint')}</p>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field id="campaignSignatureName" label={t('newCampaignForm.signatureNameLabel')}>
+            <Input
+              id="campaignSignatureName"
+              name="signatureName"
+              defaultValue={defaultValues.signatureName}
+              placeholder="John Smith"
+              toolparamdescription={t('newCampaignForm.signatureNameToolParamDescription')}
+            />
+          </Field>
+          <Field id="campaignSignatureTitle" label={t('newCampaignForm.signatureTitleLabel')}>
+            <Input
+              id="campaignSignatureTitle"
+              name="signatureTitle"
+              defaultValue={defaultValues.signatureTitle}
+              placeholder="Sales Director"
+              toolparamdescription={t('newCampaignForm.signatureTitleToolParamDescription')}
+            />
+          </Field>
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field
+            id="campaignPhone"
+            label={t('newCampaignForm.phoneLabel')}
+            hint={t('newCampaignForm.phoneHint')}
+          >
+            <Input
+              id="campaignPhone"
+              name="phone"
+              defaultValue={defaultValues.phone}
+              placeholder="+1 555 123 4567"
+              toolparamdescription={t('newCampaignForm.phoneToolParamDescription')}
+            />
+          </Field>
+          <Field id="campaignAddress" label={t('newCampaignForm.addressLabel')}>
+            <Input
+              id="campaignAddress"
+              name="address"
+              defaultValue={defaultValues.address}
+              placeholder="123 Main St, Istanbul, Turkey"
+              toolparamdescription={t('newCampaignForm.addressToolParamDescription')}
+            />
+          </Field>
+        </div>
+      </fieldset>
 
       <fieldset className="border-hairline flex flex-col gap-5 border-t pt-5">
         <legend className="sr-only">{t('newCampaignForm.icpLegend')}</legend>

@@ -5,8 +5,11 @@
 // net-new candidates only), real Emailable verification, and real Supabase
 // writes (leads/cases) under that campaign's actual client. Bypasses the
 // campaign.status === 'active' gate that the QStash route enforces — this is
-// a deliberate manual run, not the cron path — but never touches the
-// campaign row itself, so status is unchanged after this exits.
+// a deliberate manual run, not the cron path — but only for a campaign whose
+// status is 'paused' (enforced below), since an 'active' campaign is also
+// eligible for the scheduled discover-fanout cron and could run
+// concurrently with this script. Never touches the campaign row itself, so
+// status is unchanged after this exits.
 //
 // Prints a before/after snapshot of the campaign's leads + cases so the
 // diff (what got created/attached this run) is visible directly, alongside
@@ -70,17 +73,64 @@ interface CaseSnapshotRow {
   status: string
 }
 
+// Supabase/PostgREST caps a single response at up to 1000 rows by default —
+// same reasoning as PAGE_SIZE in src/lib/supabase/list-auth-users.ts. A
+// campaign accumulates leads day over day, so a long-running one can exceed
+// that cap; without paging through every page here, the before/after diff
+// this script prints would silently miss rows past the first page and
+// misreport what this run actually created.
+const SNAPSHOT_PAGE_SIZE = 1000
+
+async function fetchAllLeads(
+  admin: ReturnType<typeof import('../src/lib/supabase/admin')['createAdminClient']>,
+  campaignId: string,
+): Promise<LeadSnapshotRow[]> {
+  const rows: LeadSnapshotRow[] = []
+  let offset = 0
+  for (;;) {
+    const { data, error } = await admin
+      .from('leads')
+      .select('id, company_domain, company_name, case_id, status')
+      .eq('campaign_id', campaignId)
+      .order('id', { ascending: true })
+      .range(offset, offset + SNAPSHOT_PAGE_SIZE - 1)
+    if (error) throw new AppError('DB_ERROR', 'Failed to snapshot leads', { cause: error.message })
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < SNAPSHOT_PAGE_SIZE) break
+    offset += SNAPSHOT_PAGE_SIZE
+  }
+  return rows
+}
+
+async function fetchAllCases(
+  admin: ReturnType<typeof import('../src/lib/supabase/admin')['createAdminClient']>,
+  campaignId: string,
+): Promise<CaseSnapshotRow[]> {
+  const rows: CaseSnapshotRow[] = []
+  let offset = 0
+  for (;;) {
+    const { data, error } = await admin
+      .from('cases')
+      .select('id, company_name, status')
+      .eq('campaign_id', campaignId)
+      .order('id', { ascending: true })
+      .range(offset, offset + SNAPSHOT_PAGE_SIZE - 1)
+    if (error) throw new AppError('DB_ERROR', 'Failed to snapshot cases', { cause: error.message })
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < SNAPSHOT_PAGE_SIZE) break
+    offset += SNAPSHOT_PAGE_SIZE
+  }
+  return rows
+}
+
 async function snapshot(
   admin: ReturnType<typeof import('../src/lib/supabase/admin')['createAdminClient']>,
   campaignId: string,
 ): Promise<{ leads: LeadSnapshotRow[]; cases: CaseSnapshotRow[] }> {
-  const [{ data: leads, error: leadsErr }, { data: cases, error: casesErr }] = await Promise.all([
-    admin.from('leads').select('id, company_domain, company_name, case_id, status').eq('campaign_id', campaignId),
-    admin.from('cases').select('id, company_name, status').eq('campaign_id', campaignId),
-  ])
-  if (leadsErr) throw new AppError('DB_ERROR', 'Failed to snapshot leads', { cause: leadsErr.message })
-  if (casesErr) throw new AppError('DB_ERROR', 'Failed to snapshot cases', { cause: casesErr.message })
-  return { leads: leads ?? [], cases: cases ?? [] }
+  const [leads, cases] = await Promise.all([fetchAllLeads(admin, campaignId), fetchAllCases(admin, campaignId)])
+  return { leads, cases }
 }
 
 function diffLeads(before: LeadSnapshotRow[], after: LeadSnapshotRow[]): LeadSnapshotRow[] {
@@ -113,6 +163,25 @@ async function main(): Promise<void> {
   const admin = createAdminClient()
   const campaign = await getCampaignById(admin, args.campaignId)
   if (!campaign) throw new AppError('NOT_FOUND', `Campaign ${args.campaignId} not found`, {})
+
+  // Scheduled discovery (discover-fanout, every 5 minutes) only ever fires
+  // campaigns with status: 'active' (see listCampaignsDueForDiscovery), and
+  // serializes reruns of the SAME campaign by pushing next_discover_at
+  // forward as soon as it publishes — there is no separate lease to reuse
+  // here. This script bypasses the /api/pipeline/discover route's own
+  // status==='active' gate so it can run against a paused campaign for
+  // manual testing, but that only stays safe as long as the campaign can
+  // never ALSO be picked up by the cron at the same time: requiring
+  // 'paused' here guarantees that, since an active campaign run live could
+  // race the scheduled run and double-write against the same
+  // contactsPerCompany capacity and known-lead state.
+  if (campaign.status !== 'paused') {
+    throw new AppError(
+      'VALIDATION_ERROR',
+      `Campaign ${args.campaignId} must be paused before a live discovery run (current status: "${campaign.status}"). An 'active' campaign is eligible for the scheduled discover-fanout cron and could run concurrently with this script. Pause the campaign, run this script, then resume it.`,
+      { campaignId: args.campaignId, status: campaign.status },
+    )
+  }
 
   log(`=== Live discovery run: "${campaign.name}" (${campaign.status}) ===`)
   log(`daily_target=${campaign.daily_target}  contacts_per_company=${campaign.contacts_per_company}  reply_mode=${campaign.reply_mode}`)

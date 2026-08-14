@@ -203,6 +203,10 @@ describe('updateCampaignSettings', () => {
     discover_time: null,
     discover_timezone: null,
     mailbox_ids: ['m1'],
+    signature_name: null,
+    signature_title: null,
+    phone: null,
+    address: null,
   }
 
   it('should return the updated campaign row', async () => {

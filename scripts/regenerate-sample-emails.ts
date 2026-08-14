@@ -192,6 +192,10 @@ async function regenerateOne(
     bookingLink: campaign.booking_link,
     mailboxIds: campaign.mailbox_ids,
     companyName: kase.company_name,
+    signatureName: campaign.signature_name,
+    signatureTitle: campaign.signature_title,
+    signaturePhone: campaign.phone,
+    signatureAddress: campaign.address,
   }
 
   const clientStyle = client?.email_style_id ? await deps.getEmailStyleById(supabase, client.email_style_id) : null

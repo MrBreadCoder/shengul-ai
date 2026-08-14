@@ -61,6 +61,10 @@ export async function POST(request: Request) {
         bookingLink: campaign.booking_link,
         mailboxIds: campaign.mailbox_ids,
         companyName: kase.company_name,
+        signatureName: campaign.signature_name,
+        signatureTitle: campaign.signature_title,
+        signaturePhone: campaign.phone,
+        signatureAddress: campaign.address,
       })
       return NextResponse.json({ ok: true, summary })
     } catch (writeError) {

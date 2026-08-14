@@ -73,6 +73,10 @@ export async function POST(request: Request) {
       discover_timezone: body.discoverTimezone,
       next_discover_at: nextDiscoverAt.toISOString(),
       mailbox_ids: body.mailboxIds,
+      signature_name: body.signatureName,
+      signature_title: body.signatureTitle,
+      phone: body.phone,
+      address: body.address,
     })
     try {
       await logEvent({

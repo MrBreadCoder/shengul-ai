@@ -31,7 +31,6 @@ import { z } from 'zod'
 import type { Database } from '../src/types/database'
 import { AppError } from '../src/lib/errors/app-error'
 import type { RunWriteInput } from '../src/lib/pipeline/write'
-import type { ClientSignatureContext } from '../src/lib/pipeline/signature'
 
 const FIRST_TOUCH_STEP = 0
 const DEFAULT_COUNT = 20
@@ -149,6 +148,7 @@ interface AppDeps {
   MAX_OUTPUT_TOKENS: number
   buildPrompt: typeof import('../src/lib/pipeline/write').buildPrompt
   appendSignatureBlock: typeof import('../src/lib/pipeline/signature').appendSignatureBlock
+  resolveSignatureContext: typeof import('../src/lib/pipeline/signature').resolveSignatureContext
   listKnowledgeForCase: typeof import('../src/lib/db/case-knowledge').listKnowledgeForCase
   getLeadById: typeof import('../src/lib/db/leads').getLeadById
   getCaseById: typeof import('../src/lib/db/cases').getCaseById
@@ -182,23 +182,13 @@ async function loadAppDeps(): Promise<AppDeps> {
     MAX_OUTPUT_TOKENS: writeMod.MAX_OUTPUT_TOKENS,
     buildPrompt: writeMod.buildPrompt,
     appendSignatureBlock: signatureMod.appendSignatureBlock,
+    resolveSignatureContext: signatureMod.resolveSignatureContext,
     listKnowledgeForCase: caseKnowledgeMod.listKnowledgeForCase,
     getLeadById: leadsMod.getLeadById,
     getCaseById: casesMod.getCaseById,
     getCampaignForCase: campaignsMod.getCampaignForCase,
     getClientById: clientsMod.getClientById,
     updateDraftContent: emailsMod.updateDraftContent,
-  }
-}
-
-function toSignatureContext(client: { name: string; signature_name: string | null; signature_title: string | null; phone: string | null; address: string | null; domain: string | null } | null): ClientSignatureContext {
-  return {
-    companyName: client?.name ?? '',
-    signatureName: client?.signature_name ?? null,
-    signatureTitle: client?.signature_title ?? null,
-    phone: client?.phone ?? null,
-    address: client?.address ?? null,
-    domain: client?.domain ?? null,
   }
 }
 
@@ -227,6 +217,10 @@ async function regenerateAndMaybeApply(
     bookingLink: campaign.booking_link,
     mailboxIds: campaign.mailbox_ids,
     companyName: kase.company_name,
+    signatureName: campaign.signature_name,
+    signatureTitle: campaign.signature_title,
+    signaturePhone: campaign.phone,
+    signatureAddress: campaign.address,
   }
 
   const clientStyle = client?.email_style_id ? await deps.getEmailStyleById(supabase, client.email_style_id) : null
@@ -248,7 +242,18 @@ async function regenerateAndMaybeApply(
     },
   )
 
-  const signedBody = deps.appendSignatureBlock(generated.body, toSignatureContext(client))
+  // Resolve the campaign's per-field signature overrides (captured in `input`
+  // above) over the client's defaults — matches write.ts's real signing path,
+  // instead of always signing with the client's unoverridden values.
+  const signedBody = deps.appendSignatureBlock(
+    generated.body,
+    deps.resolveSignatureContext(client, {
+      signatureName: input.signatureName,
+      signatureTitle: input.signatureTitle,
+      phone: input.signaturePhone,
+      address: input.signatureAddress,
+    }),
+  )
   const regenerated = { subject: generated.subject, body: signedBody }
 
   if (!apply) return { draft, regenerated, applied: false }

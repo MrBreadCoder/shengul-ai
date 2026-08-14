@@ -25,7 +25,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
-import { appendSignatureBlock } from './signature'
+import { appendSignatureBlock, resolveSignatureContext } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { DEFAULT_FOLLOWUP_DELAYS_DAYS } from '@/lib/validation/followup-limits'
 
@@ -254,14 +254,15 @@ export async function runFollowupStep(
     modelId: EMAIL_WRITER_MODEL_ID,
   })
 
-  const signedBody = appendSignatureBlock(nudgeBody, {
-    companyName: client?.name ?? '',
-    signatureName: client?.signature_name ?? null,
-    signatureTitle: client?.signature_title ?? null,
-    phone: client?.phone ?? null,
-    address: client?.address ?? null,
-    domain: client?.domain ?? null,
-  })
+  const signedBody = appendSignatureBlock(
+    nudgeBody,
+    resolveSignatureContext(client, {
+      signatureName: campaign.signature_name,
+      signatureTitle: campaign.signature_title,
+      phone: campaign.phone,
+      address: campaign.address,
+    }),
+  )
 
   // Claim the (lead, step, outbound) slot before sending — retry-safe.
   const claimed = await claimOutboundEmail(supabase, {

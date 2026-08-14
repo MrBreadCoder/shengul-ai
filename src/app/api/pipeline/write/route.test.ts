@@ -43,6 +43,7 @@ describe('POST /api/pipeline/write', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
     const res = await POST(req({ caseId: CASE_ID }))
@@ -57,6 +58,7 @@ describe('POST /api/pipeline/write', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
     await POST(req({ caseId: CASE_ID }))
@@ -90,6 +92,27 @@ describe('POST /api/pipeline/write', () => {
     const res = await POST(req({ caseId: CASE_ID }))
     expect(res.status).toBe(401)
   })
+
+  it("should pass the campaign's signature override fields through to runWriteForCase", async () => {
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
+    getCampaignForCaseMock.mockResolvedValue({
+      id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: 'John Smith', signature_title: 'Sales Director', phone: '+1 555 123 4567', address: '123 Main St',
+    })
+    runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
+
+    await POST(req({ caseId: CASE_ID }))
+
+    expect(runWriteMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signatureName: 'John Smith',
+        signatureTitle: 'Sales Director',
+        signaturePhone: '+1 555 123 4567',
+        signatureAddress: '123 Main St',
+      }),
+    )
+  })
 })
 
 describe('write route error attribution', () => {
@@ -98,6 +121,7 @@ describe('write route error attribution', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockRejectedValue(new AppError('DB_ERROR', 'connection reset', {}))
 
@@ -129,6 +153,7 @@ describe('write route model-overload handling', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockRejectedValue(overloadError)
     isModelOverloadedErrorMock.mockReturnValue(true)
@@ -155,6 +180,7 @@ describe('write route model-overload handling', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockRejectedValue(new Error('overloaded'))
     isModelOverloadedErrorMock.mockReturnValue(true)
@@ -173,6 +199,7 @@ describe('write route model-overload handling', () => {
     getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
     getCampaignForCaseMock.mockResolvedValue({
       id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
     })
     runWriteMock.mockRejectedValue(new Error('overloaded'))
     isModelOverloadedErrorMock.mockReturnValue(true)

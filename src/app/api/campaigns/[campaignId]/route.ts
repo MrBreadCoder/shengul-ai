@@ -107,6 +107,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       discover_time: body.discoverTime,
       discover_timezone: body.discoverTimezone,
       mailbox_ids: body.mailboxIds,
+      signature_name: body.signatureName,
+      signature_title: body.signatureTitle,
+      phone: body.phone,
+      address: body.address,
     })
     // Recompute unconditionally rather than diffing old vs. new — cheap,
     // and correctly handles every case: an override changed, an override

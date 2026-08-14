@@ -27,6 +27,10 @@ interface EditCampaignFormProps {
   discoverTimezone: string | null
   mailboxes: MailboxOption[]
   mailboxIds: string[]
+  signatureName: string | null
+  signatureTitle: string | null
+  phone: string | null
+  address: string | null
 }
 
 export function EditCampaignForm({
@@ -42,6 +46,10 @@ export function EditCampaignForm({
   discoverTimezone,
   mailboxes,
   mailboxIds,
+  signatureName,
+  signatureTitle,
+  phone,
+  address,
 }: EditCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
   const router = useRouter()
@@ -53,6 +61,10 @@ export function EditCampaignForm({
     const employeeMinRaw = formData.get('employeeMin')
     const employeeMaxRaw = formData.get('employeeMax')
     const bookingLinkRaw = formData.get('bookingLink')
+    const signatureNameRaw = formData.get('signatureName')
+    const signatureTitleRaw = formData.get('signatureTitle')
+    const phoneRaw = formData.get('phone')
+    const addressRaw = formData.get('address')
     const body = {
       name: String(formData.get('name') ?? ''),
       valueProp: String(formData.get('valueProp') ?? ''),
@@ -71,6 +83,10 @@ export function EditCampaignForm({
       discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
       discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
       mailboxIds: getAllStrings(formData, 'mailboxIds'),
+      signatureName: signatureNameRaw ? String(signatureNameRaw) : null,
+      signatureTitle: signatureTitleRaw ? String(signatureTitleRaw) : null,
+      phone: phoneRaw ? String(phoneRaw) : null,
+      address: addressRaw ? String(addressRaw) : null,
     }
 
     try {
@@ -133,6 +149,10 @@ export function EditCampaignForm({
           discoverTime: discoverTime ?? '',
           discoverTimezone: discoverTimezone ?? '',
           mailboxIds,
+          signatureName: signatureName ?? '',
+          signatureTitle: signatureTitle ?? '',
+          phone: phone ?? '',
+          address: address ?? '',
         }}
       />
 

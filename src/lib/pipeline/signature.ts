@@ -16,6 +16,47 @@ export interface ClientSignatureContext {
   domain: string | null
 }
 
+// The subset of a client row this module reads. Structural rather than the
+// full ClientRow so callers (write.ts, followup.ts) don't need to widen a
+// `ClientRow | null` just to satisfy this signature.
+export interface SignatureClient {
+  name: string
+  signature_name: string | null
+  signature_title: string | null
+  phone: string | null
+  address: string | null
+  domain: string | null
+}
+
+// A campaign's per-field signature overrides — every field null means "no
+// override, inherit the client's value". Mirrors campaigns.discover_time /
+// discover_timezone's existing null-means-inherit convention.
+export interface CampaignSignatureOverrides {
+  signatureName: string | null
+  signatureTitle: string | null
+  phone: string | null
+  address: string | null
+}
+
+// Resolves the effective signature for one send: each field independently
+// prefers the campaign's override, then the client's value, then null. A
+// campaign can override just the phone number for a single campaign while
+// name/title/address still fall back to the client — same per-field
+// resolution as discoverTime/discoverTimezone, not an all-or-nothing switch.
+export function resolveSignatureContext(
+  client: SignatureClient | null,
+  campaignOverrides: CampaignSignatureOverrides,
+): ClientSignatureContext {
+  return {
+    companyName: client?.name ?? '',
+    signatureName: campaignOverrides.signatureName ?? client?.signature_name ?? null,
+    signatureTitle: campaignOverrides.signatureTitle ?? client?.signature_title ?? null,
+    phone: campaignOverrides.phone ?? client?.phone ?? null,
+    address: campaignOverrides.address ?? client?.address ?? null,
+    domain: client?.domain ?? null,
+  }
+}
+
 function presentLines(values: (string | null)[]): string[] {
   return values.filter((value): value is string => value !== null && value.trim().length > 0)
 }

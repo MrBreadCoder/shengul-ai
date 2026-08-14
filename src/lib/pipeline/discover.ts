@@ -415,8 +415,6 @@ async function verifyBatch(
 
 interface EnrichResult {
   rows: LeadInsert[]
-  /** Rows that ended at `status: 'active'` — i.e. actually cleared to send. */
-  verifiedCount: number
   emailableChecked: number
   emailableDeliverable: number
   emailableAcceptAllActivated: number
@@ -519,7 +517,6 @@ async function enrichCandidates(
 ): Promise<EnrichResult> {
   const { icp } = campaign
   const rows: LeadInsert[] = []
-  let verifiedCount = 0
   let emailableChecked = 0
   let emailableDeliverable = 0
   let emailableAcceptAllActivated = 0
@@ -759,15 +756,11 @@ async function enrichCandidates(
     emailableAcceptAllActivated += verified.acceptAllActivated
     emailableRejected += verified.rejected
     emailableFailedOpen += verified.failedOpen
-    for (const row of verified.rows) {
-      if (row.status === 'active') verifiedCount += 1
-      rows.push(row)
-    }
+    rows.push(...verified.rows)
   }
 
   return {
     rows,
-    verifiedCount,
     emailableChecked,
     emailableDeliverable,
     emailableAcceptAllActivated,
@@ -871,7 +864,26 @@ export async function runDiscoveryForCampaign(
     // round throwing must never discard already-durable work), and updates
     // verifiedCompanyCounts/domainBackedCompanyKeys from the real
     // post-verification outcome.
-    const applyEnrichResult = async (result: EnrichResult): Promise<void> => {
+    //
+    // contactsPerCompany is enforced here, against each row's own RESOLVED
+    // company_domain/company_name, never the pre-enrich search candidate's
+    // organizationDomain/organizationName — enrichCandidates prefers
+    // Apollo's enrich-time (bulk_match) org fields over the search-time ones
+    // whenever they differ (`??` in enrichCandidates above). That means a
+    // candidate the search phase picked as a brand-new company (keyed off
+    // its search-time fields, before enrich ever ran) can still resolve,
+    // post-enrich, to a company that already has contactsPerCompany
+    // verified leads. This is the only point where the true resolved key is
+    // known, so it is also the only point capacity can be enforced
+    // correctly: a row whose resolved key is already at capacity is
+    // downgraded to 'parked' instead of inserted 'active'. Accepted rows
+    // update verifiedCompanyCounts/domainBackedCompanyKeys/freshCompanyKeys
+    // from that same resolved key — groupVerifiedLead (after the round loop
+    // below) and tomorrow's getVerifiedLeadCompanies both key a lead's
+    // company by it too, so tracking anything else here would let this
+    // run's in-memory targeting state silently diverge from what actually
+    // gets grouped.
+    const applyEnrichResult = async (phase: 'breadth' | 'depth', result: EnrichResult): Promise<void> => {
       enrichedCount += result.rows.length
       emailableChecked += result.emailableChecked
       emailableDeliverable += result.emailableDeliverable
@@ -884,24 +896,23 @@ export async function runDiscoveryForCampaign(
       aiChecked += result.aiChecked
       aiRejected += result.aiRejected
       aiFailedOpen += result.aiFailedOpen
-      verifiedSoFar += result.verifiedCount
 
-      const insertedRows = await insertLeads(supabase, result.rows)
-      inserted.push(...insertedRows)
-
-      // Keyed off each row's own persisted company_domain/company_name, never
-      // the pre-enrich search candidate's organizationDomain/organizationName
-      // — enrichCandidates prefers Apollo's enrich-time (bulk_match) org
-      // fields over the search-time ones whenever they differ (`??` in
-      // enrichCandidates above), and groupVerifiedLead (after the round loop
-      // below) and tomorrow's getVerifiedLeadCompanies both key a lead's
-      // company by that same persisted value. Tracking anything else here
-      // would let this run's in-memory targeting state silently diverge from
-      // what actually gets grouped.
-      for (const row of result.rows) {
-        if (row.status !== 'active') continue
+      let acceptedVerified = 0
+      // Only a row that is the FIRST verified contact for its resolved
+      // company (currentCount was 0 before this row) actually opened a new
+      // company. Crediting breadthVerifiedSoFar for every breadth-phase
+      // activation regardless of the resolved key would let a breadth pick
+      // that resolves onto an already-open company count toward the
+      // breadth reserve as if it had opened a new one.
+      let acceptedNewCompanies = 0
+      const finalRows = result.rows.map((row) => {
+        if (row.status !== 'active') return row
         const key = computeCompanyKey(row.company_domain ?? null, row.company_name ?? null)
-        verifiedCompanyCounts.set(key, (verifiedCompanyCounts.get(key) ?? 0) + 1)
+        const currentCount = verifiedCompanyCounts.get(key) ?? 0
+        if (currentCount >= campaign.contactsPerCompany) {
+          return { ...row, status: 'parked' as const, email_verified_at: null }
+        }
+        verifiedCompanyCounts.set(key, currentCount + 1)
         if (row.company_domain) domainBackedCompanyKeys.add(key)
         // A company verified THIS run has no case yet at all (grouping only
         // runs after the whole discovery loop finishes, below) — that is
@@ -911,7 +922,15 @@ export async function runDiscoveryForCampaign(
         // in freshCompanyKeys (targetDomains is filtered by it), so this is
         // a no-op re-add for that case.
         freshCompanyKeys.add(key)
-      }
+        acceptedVerified += 1
+        if (phase === 'breadth' && currentCount === 0) acceptedNewCompanies += 1
+        return row
+      })
+      verifiedSoFar += acceptedVerified
+      if (phase === 'breadth') breadthVerifiedSoFar += acceptedNewCompanies
+
+      const insertedRows = await insertLeads(supabase, finalRows)
+      inserted.push(...insertedRows)
     }
 
     while (verifiedSoFar < quota) {
@@ -945,7 +964,7 @@ export async function runDiscoveryForCampaign(
         for (const domain of depth.exhaustedDomains) exhaustedDomains.add(domain)
         for (const pick of depth.picks) known.add(pick.apolloId)
         const depthEnriched = await enrichCandidates(depth.picks, campaign, supabase, aiVerdictCache)
-        await applyEnrichResult(depthEnriched)
+        await applyEnrichResult('depth', depthEnriched)
       }
 
       const breadthQuota = quota - verifiedSoFar
@@ -981,8 +1000,7 @@ export async function runDiscoveryForCampaign(
         if (breadth.ranOutOfTargets) breadthExhausted = true
         for (const pick of breadth.picks) known.add(pick.apolloId)
         const breadthEnriched = await enrichCandidates(breadth.picks, campaign, supabase, aiVerdictCache)
-        await applyEnrichResult(breadthEnriched)
-        breadthVerifiedSoFar += breadthEnriched.verifiedCount
+        await applyEnrichResult('breadth', breadthEnriched)
       }
 
       if (roundPicks === 0) break

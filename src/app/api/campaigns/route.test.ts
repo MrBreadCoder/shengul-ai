@@ -227,4 +227,53 @@ describe('POST /api/campaigns', () => {
       expect.objectContaining({ discover_time: '09:00', discover_timezone: 'Europe/Istanbul' }),
     )
   })
+
+  it('should default the signature override fields to null when omitted', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue({
+      id: validBody.clientId,
+      reply_mode: 'human_approve',
+      timezone: 'UTC',
+      default_discover_time: '06:00',
+    })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(req(validBody))
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ signature_name: null, signature_title: null, phone: null, address: null }),
+    )
+  })
+
+  it("should store the campaign's own signature override fields", async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'operator' } })
+    getClientByIdMock.mockResolvedValue({
+      id: validBody.clientId,
+      reply_mode: 'human_approve',
+      timezone: 'UTC',
+      default_discover_time: '06:00',
+    })
+    insertCampaignMock.mockResolvedValue({ id: 'camp1', name: 'Q3 campaign' })
+
+    await POST(
+      req({
+        ...validBody,
+        signatureName: 'John Smith',
+        signatureTitle: 'Sales Director',
+        phone: '+1 555 123 4567',
+        address: '123 Main St',
+      }),
+    )
+
+    expect(insertCampaignMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        signature_name: 'John Smith',
+        signature_title: 'Sales Director',
+        phone: '+1 555 123 4567',
+        address: '123 Main St',
+      }),
+    )
+  })
 })

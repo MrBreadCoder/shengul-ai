@@ -76,7 +76,10 @@ beforeEach(() => {
   listThreadEmailsMock.mockResolvedValue([
     { direction: 'outbound', subject: 'Quick idea', body: 'Hi', thread_id: 'thr1', provider_message_id: '<a@mail>' },
   ])
-  getCampaignForCaseMock.mockResolvedValue({ mailbox_ids: ['m1'], value_prop: 'v', status: 'active' })
+  getCampaignForCaseMock.mockResolvedValue({
+    mailbox_ids: ['m1'], value_prop: 'v', status: 'active',
+    signature_name: null, signature_title: null, phone: null, address: null,
+  })
   generateTextMock.mockResolvedValue('Just following up, Jane.')
 })
 
@@ -270,6 +273,25 @@ describe('runFollowupStep', () => {
       expect.anything(),
       expect.objectContaining({ body: 'Just following up, Jane.' }),
     )
+  })
+
+  it("should override the client's phone with the campaign's own phone override in the nudge", async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: 'acme.com',
+      phone: '+1 555 000 0000', address: null, signature_name: null, signature_title: null,
+    })
+    getCampaignForCaseMock.mockResolvedValue({
+      mailbox_ids: ['m1'], value_prop: 'v', status: 'active',
+      signature_name: null, signature_title: null, phone: '+1 555 999 9999', address: null,
+    })
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    const expectedBody = 'Just following up, Jane.\n\nBest regards,\n\nAcme\n\n+1 555 999 9999\nacme.com'
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
   })
 
   it('should inject the client\'s company info as "About our company" when set', async () => {

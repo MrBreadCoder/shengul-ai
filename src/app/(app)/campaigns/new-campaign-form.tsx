@@ -53,6 +53,10 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
     const employeeMinRaw = formData.get('employeeMin')
     const employeeMaxRaw = formData.get('employeeMax')
     const bookingLinkRaw = formData.get('bookingLink')
+    const signatureNameRaw = formData.get('signatureName')
+    const signatureTitleRaw = formData.get('signatureTitle')
+    const phoneRaw = formData.get('phone')
+    const addressRaw = formData.get('address')
     const body = {
       clientId,
       name: String(formData.get('name') ?? ''),
@@ -72,6 +76,10 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       discoverTime: formData.get('discoverTime') ? String(formData.get('discoverTime')) : null,
       discoverTimezone: formData.get('discoverTimezone') ? String(formData.get('discoverTimezone')) : null,
       mailboxIds: getAllStrings(formData, 'mailboxIds'),
+      signatureName: signatureNameRaw ? String(signatureNameRaw) : null,
+      signatureTitle: signatureTitleRaw ? String(signatureTitleRaw) : null,
+      phone: phoneRaw ? String(phoneRaw) : null,
+      address: addressRaw ? String(addressRaw) : null,
     }
 
     try {
@@ -163,6 +171,10 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           discoverTime: '',
           discoverTimezone: '',
           mailboxIds: [],
+          signatureName: '',
+          signatureTitle: '',
+          phone: '',
+          address: '',
         }}
       />
 

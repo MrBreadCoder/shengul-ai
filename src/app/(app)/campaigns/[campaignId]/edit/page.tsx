@@ -53,6 +53,10 @@ export default async function EditCampaignPage({
         discoverTimezone={campaign.discover_timezone}
         mailboxes={mailboxes}
         mailboxIds={campaign.mailbox_ids}
+        signatureName={campaign.signature_name}
+        signatureTitle={campaign.signature_title}
+        phone={campaign.phone}
+        address={campaign.address}
       />
     </div>
   )

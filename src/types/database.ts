@@ -129,6 +129,15 @@ export interface Database {
           contacts_per_company: number
           discover_time: string | null
           discover_timezone: string | null
+          // Nullable per-campaign overrides of the owning client's signature
+          // fields (clients.signature_name/signature_title/phone/address) —
+          // null means "inherit the client's value", same convention as
+          // discover_time/discover_timezone above. See
+          // src/lib/pipeline/signature.ts's resolveSignatureContext.
+          signature_name: string | null
+          signature_title: string | null
+          phone: string | null
+          address: string | null
           next_discover_at: string
           created_at: string
           updated_at: string
@@ -148,6 +157,10 @@ export interface Database {
           contacts_per_company?: number
           discover_time?: string | null
           discover_timezone?: string | null
+          signature_name?: string | null
+          signature_title?: string | null
+          phone?: string | null
+          address?: string | null
           next_discover_at?: string
           created_at?: string
           updated_at?: string

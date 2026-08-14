@@ -62,6 +62,7 @@ const fullLead: LeadRow = {
 const input = {
   clientId: 'c1', campaignId: 'camp1', caseId: 'case1', replyMode: 'auto_send' as const,
   valueProp: 'We save time', bookingLink: 'https://cal.com/x', mailboxIds: ['m1'], companyName: 'Acme',
+  signatureName: null, signatureTitle: null, signaturePhone: null, signatureAddress: null,
 }
 
 beforeEach(() => {
@@ -198,6 +199,39 @@ describe('runWriteForCase', () => {
     await runWriteForCase({} as never, input)
 
     expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: 'Hi Jane...' }))
+  })
+
+  it("should override the client's phone with the campaign's own phone override", async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: 'acme.com',
+      phone: '+1 555 000 0000', address: null, signature_name: null, signature_title: null,
+    })
+
+    await runWriteForCase({} as never, { ...input, signaturePhone: '+1 555 999 9999' })
+
+    const expectedBody = 'Hi Jane...\n\nBest regards,\n\nAcme\n\n+1 555 999 9999\nacme.com'
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
+  })
+
+  it('should use the campaign phone override even when the client has none on file', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+
+    await runWriteForCase(
+      {} as never,
+      { ...input, signatureName: 'John Smith', signaturePhone: '+1 555 999 9999', signatureAddress: '2 Campaign Ave' },
+    )
+
+    const expectedBody = 'Hi Jane...\n\nBest regards,\n\nJohn Smith\nAcme\n\n+1 555 999 9999\n2 Campaign Ave'
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: expectedBody }))
   })
 
   it('should look up the client\'s configured style and use its voice text when email_style_id is set', async () => {

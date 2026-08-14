@@ -13,7 +13,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
-import { appendSignatureBlock } from './signature'
+import { appendSignatureBlock, resolveSignatureContext } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
 
@@ -52,6 +52,12 @@ export interface RunWriteInput {
   bookingLink: string | null
   mailboxIds: string[]
   companyName: string
+  // Campaign-level signature overrides — null means inherit the client's
+  // value. See resolveSignatureContext in ./signature.
+  signatureName: string | null
+  signatureTitle: string | null
+  signaturePhone: string | null
+  signatureAddress: string | null
 }
 
 export interface WriteSummary {
@@ -210,14 +216,15 @@ async function processLead(
 
   // Deterministic — never left to the model's discretion. Appended here,
   // before the claim, so both a sent email and a human_approve draft carry it.
-  const signedBody = appendSignatureBlock(draft.body, {
-    companyName: client?.name ?? '',
-    signatureName: client?.signature_name ?? null,
-    signatureTitle: client?.signature_title ?? null,
-    phone: client?.phone ?? null,
-    address: client?.address ?? null,
-    domain: client?.domain ?? null,
-  })
+  const signedBody = appendSignatureBlock(
+    draft.body,
+    resolveSignatureContext(client, {
+      signatureName: input.signatureName,
+      signatureTitle: input.signatureTitle,
+      phone: input.signaturePhone,
+      address: input.signatureAddress,
+    }),
+  )
 
   // Claim the (lead, step 0, outbound) slot BEFORE sending — a retry that finds
   // the slot taken returns null and we never double-send.

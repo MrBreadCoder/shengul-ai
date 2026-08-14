@@ -154,6 +154,10 @@ export interface CampaignSettingsPatch {
   discover_time: string | null
   discover_timezone: string | null
   mailbox_ids: string[]
+  signature_name: string | null
+  signature_title: string | null
+  phone: string | null
+  address: string | null
 }
 
 // Full-replace update of a campaign's editable settings (name, value prop,

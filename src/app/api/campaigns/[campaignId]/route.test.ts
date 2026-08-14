@@ -205,4 +205,47 @@ describe('PATCH /api/campaigns/[campaignId]', () => {
       campaign: { id: 'camp1', name: 'Updated name', next_discover_at: '2026-06-16T09:00:00.000Z' },
     })
   })
+
+  it('should pass the signature override fields through to the update', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Old name' })
+    updateCampaignSettingsMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+
+    await PATCH(
+      patchReq(
+        validPatchBody({
+          signatureName: 'John Smith',
+          signatureTitle: 'Sales Director',
+          phone: '+1 555 123 4567',
+          address: '123 Main St',
+        }),
+      ),
+      ctx('camp1'),
+    )
+
+    expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'camp1',
+      expect.objectContaining({
+        signature_name: 'John Smith',
+        signature_title: 'Sales Director',
+        phone: '+1 555 123 4567',
+        address: '123 Main St',
+      }),
+    )
+  })
+
+  it('should default the signature override fields to null when omitted', async () => {
+    getCampaignByIdMock.mockResolvedValue({ id: 'camp1', client_id: 'c1', name: 'Old name' })
+    updateCampaignSettingsMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+    recomputeCampaignNextDiscoverAtMock.mockResolvedValue({ id: 'camp1', name: 'Updated name' })
+
+    await PATCH(patchReq(validPatchBody()), ctx('camp1'))
+
+    expect(updateCampaignSettingsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'camp1',
+      expect.objectContaining({ signature_name: null, signature_title: null, phone: null, address: null }),
+    )
+  })
 })

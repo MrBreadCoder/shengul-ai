@@ -89,4 +89,76 @@ describe('campaignSettingsSchema', () => {
     const result = campaignSettingsSchema.safeParse({ ...valid, mailboxIds: ['not-a-uuid'] })
     expect(result.success).toBe(false)
   })
+
+  it('should default signatureName, signatureTitle, phone, and address to null when omitted', () => {
+    const result = campaignSettingsSchema.parse(valid)
+    expect(result.signatureName).toBeNull()
+    expect(result.signatureTitle).toBeNull()
+    expect(result.phone).toBeNull()
+    expect(result.address).toBeNull()
+  })
+
+  it('should accept a full set of signature override fields', () => {
+    const result = campaignSettingsSchema.parse({
+      ...valid,
+      signatureName: 'John Smith',
+      signatureTitle: 'Sales Director',
+      phone: '+1 555 123 4567',
+      address: '123 Main St, Istanbul, Turkey',
+    })
+    expect(result.signatureName).toBe('John Smith')
+    expect(result.signatureTitle).toBe('Sales Director')
+    expect(result.phone).toBe('+1 555 123 4567')
+    expect(result.address).toBe('123 Main St, Istanbul, Turkey')
+  })
+
+  it('should reject an invalid phone override', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, phone: 'call me maybe' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an empty-string phone override rather than silently clearing it', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, phone: '' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject a signatureName over 120 characters', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, signatureName: 'x'.repeat(121) })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an address over 200 characters', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, address: 'x'.repeat(201) })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an empty-string signatureName rather than silently clearing it', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, signatureName: '' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject a whitespace-only signatureName', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, signatureName: '   ' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an empty-string signatureTitle rather than silently clearing it', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, signatureTitle: '' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject a whitespace-only signatureTitle', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, signatureTitle: '   ' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject an empty-string address rather than silently clearing it', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, address: '' })
+    expect(result.success).toBe(false)
+  })
+
+  it('should reject a whitespace-only address', () => {
+    const result = campaignSettingsSchema.safeParse({ ...valid, address: '   ' })
+    expect(result.success).toBe(false)
+  })
 })

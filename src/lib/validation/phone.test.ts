@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { phoneSchema } from './phone'
+import { phoneSchema, nullablePhoneSchema } from './phone'
 
 describe('phoneSchema', () => {
   it('should accept a plain international number', () => {
@@ -28,5 +28,31 @@ describe('phoneSchema', () => {
 
   it('should reject a value containing letters', () => {
     expect(() => phoneSchema.parse('call me maybe')).toThrow()
+  })
+})
+
+describe('nullablePhoneSchema', () => {
+  it('should accept a plain international number', () => {
+    expect(nullablePhoneSchema.parse('+1 555 123 4567')).toBe('+1 555 123 4567')
+  })
+
+  it('should trim surrounding whitespace', () => {
+    expect(nullablePhoneSchema.parse('  +1 555 123 4567  ')).toBe('+1 555 123 4567')
+  })
+
+  it('should pass null straight through', () => {
+    expect(nullablePhoneSchema.parse(null)).toBeNull()
+  })
+
+  it('should reject an empty string rather than silently clearing it', () => {
+    expect(() => nullablePhoneSchema.parse('')).toThrow()
+  })
+
+  it('should reject a value with fewer than 7 digits', () => {
+    expect(() => nullablePhoneSchema.parse('123 456')).toThrow()
+  })
+
+  it('should reject a value containing letters', () => {
+    expect(() => nullablePhoneSchema.parse('call me maybe')).toThrow()
   })
 })
