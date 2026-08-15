@@ -127,8 +127,7 @@ interface AppDeps {
   generateJson: typeof import('../src/lib/llm/client').generateJson
   draftSchema: typeof import('../src/lib/pipeline/draft-schema').draftSchema
   buildSystemPrompt: typeof import('../src/lib/pipeline/write').buildSystemPrompt
-  getEmailStyleById: typeof import('../src/lib/db/email-styles').getEmailStyleById
-  getDefaultEmailStyle: typeof import('../src/lib/db/email-styles').getDefaultEmailStyle
+  resolveEmailTemplate: typeof import('../src/lib/pipeline/write').resolveEmailTemplate
   EMAIL_WRITER_MODEL_ID: string
   MAX_OUTPUT_TOKENS: number
   buildPrompt: typeof import('../src/lib/pipeline/write').buildPrompt
@@ -140,7 +139,7 @@ interface AppDeps {
 }
 
 async function loadAppDeps(): Promise<AppDeps> {
-  const [writeMod, llmMod, schemaMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod, emailStylesMod] =
+  const [writeMod, llmMod, schemaMod, caseKnowledgeMod, leadsMod, casesMod, campaignsMod, clientsMod] =
     await Promise.all([
       import('../src/lib/pipeline/write'),
       import('../src/lib/llm/client'),
@@ -150,14 +149,12 @@ async function loadAppDeps(): Promise<AppDeps> {
       import('../src/lib/db/cases'),
       import('../src/lib/db/campaigns'),
       import('../src/lib/db/clients'),
-      import('../src/lib/db/email-styles'),
     ])
   return {
     generateJson: llmMod.generateJson,
     draftSchema: schemaMod.draftSchema,
     buildSystemPrompt: writeMod.buildSystemPrompt,
-    getEmailStyleById: emailStylesMod.getEmailStyleById,
-    getDefaultEmailStyle: emailStylesMod.getDefaultEmailStyle,
+    resolveEmailTemplate: writeMod.resolveEmailTemplate,
     EMAIL_WRITER_MODEL_ID: writeMod.EMAIL_WRITER_MODEL_ID,
     MAX_OUTPUT_TOKENS: writeMod.MAX_OUTPUT_TOKENS,
     buildPrompt: writeMod.buildPrompt,
@@ -196,15 +193,15 @@ async function regenerateOne(
     signatureTitle: campaign.signature_title,
     signaturePhone: campaign.phone,
     signatureAddress: campaign.address,
+    campaignEmailTemplateId: campaign.email_template_id,
   }
 
-  const clientStyle = client?.email_style_id ? await deps.getEmailStyleById(supabase, client.email_style_id) : null
-  const style = clientStyle ?? (await deps.getDefaultEmailStyle(supabase))
+  const template = await deps.resolveEmailTemplate(supabase, campaign.email_template_id, client)
 
   const draft = await deps.generateJson(
     { clientId: sample.clientId, caseId: sample.caseId, actor: ACTOR },
     {
-      instructions: deps.buildSystemPrompt(style.voice_instructions),
+      instructions: deps.buildSystemPrompt(template.template_text),
       prompt: deps.buildPrompt(input, lead, knowledge, client),
       schema: deps.draftSchema,
       maxOutputTokens: deps.MAX_OUTPUT_TOKENS,

@@ -207,6 +207,7 @@ describe('updateCampaignSettings', () => {
     signature_title: null,
     phone: null,
     address: null,
+    email_template_id: null,
   }
 
   it('should return the updated campaign row', async () => {

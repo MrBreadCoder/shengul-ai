@@ -7,7 +7,7 @@ import { getTranslations } from 'next-intl/server'
 import { requireUser } from '@/lib/auth/require-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientById, listClientRoleAppUsers } from '@/lib/db/clients'
-import { listEmailStyles, getDefaultEmailStyle } from '@/lib/db/email-styles'
+import { listEmailTemplates, getDefaultEmailTemplate } from '@/lib/db/email-templates'
 import { listCampaignsForClient } from '@/lib/db/campaigns'
 import { listMailboxesForClient, listMailboxOptionsForClient } from '@/lib/db/mailboxes'
 import { listEventsForClient } from '@/lib/db/events'
@@ -37,7 +37,7 @@ import { DeleteClientDialog } from './delete-client-dialog'
 import { WarmupProfileSelect } from './warmup-profile-select'
 import { MailreachToggle } from './mailreach-toggle'
 import { DefaultLocaleSelect } from './default-locale-select'
-import { EmailStyleSelect } from './email-style-select'
+import { EmailTemplateSelect } from './email-template-select'
 import { ScheduleSettings } from './schedule-settings'
 import { WarmupTab } from './warmup-tab'
 import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
@@ -89,12 +89,12 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
   const admin = createAdminClient()
   const client = await getClientById(admin, clientId)
   if (!client) notFound()
-  const emailStyles = await listEmailStyles(admin)
-  // A client's email_style_id can be null (never explicitly set, or reset
-  // by a style deletion) — the dropdown always needs a real, resolved
-  // selection to display, so fall back to whichever style is default.
-  const selectedEmailStyle =
-    emailStyles.find((style) => style.id === client.email_style_id) ?? (await getDefaultEmailStyle(admin))
+  const emailTemplates = await listEmailTemplates(admin)
+  // A client's email_template_id can be null (never explicitly set, or reset
+  // by a template deletion) — the dropdown always needs a real, resolved
+  // selection to display, so fall back to whichever template is default.
+  const selectedEmailTemplate =
+    emailTemplates.find((template) => template.id === client.email_template_id) ?? (await getDefaultEmailTemplate(admin))
   const t = await getTranslations('clients')
 
   const [campaigns, clientAppUsers, authUsers, mailboxOptions] = await Promise.all([
@@ -191,7 +191,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
             <WarmupProfileSelect clientId={client.id} value={client.warmup_profile} />
             <MailreachToggle clientId={client.id} enabled={client.mailreach_enabled} />
             <DefaultLocaleSelect clientId={client.id} value={client.default_locale} />
-            <EmailStyleSelect clientId={client.id} styles={emailStyles} selectedStyleId={selectedEmailStyle.id} />
+            <EmailTemplateSelect clientId={client.id} templates={emailTemplates} selectedTemplateId={selectedEmailTemplate.id} />
             <ScheduleSettings
               clientId={client.id}
               timezone={client.timezone}
@@ -252,7 +252,12 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
 
         <TabsContent value="campaigns">
           <div className="flex max-w-3xl flex-col gap-6">
-            <NewCampaignForm fixedClientId={client.id} fixedClientName={client.name} mailboxes={mailboxOptions} />
+            <NewCampaignForm
+              fixedClientId={client.id}
+              fixedClientName={client.name}
+              mailboxes={mailboxOptions}
+              emailTemplates={emailTemplates}
+            />
             {campaigns.length === 0 ? (
               <EmptyState icon={Lightning} title={t('detail.noCampaignsTitle')} description={t('detail.noCampaignsDescription')} />
             ) : (

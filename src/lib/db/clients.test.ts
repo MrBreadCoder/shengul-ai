@@ -11,7 +11,7 @@ import {
   updateClientStatus,
   deleteClientCascade,
   updateClientWarmupProfile,
-  updateClientEmailStyle,
+  updateClientEmailTemplate,
   updateClientDomain,
   updateClientCompanyInfo,
   updateClientLogoUrl,
@@ -314,23 +314,23 @@ describe('updateClientWarmupProfile', () => {
   })
 })
 
-describe('updateClientEmailStyle', () => {
-  it('should persist the style id and return the updated client', async () => {
-    const row = { id: 'c1', email_style_id: 's2' }
+describe('updateClientEmailTemplate', () => {
+  it('should persist the template id and return the updated client', async () => {
+    const row = { id: 'c1', email_template_id: 't2' }
     const update = vi.fn().mockReturnValue({
       eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }),
     })
-    const result = await updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', 's2')
-    expect(update).toHaveBeenCalledWith({ email_style_id: 's2' })
+    const result = await updateClientEmailTemplate({ from: () => ({ update }) } as never, 'c1', 't2')
+    expect(update).toHaveBeenCalledWith({ email_template_id: 't2' })
     expect(result).toEqual(row)
   })
 
-  it('should allow clearing the style id with null', async () => {
+  it('should allow clearing the template id with null', async () => {
     const update = vi.fn().mockReturnValue({
-      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'c1', email_style_id: null }, error: null }) }) }),
+      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'c1', email_template_id: null }, error: null }) }) }),
     })
-    await updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', null)
-    expect(update).toHaveBeenCalledWith({ email_style_id: null })
+    await updateClientEmailTemplate({ from: () => ({ update }) } as never, 'c1', null)
+    expect(update).toHaveBeenCalledWith({ email_template_id: null })
   })
 
   it('should throw DB_ERROR when the update fails', async () => {
@@ -338,7 +338,7 @@ describe('updateClientEmailStyle', () => {
       eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }),
     })
     await expect(
-      updateClientEmailStyle({ from: () => ({ update }) } as never, 'c1', 's2'),
+      updateClientEmailTemplate({ from: () => ({ update }) } as never, 'c1', 't2'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

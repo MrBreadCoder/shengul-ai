@@ -9,7 +9,7 @@ import {
   updateClientDomain,
   updateClientSignature,
   updateClientCompanyInfo,
-  updateClientEmailStyle,
+  updateClientEmailTemplate,
   deleteClientCascade,
   listClientRoleAppUsers,
 } from '@/lib/db/clients'
@@ -47,7 +47,7 @@ const patchSchema = z
     // Generous cap — this is meant to hold a real paragraph or two of company
     // description, unlike the one-liner signature fields above.
     companyInfo: nullableTextSchema(4000).optional(),
-    emailStyleId: z.string().uuid().nullable().optional(),
+    emailTemplateId: z.string().uuid().nullable().optional(),
   })
   .refine(
     (body) =>
@@ -59,7 +59,7 @@ const patchSchema = z
       body.signatureName !== undefined ||
       body.signatureTitle !== undefined ||
       body.companyInfo !== undefined ||
-      body.emailStyleId !== undefined,
+      body.emailTemplateId !== undefined,
     { message: 'At least one field must be provided' },
   )
 
@@ -169,14 +169,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ clien
       }
     }
 
-    if (body.emailStyleId !== undefined) {
-      updated = await updateClientEmailStyle(admin, clientId, body.emailStyleId)
+    if (body.emailTemplateId !== undefined) {
+      updated = await updateClientEmailTemplate(admin, clientId, body.emailTemplateId)
       try {
         await logEvent({
           clientId,
           actor: `human:${appUser.id}`,
-          type: 'client.email_style_changed',
-          payload: { from: client.email_style_id, to: body.emailStyleId },
+          type: 'client.email_template_changed',
+          payload: { from: client.email_template_id, to: body.emailTemplateId },
         })
       } catch {
         // Audit logging is best-effort — the update already succeeded.

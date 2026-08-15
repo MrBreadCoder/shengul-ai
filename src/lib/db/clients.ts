@@ -179,23 +179,24 @@ export async function updateClientWarmupProfile(
   return data
 }
 
-// The client-level first-touch email voice — a reference into email_styles,
-// resolved by write.ts's buildSystemPrompt via getEmailStyleById /
-// getDefaultEmailStyle (see lib/db/email-styles.ts). `null` means "use
-// whichever style is currently marked default."
-export async function updateClientEmailStyle(
+// The client-level first-touch email template — a reference into
+// email_templates, resolved by write.ts's resolveEmailTemplate via
+// getEmailTemplateById / getDefaultEmailTemplate (see
+// lib/db/email-templates.ts). `null` means "use whichever template is
+// currently marked default."
+export async function updateClientEmailTemplate(
   supabase: SupabaseClient<Database>,
   id: string,
-  styleId: string | null,
+  templateId: string | null,
 ): Promise<ClientRow> {
   const { data, error } = await supabase
     .from('clients')
-    .update({ email_style_id: styleId })
+    .update({ email_template_id: templateId })
     .eq('id', id)
     .select('*')
     .single()
   if (error || !data) {
-    throw new AppError('DB_ERROR', 'Failed to update client email style', { id, cause: error?.message })
+    throw new AppError('DB_ERROR', 'Failed to update client email template', { id, cause: error?.message })
   }
   return data
 }

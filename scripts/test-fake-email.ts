@@ -6,8 +6,8 @@
 // signed body (via the same appendSignatureBlock() a real send would use), and the
 // same cliché/tell scan regenerate-sample-emails.ts uses.
 //
-//   pnpm test-fake-email                    # concise (default) style
-//   pnpm test-fake-email --style=formal     # formal introduction style
+//   pnpm test-fake-email                       # concise (default) template
+//   pnpm test-fake-email --template=formal     # formal introduction template
 //
 // Static imports here are limited to packages and type-only app imports — every app
 // module that transitively reads @/lib/env (generateJson itself) is dynamically
@@ -23,10 +23,11 @@ import type { KnowledgeRow } from '../src/lib/db/case-knowledge'
 const ACTOR = 'test_fake_email_script'
 
 // Byte-for-byte copies of the two seeded rows in
-// supabase/migrations/0035_email_styles_table.sql, as amended by
+// supabase/migrations/0035_email_styles_table.sql (table/column renamed to
+// email_templates/template_text by 0046), as amended by
 // 0038_fix_formal_intro_overclaim_and_isolation.sql, so this script exercises
 // the exact wording a real client would get — not an approximation of it.
-const STYLE_VOICE_INSTRUCTIONS: Record<'concise' | 'formal', string> = {
+const TEMPLATE_TEXT_BY_NAME: Record<'concise' | 'formal', string> = {
   concise:
     'You write short, human-sounding B2B cold emails. One clear idea. 90 words or fewer. ' +
     'Lead with the specific dossier fact, not a greeting. ' +
@@ -78,13 +79,13 @@ const STYLE_VOICE_INSTRUCTIONS: Record<'concise' | 'formal', string> = {
     'fewer, including the greeting.',
 }
 
-const argsSchema = z.object({ style: z.enum(['concise', 'formal']) })
+const argsSchema = z.object({ template: z.enum(['concise', 'formal']) })
 
 function parseArgs(argv: readonly string[]): z.infer<typeof argsSchema> {
-  const raw = argv.find((arg) => arg.startsWith('--style='))?.slice('--style='.length) ?? 'concise'
-  const parsed = argsSchema.safeParse({ style: raw })
+  const raw = argv.find((arg) => arg.startsWith('--template='))?.slice('--template='.length) ?? 'concise'
+  const parsed = argsSchema.safeParse({ template: raw })
   if (!parsed.success) {
-    throw new AppError('VALIDATION_ERROR', `Invalid --style (expected "concise" or "formal"), got "${raw}"`, {})
+    throw new AppError('VALIDATION_ERROR', `Invalid --template (expected "concise" or "formal"), got "${raw}"`, {})
   }
   return parsed.data
 }
@@ -132,7 +133,7 @@ function buildFakeClient(): ClientRow {
     warmup_profile: 'standard',
     mailreach_enabled: false,
     reply_mode: 'human_approve',
-    email_style_id: null,
+    email_template_id: null,
     followup_delays_days: [3, 7],
     default_locale: 'en',
     domain: 'vantagerobotics.com',
@@ -216,6 +217,7 @@ function buildFakeInput(): RunWriteInput {
     signatureTitle: null,
     signaturePhone: null,
     signatureAddress: null,
+    campaignEmailTemplateId: null,
   }
 }
 
@@ -275,11 +277,11 @@ async function main(): Promise<void> {
   const knowledge = buildFakeKnowledge()
   const input = buildFakeInput()
 
-  const systemPrompt = deps.buildSystemPrompt(STYLE_VOICE_INSTRUCTIONS[args.style])
+  const systemPrompt = deps.buildSystemPrompt(TEMPLATE_TEXT_BY_NAME[args.template])
   const userPrompt = deps.buildPrompt(input, lead, knowledge, client)
 
   console.log(`\n${'='.repeat(72)}`)
-  console.log(`FAKE SCENARIO — style: ${args.style}`)
+  console.log(`FAKE SCENARIO — template: ${args.template}`)
   console.log('='.repeat(72))
   console.log('\n--- SYSTEM PROMPT (buildSystemPrompt output) ---\n')
   console.log(systemPrompt)

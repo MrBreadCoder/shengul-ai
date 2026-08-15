@@ -9,13 +9,13 @@ const MODEL_ID = 'gemini-3-flash-preview'
 
 // Shared modelId override for every pipeline stage that writes outbound
 // email copy (write.ts, followup.ts, redesign.ts, reply.ts,
-// knowledge-answer.ts) — gemini-3.6-flash (GA July 2026) is more
+// knowledge-answer.ts) — gemini-3.7-flash (GA August 2026) is more
 // disciplined than the module default about not padding a thin dossier
 // with an invented claim. Centralized here (not duplicated per-file) so
 // there is exactly one place to change it. Not used by ai-relevance.ts —
 // that call is a classification, not email writing, and stays on its own
 // lighter model (gemini-3.1-flash-lite).
-export const EMAIL_WRITER_MODEL_ID = 'gemini-3.6-flash'
+export const EMAIL_WRITER_MODEL_ID = 'gemini-3.7-flash'
 
 // Raised 2026-08-10 (60s → 90s) alongside every other timeout in this
 // investigation — see TOOL_LOOP_TIMEOUT_MS below and brightdata.ts's

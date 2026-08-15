@@ -77,6 +77,7 @@ export async function POST(request: Request) {
       signature_title: body.signatureTitle,
       phone: body.phone,
       address: body.address,
+      email_template_id: body.emailTemplateId,
     })
     try {
       await logEvent({

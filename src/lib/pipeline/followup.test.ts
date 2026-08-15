@@ -43,7 +43,7 @@ vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => update
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
   generateText: (...a: unknown[]) => generateTextMock(...a),
-  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.7-flash',
 }))
 vi.mock('@/lib/qstash/client', () => ({ publishJsonWithDelay: (...a: unknown[]) => publishDelayMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a), logEventSafe: (...a: unknown[]) => logEventMock(...a) }))
@@ -148,14 +148,14 @@ describe('runFollowupStep', () => {
     )
   })
 
-  it('should generate the nudge with the gemini-3.6-flash override', async () => {
+  it('should generate the nudge with the gemini-3.7-flash override', async () => {
     claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
     sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
     publishDelayMock.mockResolvedValue('qmsg2')
     await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
+      expect.objectContaining({ modelId: 'gemini-3.7-flash' }),
     )
   })
 

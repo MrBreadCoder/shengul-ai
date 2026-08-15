@@ -5,7 +5,7 @@ import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge
 import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getClientById, type ClientRow } from '@/lib/db/clients'
-import { getEmailStyleById, getDefaultEmailStyle } from '@/lib/db/email-styles'
+import { getEmailTemplateById, getDefaultEmailTemplate, type EmailTemplateRow } from '@/lib/db/email-templates'
 import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
 import { updateCaseStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
@@ -58,6 +58,9 @@ export interface RunWriteInput {
   signatureTitle: string | null
   signaturePhone: string | null
   signatureAddress: string | null
+  // Per-campaign override of the owning client's email template — null
+  // means inherit the client's template. See resolveEmailTemplate below.
+  campaignEmailTemplateId: string | null
 }
 
 export interface WriteSummary {
@@ -80,8 +83,8 @@ const DOSSIER_KIND_PRIORITY: Record<Database['public']['Enums']['knowledge_kind'
   company: 4,
 }
 
-// Shared across every style's system prompt so subject-line formatting can
-// never drift between them.
+// Shared across every template's system prompt so subject-line formatting
+// can never drift between them.
 const SUBJECT_LINE_RULES = [
   `Subject line: 2-5 words, under ${SUBJECT_TARGET_CHARS} characters so it never truncates`,
   'on mobile. Make it specific to the recipient\'s company, role, or a dossier fact —',
@@ -90,13 +93,16 @@ const SUBJECT_LINE_RULES = [
   'act now, urgent, limited time, buy now).',
 ]
 
-// Always true regardless of which email_styles row a client is on — never
-// something an operator-authored style's voice_instructions can opt out of.
-// This is the entire trust boundary between "operator picks the voice and
-// structure" and "operator can break compliance": subject formatting,
+// Always true regardless of which email_templates row a campaign or client
+// is on — never something an operator-authored template's text can opt out
+// of. This is the entire trust boundary between "operator picks the
+// template" and "operator can break compliance": subject formatting,
 // English-only output, no bulk-sender markers, and dossier-grounded facts
 // all live here, in code, never in a database row a non-engineer edits. See
-// docs/superpowers/specs/2026-08-09-editable-email-styles-design.md
+// docs/superpowers/specs/2026-08-09-editable-email-styles-design.md (the
+// mechanism it describes is unchanged; only the "style" naming and the
+// per-row content model — literal template vs. abstract voice instructions
+// — changed 2026-08-15, see .claude/roadmap.md).
 const FIXED_GUARDRAILS = [
   'Always write in English, even if the dossier or company knowledge below is in',
   'another language — translate any facts you use, never copy foreign-language text.',
@@ -141,11 +147,54 @@ const FIXED_GUARDRAILS = [
   HUMAN_VOICE_INSTRUCTION,
 ].join(' ')
 
-// Combines the fixed guardrails above with a style's operator-authored voice
-// text (email_styles.voice_instructions). The only place style text touches
-// the system prompt — kept pure so it's trivial to unit test.
-export function buildSystemPrompt(voiceInstructions: string): string {
-  return `${FIXED_GUARDRAILS} ${voiceInstructions}`
+// Frames a campaign's reference template (email_templates.template_text) so
+// the model treats it as inspiration to personalize, not a literal
+// find-and-replace target or a second, conflicting set of rules. Written to
+// work whether the row holds an actual example email (the normal case for a
+// new per-campaign template — see .claude/roadmap.md 2026-08-15) or the
+// older abstract "1. Greeting: ... 2. Self-introduction: ..."-style
+// instructions the two seeded rows (Concise / Formal introduction) still
+// carry — "study and personalize" reads sensibly against either.
+const TEMPLATE_USAGE_INSTRUCTION = [
+  "Below is this campaign's reference template — the client's own voice, structure, and offer for this audience.",
+  'Study its opening, structure, tone, and the value-proposition points it draws on, then write a new, fully',
+  'personalized email in the same spirit for this specific recipient. Never copy it verbatim and never leave a',
+  'bracketed placeholder like [Name] or [Hotel Name] in the output — replace it with the real recipient or company',
+  'detail given below, or drop that clause entirely if no matching detail is available. If the template contains',
+  'more than one example separated by a "---" line, they cover different sub-segments of this campaign\'s',
+  'audience — use whichever one\'s framing and proof points best match this recipient\'s actual company or',
+  'industry from the dossier below, and do not blend proof points from the others. The template\'s own sign-off is',
+  'never part of your output — a signature block is appended separately, after you write the body.',
+  'Reference template:',
+].join(' ')
+
+// Combines the fixed guardrails above with a campaign or client's
+// operator-authored reference template (email_templates.template_text). The
+// only place template text touches the system prompt — kept pure so it's
+// trivial to unit test.
+export function buildSystemPrompt(templateText: string): string {
+  return `${FIXED_GUARDRAILS} ${TEMPLATE_USAGE_INSTRUCTION}\n"""\n${templateText}\n"""`
+}
+
+// Campaign template (if set) beats the owning client's template, which beats
+// whichever template is marked default — same precedence order as
+// resolveSignatureContext in ./signature, just against a single id instead
+// of four independent fields. Exported so scripts/regenerate-sample-emails.ts
+// and scripts/rewrite-draft-emails.ts (which drive this exact generation
+// path against historical/draft rows) resolve the same template write.ts
+// actually uses, without duplicating this precedence logic.
+export async function resolveEmailTemplate(
+  supabase: SupabaseClient<Database>,
+  campaignEmailTemplateId: string | null,
+  client: ClientRow | null,
+): Promise<EmailTemplateRow> {
+  const campaignTemplate = campaignEmailTemplateId
+    ? await getEmailTemplateById(supabase, campaignEmailTemplateId)
+    : null
+  if (campaignTemplate) return campaignTemplate
+
+  const clientTemplate = client?.email_template_id ? await getEmailTemplateById(supabase, client.email_template_id) : null
+  return clientTemplate ?? (await getDefaultEmailTemplate(supabase))
 }
 
 export function buildPrompt(
@@ -186,24 +235,24 @@ async function processLead(
   if (!lead.email) return 'skipped'
   if (await isSuppressed(supabase, input.clientId, lead.email)) return 'skipped'
 
-  // Resolves the client's configured voice, falling back to the DB-wide
-  // default whenever the client has none set (or has no row at all) — same
-  // "missing client row never blocks generation" guarantee the old
-  // selectSystemPrompt(undefined) fallback provided.
-  const clientStyle = client?.email_style_id ? await getEmailStyleById(supabase, client.email_style_id) : null
-  const style = clientStyle ?? (await getDefaultEmailStyle(supabase))
+  // Resolves this campaign's configured template, falling back to the
+  // client's, falling back to the DB-wide default whenever neither is set
+  // (or the client has no row at all) — same "missing client row never
+  // blocks generation" guarantee the old selectSystemPrompt(undefined)
+  // fallback provided.
+  const template = await resolveEmailTemplate(supabase, input.campaignEmailTemplateId, client)
 
   const context: LlmCallContext = { clientId: input.clientId, caseId: input.caseId, actor: ACTOR }
   const draft = await generateJson(context, {
-    instructions: buildSystemPrompt(style.voice_instructions),
+    instructions: buildSystemPrompt(template.template_text),
     prompt: buildPrompt(input, lead, knowledge, client),
     schema: draftSchema,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     timeoutMs: GENERATE_TIMEOUT_MS,
     modelId: EMAIL_WRITER_MODEL_ID,
     // Raised back 'low' -> 'medium' (2026-08-12): the 2026-08-10 cost/latency
-    // cut regressed email quality — FIXED_GUARDRAILS + a style's
-    // voice_instructions is a long, dense rulebook (isolated-fact avoidance,
+    // cut regressed email quality — FIXED_GUARDRAILS + a campaign's
+    // reference template is a long, dense rulebook (isolated-fact avoidance,
     // no-overclaim, relevance, tone), and 'low' thinking wasn't reliably
     // holding all of it under real dossiers (see .claude/roadmap.md
     // 2026-08-12). MAX_OUTPUT_TOKENS keeps its 2,600 headroom regardless:

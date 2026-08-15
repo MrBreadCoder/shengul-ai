@@ -23,7 +23,7 @@ vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClie
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
   generateText: (...a: unknown[]) => generateTextMock(...a),
-  EMAIL_WRITER_MODEL_ID: 'gemini-3.6-flash',
+  EMAIL_WRITER_MODEL_ID: 'gemini-3.7-flash',
 }))
 vi.mock('@/lib/pipeline/reply', () => ({
   sendOrDraftReply: (...a: unknown[]) => sendOrDraftReplyMock(...a),
@@ -57,11 +57,11 @@ describe('runKnowledgeAnswer', () => {
     expect(result.action).toBe('sent')
   })
 
-  it('should generate the answer with the gemini-3.6-flash override', async () => {
+  it('should generate the answer with the gemini-3.7-flash override', async () => {
     await runKnowledgeAnswer({} as never, { knowledgeRequestId: 'kr1' })
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ modelId: 'gemini-3.6-flash' }),
+      expect.objectContaining({ modelId: 'gemini-3.7-flash' }),
     )
   })
 

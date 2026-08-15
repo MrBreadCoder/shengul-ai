@@ -54,6 +54,10 @@ export const campaignSettingsSchema = z.object({
   signatureTitle: nullableTextSchema(120).default(null),
   phone: nullablePhoneSchema.default(null),
   address: nullableTextSchema(200).default(null),
+  // Per-campaign override of the owning client's email template — null
+  // means inherit the client's template. See resolveEmailTemplate in
+  // src/lib/pipeline/write.ts.
+  emailTemplateId: z.string().uuid().nullable().default(null),
 })
 
 export type CampaignSettingsInput = z.infer<typeof campaignSettingsSchema>

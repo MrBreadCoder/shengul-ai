@@ -65,6 +65,7 @@ export async function POST(request: Request) {
         signatureTitle: campaign.signature_title,
         signaturePhone: campaign.phone,
         signatureAddress: campaign.address,
+        campaignEmailTemplateId: campaign.email_template_id,
       })
       return NextResponse.json({ ok: true, summary })
     } catch (writeError) {

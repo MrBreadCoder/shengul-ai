@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { MailboxOption } from '@/lib/db/mailboxes'
+import type { EmailTemplateRow } from '@/lib/db/email-templates'
 import { CampaignSettingsFields, Field } from './campaign-settings-fields'
 import { splitCsv, getAllStrings } from './campaign-form-utils'
 
@@ -25,9 +26,10 @@ interface ClientOption {
 
 type SubmitState = { status: 'idle' } | { status: 'submitting' } | { status: 'error'; message: string }
 
-type NewCampaignFormProps =
+type NewCampaignFormProps = { emailTemplates: EmailTemplateRow[] } & (
   | { clients: ClientOption[]; mailboxesByClientId: Record<string, MailboxOption[]> }
   | { fixedClientId: string; fixedClientName: string; mailboxes: MailboxOption[] }
+)
 
 export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
@@ -57,6 +59,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
     const signatureTitleRaw = formData.get('signatureTitle')
     const phoneRaw = formData.get('phone')
     const addressRaw = formData.get('address')
+    const emailTemplateIdRaw = formData.get('emailTemplateId')
     const body = {
       clientId,
       name: String(formData.get('name') ?? ''),
@@ -80,6 +83,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
       signatureTitle: signatureTitleRaw ? String(signatureTitleRaw) : null,
       phone: phoneRaw ? String(phoneRaw) : null,
       address: addressRaw ? String(addressRaw) : null,
+      emailTemplateId: emailTemplateIdRaw ? String(emailTemplateIdRaw) : null,
     }
 
     try {
@@ -154,6 +158,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
 
       <CampaignSettingsFields
         mailboxes={mailboxes}
+        emailTemplates={props.emailTemplates}
         defaultValues={{
           valueProp: '',
           bookingLink: '',
@@ -175,6 +180,7 @@ export function NewCampaignForm(props: NewCampaignFormProps): React.ReactElement
           signatureTitle: '',
           phone: '',
           address: '',
+          emailTemplateId: '',
         }}
       />
 

@@ -9,9 +9,9 @@ export type AppErrorCode =
   | 'DB_ERROR'
   | 'CONFIG_ERROR'
   | 'INVARIANT_VIOLATION'
-  | 'EMAIL_STYLE_NAME_TAKEN'
-  | 'EMAIL_STYLE_NOT_FOUND'
-  | 'CANNOT_DELETE_DEFAULT_STYLE'
+  | 'EMAIL_TEMPLATE_NAME_TAKEN'
+  | 'EMAIL_TEMPLATE_NOT_FOUND'
+  | 'CANNOT_DELETE_DEFAULT_TEMPLATE'
 
 export class AppError extends Error {
   public readonly code: AppErrorCode

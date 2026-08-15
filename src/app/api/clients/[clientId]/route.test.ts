@@ -6,7 +6,7 @@ const updateClientNameMock = vi.fn()
 const updateClientDomainMock = vi.fn()
 const updateClientSignatureMock = vi.fn()
 const updateClientCompanyInfoMock = vi.fn()
-const updateClientEmailStyleMock = vi.fn()
+const updateClientEmailTemplateMock = vi.fn()
 const deleteClientCascadeMock = vi.fn()
 const listClientRoleAppUsersMock = vi.fn()
 const deleteAuthUsersMock = vi.fn()
@@ -20,7 +20,7 @@ vi.mock('@/lib/db/clients', () => ({
   updateClientDomain: (...a: unknown[]) => updateClientDomainMock(...a),
   updateClientSignature: (...a: unknown[]) => updateClientSignatureMock(...a),
   updateClientCompanyInfo: (...a: unknown[]) => updateClientCompanyInfoMock(...a),
-  updateClientEmailStyle: (...a: unknown[]) => updateClientEmailStyleMock(...a),
+  updateClientEmailTemplate: (...a: unknown[]) => updateClientEmailTemplateMock(...a),
   deleteClientCascade: (...a: unknown[]) => deleteClientCascadeMock(...a),
   listClientRoleAppUsers: (...a: unknown[]) => listClientRoleAppUsersMock(...a),
 }))
@@ -48,7 +48,7 @@ beforeEach(() => {
   updateClientDomainMock.mockReset()
   updateClientSignatureMock.mockReset()
   updateClientCompanyInfoMock.mockReset()
-  updateClientEmailStyleMock.mockReset()
+  updateClientEmailTemplateMock.mockReset()
   deleteClientCascadeMock.mockReset()
   listClientRoleAppUsersMock.mockReset()
   deleteAuthUsersMock.mockReset()
@@ -196,32 +196,32 @@ describe('PATCH /api/clients/[clientId]', () => {
     expect(updateClientCompanyInfoMock).not.toHaveBeenCalled()
   })
 
-  const STYLE_ID = '22222222-2222-4222-a222-222222222222'
+  const TEMPLATE_ID = '22222222-2222-4222-a222-222222222222'
 
-  it('should save the email style id and log the event on success', async () => {
-    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_style_id: null })
-    updateClientEmailStyleMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_style_id: STYLE_ID })
-    const res = await PATCH(req({ emailStyleId: STYLE_ID }), ctx('c1'))
+  it('should save the email template id and log the event on success', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_template_id: null })
+    updateClientEmailTemplateMock.mockResolvedValue({ id: 'c1', name: 'Uniforms Fashion', email_template_id: TEMPLATE_ID })
+    const res = await PATCH(req({ emailTemplateId: TEMPLATE_ID }), ctx('c1'))
     const json = await res.json()
     expect(res.status).toBe(200)
-    expect(json.client.email_style_id).toBe(STYLE_ID)
-    expect(updateClientEmailStyleMock).toHaveBeenCalledWith(expect.anything(), 'c1', STYLE_ID)
-    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'client.email_style_changed' }))
+    expect(json.client.email_template_id).toBe(TEMPLATE_ID)
+    expect(updateClientEmailTemplateMock).toHaveBeenCalledWith(expect.anything(), 'c1', TEMPLATE_ID)
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', type: 'client.email_template_changed' }))
   })
 
-  it('should allow clearing the email style id back to null (use the default style)', async () => {
-    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_style_id: STYLE_ID })
-    updateClientEmailStyleMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_style_id: null })
-    const res = await PATCH(req({ emailStyleId: null }), ctx('c1'))
+  it('should allow clearing the email template id back to null (use the default template)', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_template_id: TEMPLATE_ID })
+    updateClientEmailTemplateMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_template_id: null })
+    const res = await PATCH(req({ emailTemplateId: null }), ctx('c1'))
     expect(res.status).toBe(200)
-    expect(updateClientEmailStyleMock).toHaveBeenCalledWith(expect.anything(), 'c1', null)
+    expect(updateClientEmailTemplateMock).toHaveBeenCalledWith(expect.anything(), 'c1', null)
   })
 
-  it('should return 400 for a non-uuid email style id', async () => {
-    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_style_id: null })
-    const res = await PATCH(req({ emailStyleId: 'not-a-uuid' }), ctx('c1'))
+  it('should return 400 for a non-uuid email template id', async () => {
+    getClientByIdMock.mockResolvedValue({ id: 'c1', name: 'Acme', email_template_id: null })
+    const res = await PATCH(req({ emailTemplateId: 'not-a-uuid' }), ctx('c1'))
     expect(res.status).toBe(400)
-    expect(updateClientEmailStyleMock).not.toHaveBeenCalled()
+    expect(updateClientEmailTemplateMock).not.toHaveBeenCalled()
   })
 })
 

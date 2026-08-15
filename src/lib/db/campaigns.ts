@@ -158,6 +158,7 @@ export interface CampaignSettingsPatch {
   signature_title: string | null
   phone: string | null
   address: string | null
+  email_template_id: string | null
 }
 
 // Full-replace update of a campaign's editable settings (name, value prop,

@@ -18,7 +18,7 @@ export interface Database {
           warmup_profile: Database['public']['Enums']['warmup_profile']
           mailreach_enabled: boolean
           reply_mode: Database['public']['Enums']['reply_mode']
-          email_style_id: string | null
+          email_template_id: string | null
           followup_delays_days: number[]
           default_locale: Database['public']['Enums']['app_locale']
           domain: string | null
@@ -41,7 +41,7 @@ export interface Database {
           warmup_profile?: Database['public']['Enums']['warmup_profile']
           mailreach_enabled?: boolean
           reply_mode?: Database['public']['Enums']['reply_mode']
-          email_style_id?: string | null
+          email_template_id?: string | null
           followup_delays_days?: number[]
           default_locale?: Database['public']['Enums']['app_locale']
           domain?: string | null
@@ -59,19 +59,19 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['clients']['Insert']>
         Relationships: [
           {
-            foreignKeyName: 'clients_email_style_id_fkey'
-            columns: ['email_style_id']
+            foreignKeyName: 'clients_email_template_id_fkey'
+            columns: ['email_template_id']
             isOneToOne: false
-            referencedRelation: 'email_styles'
+            referencedRelation: 'email_templates'
             referencedColumns: ['id']
           },
         ]
       }
-      email_styles: {
+      email_templates: {
         Row: {
           id: string
           name: string
-          voice_instructions: string
+          template_text: string
           is_default: boolean
           created_at: string
           updated_at: string
@@ -79,12 +79,12 @@ export interface Database {
         Insert: {
           id?: string
           name: string
-          voice_instructions: string
+          template_text: string
           is_default?: boolean
           created_at?: string
           updated_at?: string
         }
-        Update: Partial<Database['public']['Tables']['email_styles']['Insert']>
+        Update: Partial<Database['public']['Tables']['email_templates']['Insert']>
         Relationships: []
       }
       app_users: {
@@ -138,6 +138,11 @@ export interface Database {
           signature_title: string | null
           phone: string | null
           address: string | null
+          // Nullable per-campaign override of the owning client's email
+          // template — null means "inherit the client's template", same
+          // convention as the signature fields above. See
+          // resolveEmailTemplate in src/lib/pipeline/write.ts.
+          email_template_id: string | null
           next_discover_at: string
           created_at: string
           updated_at: string
@@ -161,6 +166,7 @@ export interface Database {
           signature_title?: string | null
           phone?: string | null
           address?: string | null
+          email_template_id?: string | null
           next_discover_at?: string
           created_at?: string
           updated_at?: string
@@ -172,6 +178,13 @@ export interface Database {
             columns: ['client_id']
             isOneToOne: false
             referencedRelation: 'clients'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'campaigns_email_template_id_fkey'
+            columns: ['email_template_id']
+            isOneToOne: false
+            referencedRelation: 'email_templates'
             referencedColumns: ['id']
           },
         ]
@@ -1107,9 +1120,9 @@ export interface Database {
         Args: { p_mailbox_id: string }
         Returns: Database['public']['Tables']['mailboxes']['Row'][]
       }
-      set_default_email_style: {
+      set_default_email_template: {
         Args: { p_id: string }
-        Returns: Database['public']['Tables']['email_styles']['Row'][]
+        Returns: Database['public']['Tables']['email_templates']['Row'][]
       }
       mailbox_send_stats: {
         Args: { p_since: string }

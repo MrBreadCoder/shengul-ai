@@ -111,6 +111,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ campa
       signature_title: body.signatureTitle,
       phone: body.phone,
       address: body.address,
+      email_template_id: body.emailTemplateId,
     })
     // Recompute unconditionally rather than diffing old vs. new — cheap,
     // and correctly handles every case: an override changed, an override

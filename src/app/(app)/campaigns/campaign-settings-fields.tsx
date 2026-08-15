@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { TimeOfDayInput } from '@/components/ui/time-of-day-input'
 import { apolloPersonSeniorities, apolloContactEmailStatuses } from '@/lib/apollo/types'
 import type { MailboxOption } from '@/lib/db/mailboxes'
+import type { EmailTemplateRow } from '@/lib/db/email-templates'
 
 const SENIORITY_KEY: Record<(typeof apolloPersonSeniorities)[number], string> = {
   owner: 'seniority.owner',
@@ -79,6 +80,11 @@ export interface CampaignSettingsDefaults {
   signatureTitle: string
   phone: string
   address: string
+  // Per-campaign email template override — empty string means "no override,
+  // inherit the client's template", same convention as discoverTimezone/
+  // signature fields above. See resolveEmailTemplate in
+  // src/lib/pipeline/write.ts.
+  emailTemplateId: string
 }
 
 interface CampaignSettingsFieldsProps {
@@ -87,13 +93,16 @@ interface CampaignSettingsFieldsProps {
   // like the rest of the fieldset, since it's the option list rather than the
   // current selection. Empty when the client has none connected yet.
   mailboxes: MailboxOption[]
+  // Every email template available to pick from for the override below —
+  // same "option list, not a default value" reasoning as mailboxes.
+  emailTemplates: EmailTemplateRow[]
 }
 
 // Shared between NewCampaignForm and EditCampaignForm: value prop, booking
 // link, daily target, and the full ICP fieldset are identical in both create
 // and edit — only the surrounding <form> (client selector vs. fixed client,
 // submit target, submit label) differs between the two callers.
-export function CampaignSettingsFields({ defaultValues, mailboxes }: CampaignSettingsFieldsProps): React.ReactElement {
+export function CampaignSettingsFields({ defaultValues, mailboxes, emailTemplates }: CampaignSettingsFieldsProps): React.ReactElement {
   const t = useTranslations('campaigns')
   // Uncontrolled everywhere else in this component — FormData is read
   // straight off the DOM on submit. discoverTime is the one exception: it's
@@ -274,6 +283,27 @@ export function CampaignSettingsFields({ defaultValues, mailboxes }: CampaignSet
           </Field>
         </div>
       </fieldset>
+
+      <Field
+        id="emailTemplateId"
+        label={t('newCampaignForm.emailTemplateLabel')}
+        hint={t('newCampaignForm.emailTemplateHint')}
+      >
+        <select
+          id="emailTemplateId"
+          name="emailTemplateId"
+          defaultValue={defaultValues.emailTemplateId}
+          className={NATIVE_SELECT_CLASSNAME}
+          toolparamdescription={t('newCampaignForm.emailTemplateToolParamDescription')}
+        >
+          <option value="">{t('newCampaignForm.emailTemplateInheritOption')}</option>
+          {emailTemplates.map((template) => (
+            <option key={template.id} value={template.id}>
+              {template.name}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <fieldset className="border-hairline flex flex-col gap-5 border-t pt-5">
         <legend className="sr-only">{t('newCampaignForm.icpLegend')}</legend>

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { ApolloIcpFilters } from '@/lib/apollo/types'
 import type { MailboxOption } from '@/lib/db/mailboxes'
+import type { EmailTemplateRow } from '@/lib/db/email-templates'
 import { CampaignSettingsFields, Field } from '../../campaign-settings-fields'
 import { splitCsv, getAllStrings } from '../../campaign-form-utils'
 
@@ -31,6 +32,8 @@ interface EditCampaignFormProps {
   signatureTitle: string | null
   phone: string | null
   address: string | null
+  emailTemplates: EmailTemplateRow[]
+  emailTemplateId: string | null
 }
 
 export function EditCampaignForm({
@@ -50,6 +53,8 @@ export function EditCampaignForm({
   signatureTitle,
   phone,
   address,
+  emailTemplates,
+  emailTemplateId,
 }: EditCampaignFormProps): React.ReactElement {
   const t = useTranslations('campaigns')
   const router = useRouter()
@@ -65,6 +70,7 @@ export function EditCampaignForm({
     const signatureTitleRaw = formData.get('signatureTitle')
     const phoneRaw = formData.get('phone')
     const addressRaw = formData.get('address')
+    const emailTemplateIdRaw = formData.get('emailTemplateId')
     const body = {
       name: String(formData.get('name') ?? ''),
       valueProp: String(formData.get('valueProp') ?? ''),
@@ -87,6 +93,7 @@ export function EditCampaignForm({
       signatureTitle: signatureTitleRaw ? String(signatureTitleRaw) : null,
       phone: phoneRaw ? String(phoneRaw) : null,
       address: addressRaw ? String(addressRaw) : null,
+      emailTemplateId: emailTemplateIdRaw ? String(emailTemplateIdRaw) : null,
     }
 
     try {
@@ -132,6 +139,7 @@ export function EditCampaignForm({
 
       <CampaignSettingsFields
         mailboxes={mailboxes}
+        emailTemplates={emailTemplates}
         defaultValues={{
           valueProp,
           bookingLink: bookingLink ?? '',
@@ -153,6 +161,7 @@ export function EditCampaignForm({
           signatureTitle: signatureTitle ?? '',
           phone: phone ?? '',
           address: address ?? '',
+          emailTemplateId: emailTemplateId ?? '',
         }}
       />
 
