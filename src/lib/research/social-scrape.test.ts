@@ -5,6 +5,7 @@ vi.mock('@/lib/http/fetch-json', () => ({ fetchJson: mockFetchJson }))
 vi.mock('@/lib/env', () => ({ env: { BRIGHTDATA_API_KEY: 'test-brightdata-key' } }))
 
 import { discoverLinkedInPersonPosts, discoverLinkedInCompanyPosts, discoverXPersonPosts, discoverXCompanyPosts } from './social-scrape'
+import { BRIGHTDATA_MAX_CONCURRENT } from './brightdata-limiter'
 
 beforeEach(() => { mockFetchJson.mockReset() })
 
@@ -167,5 +168,47 @@ describe('polling behavior', () => {
 
     await assertion
     vi.useRealTimers()
+  })
+})
+
+describe('discovery job concurrency', () => {
+  it('should cap concurrent discovery jobs at BRIGHTDATA_MAX_CONCURRENT and queue the rest', async () => {
+    const overflow = 2
+    const total = BRIGHTDATA_MAX_CONCURRENT + overflow
+    const profileUrls = Array.from({ length: total }, (_, i) => `https://www.linkedin.com/in/person-${i}/`)
+    const startedProfiles: string[] = []
+    const triggerDeferreds = new Map<string, () => void>()
+    const triggerPromises = new Map<string, Promise<{ snapshot_id: string }>>()
+
+    for (const profileUrl of profileUrls) {
+      let resolveFn: () => void = () => {}
+      const promise = new Promise<{ snapshot_id: string }>((resolve) => {
+        resolveFn = () => resolve({ snapshot_id: `snap-${profileUrl}` })
+      })
+      triggerDeferreds.set(profileUrl, resolveFn)
+      triggerPromises.set(profileUrl, promise)
+    }
+
+    mockFetchJson.mockImplementation((url: string, options: RequestInit) => {
+      if (url.includes('/trigger?')) {
+        const body = JSON.parse(options.body as string) as { input: Array<{ url: string }> }
+        const profileUrl = body.input[0]!.url
+        startedProfiles.push(profileUrl)
+        return triggerPromises.get(profileUrl)
+      }
+      if (url.includes('/progress/')) {
+        return Promise.resolve({ status: 'ready', snapshot_id: 'irrelevant-in-this-test' })
+      }
+      return Promise.resolve([]) // snapshot download
+    })
+
+    const calls = profileUrls.map((profileUrl) => discoverLinkedInPersonPosts(profileUrl))
+    await vi.waitFor(() => expect(startedProfiles).toHaveLength(BRIGHTDATA_MAX_CONCURRENT))
+
+    for (const profileUrl of profileUrls.slice(0, BRIGHTDATA_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
+    await vi.waitFor(() => expect(startedProfiles).toHaveLength(total))
+
+    for (const profileUrl of profileUrls.slice(BRIGHTDATA_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
+    await Promise.all(calls)
   })
 })

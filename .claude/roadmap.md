@@ -6228,3 +6228,79 @@ in a new migration rather than editing 0044).
   `vitest.integration.config.ts` only runs `*.integration.test.ts` files
   and needs a live Supabase instance to execute, same limitation as
   0044's own migration noted above).
+
+## 2026-08-15 — Concurrency limiter for Bright Data (closes the 2026-08-10 "Cluster B" gap)
+
+User asked for a concurrency limiter on Bright Data. This was already
+root-caused in the 2026-08-10 "Raised all the timeout/token-budget
+limits" entry above: with no cap, `collectSocialKnowledge`'s
+`Promise.all` fan-out (2 + 2×leads Bright Data calls at once) plus the
+research agent's own tool-call concurrency could fire more simultaneous
+Bright Data requests than the zone could serve, surfacing as "aborted" /
+"Unexpected response shape" failures. That entry explicitly flagged "a
+concurrency cap (semaphore)... sized to whatever BrightData's dashboard
+reports as the zone's actual concurrent-connection limit" as the real
+fix, left unimplemented at the time.
+
+Checked Bright Data's docs for that number before picking one (user
+asked explicitly). No clean answer: the Web Unlocker/SERP product
+(`brightdata.ts` — the one that was actually erroring) publishes no
+concurrent-connections limit at all, only a 1,000 req/min rate limit for
+unfunded accounts; the real per-zone concurrency ceiling is
+account-specific, visible only in Control Panel → zone → Overview →
+Access details (not reachable from here). The Datasets API (LinkedIn/X
+posts, `social-scrape.ts`) does publish numbers, but inconsistently
+across pages — 5,000 concurrent jobs on LinkedIn's own async-requests
+page and the general Scrapers Library overview, vs 100 batch / 1,500
+single-input on the Twitter/Facebook/ChatGPT/Amazon/TikTok pages — all
+comfortably above anything this app produces on its own (worst case
+~22 concurrent social jobs at `contactsPerCompany` max=10). User chose a
+conservative default now over waiting on a dashboard check.
+
+**Implementation** (`superpowers:brainstorming` bounded path → user
+approved in chat, no spec file; TDD throughout):
+- `src/lib/http/concurrency-limiter.ts` (new): `createConcurrencyLimiter(maxConcurrent)`
+  — generic, dependency-free FIFO semaphore. Returns a `limit(fn)`
+  wrapper; queues callers beyond the cap, releases (and hands the slot to
+  the next queued caller) on both success and throw. 5 unit tests: runs
+  immediately under the limit, never exceeds the cap, starts a queued
+  task once an earlier one finishes, releases on throw, keeps each
+  caller's result independent.
+- `src/lib/research/brightdata-limiter.ts` (new): `BRIGHTDATA_MAX_CONCURRENT = 5`
+  (the conservative default above, with a comment on where to find the
+  real number) and `limitBrightdataConcurrency`, one shared
+  `createConcurrencyLimiter` instance — shared, not per-module, so the
+  cap reflects total Bright Data load rather than letting each caller
+  independently max out the zone at the same time.
+- Wired into `brightdata.ts`: `search()` and `scrape()` each wrap their
+  existing `withRetry(...)` call in `limitBrightdataConcurrency(...)` —
+  one slot per logical operation including its retries, not re-acquired
+  per attempt.
+- Wired into `social-scrape.ts`: `discoverPosts()` (the whole
+  trigger→poll→download job lifecycle, not each individual HTTP call) is
+  wrapped in `limitBrightdataConcurrency(...)` — a slot represents one
+  in-flight *job*, matching how Bright Data's own "too many running jobs
+  for this dataset" 429 counts concurrency, and correctly holds the slot
+  across the up-to-180s poll loop rather than releasing and re-acquiring
+  every 5s.
+- Known, accepted trade-off: search/scrape and social-discovery jobs
+  share one pool. A discovery job can hold its slot for the full
+  ~180s-worst-case lifecycle, so a `search`/`scrape` call queued behind
+  several running discovery jobs waits its turn (FIFO — never starved,
+  just delayed). Flagged to the user before implementing; accepted.
+- Added real (non-mocked-away) concurrency integration tests proving the
+  wiring, not just the primitive: `brightdata.test.ts` fires
+  `BRIGHTDATA_MAX_CONCURRENT + 2` concurrent `search()` calls against
+  controllable deferred `fetchJson` responses and asserts exactly 5 start
+  before any resolve, the rest only starting once slots free;
+  `social-scrape.test.ts` does the same at the `discoverPosts()` level,
+  identifying each queued job by the profile URL in its trigger request
+  body. Both use `vi.waitFor` rather than counting microtask ticks
+  manually (the real await-chain depth through `withRetry`/`limit`
+  turned out to need more ticks than a naive fixed count, which the
+  first draft of the test caught).
+- No new dependency, no env var, no schema change — pure application code.
+- Verified: `tsc --noEmit` clean, `eslint` clean on every touched/new
+  file, `vitest run` — **222 files, 2494 tests, all green** (7 new: 5 in
+  `concurrency-limiter.test.ts`, 1 each in `brightdata.test.ts` and
+  `social-scrape.test.ts`).

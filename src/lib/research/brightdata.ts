@@ -3,6 +3,7 @@ import { env } from '@/lib/env'
 import { AppError } from '@/lib/errors/app-error'
 import { fetchJson } from '@/lib/http/fetch-json'
 import { fetchText } from '@/lib/http/fetch-text'
+import { limitBrightdataConcurrency } from './brightdata-limiter'
 import type { WebResearch, WebSnippet } from './provider'
 
 // Both SERP and Web Unlocker requests go through the same Bright Data proxy
@@ -76,19 +77,21 @@ export const brightdataResearch: WebResearch = {
       // brd_json=1 asks Bright Data's SERP parser for structured JSON (the
       // `serpResponseSchema` shape below) instead of raw Google HTML.
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&brd_json=1`
-      response = await withRetry(() =>
-        fetchJson(
-          BRIGHTDATA_REQUEST_URL,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${env.BRIGHTDATA_API_KEY}`,
-              'Content-Type': 'application/json',
+      response = await limitBrightdataConcurrency(() =>
+        withRetry(() =>
+          fetchJson(
+            BRIGHTDATA_REQUEST_URL,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${env.BRIGHTDATA_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ zone: env.BRIGHTDATA_SERP_ZONE, url: searchUrl, format: 'raw' }),
             },
-            body: JSON.stringify({ zone: env.BRIGHTDATA_SERP_ZONE, url: searchUrl, format: 'raw' }),
-          },
-          serpResponseSchema,
-          TIMEOUT_MS,
+            serpResponseSchema,
+            TIMEOUT_MS,
+          ),
         ),
       )
     } catch (cause) {
@@ -110,23 +113,25 @@ export const brightdataResearch: WebResearch = {
     try {
       // Web Unlocker returns the page as markdown when data_format=markdown,
       // which is far cheaper to feed to the model than raw HTML.
-      const body = await withRetry(() =>
-        fetchText(
-          BRIGHTDATA_REQUEST_URL,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${env.BRIGHTDATA_API_KEY}`,
-              'Content-Type': 'application/json',
+      const body = await limitBrightdataConcurrency(() =>
+        withRetry(() =>
+          fetchText(
+            BRIGHTDATA_REQUEST_URL,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${env.BRIGHTDATA_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                zone: env.BRIGHTDATA_SCRAPE_ZONE,
+                url,
+                format: 'raw',
+                data_format: 'markdown',
+              }),
             },
-            body: JSON.stringify({
-              zone: env.BRIGHTDATA_SCRAPE_ZONE,
-              url,
-              format: 'raw',
-              data_format: 'markdown',
-            }),
-          },
-          SCRAPE_TIMEOUT_MS,
+            SCRAPE_TIMEOUT_MS,
+          ),
         ),
       )
       return body.slice(0, maxChars)

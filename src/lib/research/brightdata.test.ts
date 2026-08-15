@@ -14,8 +14,44 @@ vi.mock('@/lib/env', () => ({
 }))
 
 import { brightdataResearch } from './brightdata'
+import { BRIGHTDATA_MAX_CONCURRENT } from './brightdata-limiter'
 
 beforeEach(() => { fetchJsonMock.mockReset(); fetchTextMock.mockReset() })
+
+// Each entry resolves only when its own `resolve()` is called, so the test
+// can observe exactly how many fetchJson calls have started before any of
+// them are allowed to finish.
+function deferred(): { promise: Promise<{ organic: never[] }>; resolve: () => void } {
+  let resolveFn: () => void
+  const promise = new Promise<{ organic: never[] }>((resolve) => {
+    resolveFn = () => resolve({ organic: [] })
+  })
+  return { promise, resolve: () => resolveFn() }
+}
+
+describe('brightdataResearch concurrency', () => {
+  it('should cap concurrent search calls at BRIGHTDATA_MAX_CONCURRENT and queue the rest', async () => {
+    const overflow = 2
+    const total = BRIGHTDATA_MAX_CONCURRENT + overflow
+    const deferreds = Array.from({ length: total }, () => deferred())
+    let startedCount = 0
+    fetchJsonMock.mockImplementation(() => {
+      const d = deferreds[startedCount]!
+      startedCount += 1
+      return d.promise
+    })
+
+    const calls = Array.from({ length: total }, (_, i) => brightdataResearch.search(`query ${i}`))
+    await vi.waitFor(() => expect(startedCount).toBe(BRIGHTDATA_MAX_CONCURRENT))
+
+    // Release the first batch — this should free slots for the overflow calls.
+    for (let i = 0; i < BRIGHTDATA_MAX_CONCURRENT; i += 1) deferreds[i]!.resolve()
+    await vi.waitFor(() => expect(startedCount).toBe(total))
+
+    for (let i = BRIGHTDATA_MAX_CONCURRENT; i < total; i += 1) deferreds[i]!.resolve()
+    await Promise.all(calls)
+  })
+})
 
 describe('brightdataResearch.search', () => {
   it('should map organic results to snippets when the API returns them', async () => {
