@@ -19,7 +19,7 @@ export interface ReportEmailTemplateInput {
 export interface WarmupTemplateContext {
   gatedCount: number
   totalEnrolled: number
-  closestElapsedDays: number
+  closestDayNumber: number
   closestGateDays: number
   closestReputationScore: number | null
   messagesExchanged: number
@@ -32,7 +32,7 @@ export function buildWarmupTemplateContext(warmup: MailboxWarmupInfo[]): WarmupT
   return {
     gatedCount: gated.length,
     totalEnrolled: warmup.length,
-    closestElapsedDays: closest.elapsedDays,
+    closestDayNumber: closest.dayNumber,
     closestGateDays: closest.gateDays,
     closestReputationScore: closest.reputationScore,
     messagesExchanged: totalMessagesExchanged(gated),
@@ -124,7 +124,7 @@ const WARMUP_TEMPLATE: ReportEmailTemplate = {
     return (
       `Hey ${clientName} team,\n\n` +
       `No outreach numbers to report ${periodLabel} yet — ${warmup.gatedCount} of ${warmup.totalEnrolled} mailboxes ` +
-      `are still building sending reputation with Mailreach. The closest is on day ${warmup.closestElapsedDays} of ` +
+      `are still building sending reputation with Mailreach. The closest is on day ${warmup.closestDayNumber} of ` +
       `${warmup.closestGateDays}${scoreLine}. ${warmup.messagesExchanged} messages exchanged so far as part of warmup.\n\n` +
       `Once warmup clears, outreach starts automatically — full detail here: ${reportUrl}\n\n` +
       `Questions? Reply to this email, or grab 15 minutes: ${FEEDBACK_CALL_URL}\n\n` +

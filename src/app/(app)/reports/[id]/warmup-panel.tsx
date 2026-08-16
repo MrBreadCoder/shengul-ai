@@ -20,7 +20,7 @@ export async function WarmupPanel({ mailboxes }: WarmupPanelProps): Promise<Reac
             <span className="truncate">{mailbox.emailAddress}</span>
             <span className="text-muted-foreground tnum shrink-0">
               {mailbox.isGated
-                ? t('warmupPanel.statusWarming', { elapsed: mailbox.elapsedDays, gate: mailbox.gateDays })
+                ? t('warmupPanel.statusWarming', { elapsed: mailbox.dayNumber, gate: mailbox.gateDays })
                 : t('warmupPanel.statusWarm')}
               {mailbox.reputationScore !== null ? ` · ${t('warmupPanel.reputation')}: ${mailbox.reputationScore}` : null}
             </span>

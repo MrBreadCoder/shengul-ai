@@ -121,12 +121,12 @@ describe('summarizeMailboxWarmup', () => {
 
   it('should mark a mailbox gated before day 14', () => {
     const [result] = summarizeMailboxWarmup([mailboxRow({ mailreach_started_at: '2026-07-20T00:00:00Z' })], true, now)
-    expect(result).toMatchObject({ elapsedDays: 9, gateDays: 14, isGated: true })
+    expect(result).toMatchObject({ elapsedDays: 9, dayNumber: 10, gateDays: 14, isGated: true })
   })
 
   it('should mark a mailbox warm at exactly day 14', () => {
     const [result] = summarizeMailboxWarmup([mailboxRow({ mailreach_started_at: '2026-07-15T00:00:00Z' })], true, now)
-    expect(result).toMatchObject({ elapsedDays: 14, isGated: false })
+    expect(result).toMatchObject({ elapsedDays: 14, dayNumber: 15, isGated: false })
   })
 
   it('should pass reputation and message-volume fields through unchanged, including null', () => {

@@ -26,6 +26,7 @@ const gatedMailbox: MailboxWarmupInfo = {
   mailboxId: 'm1',
   emailAddress: 'sales@acme.com',
   elapsedDays: 6,
+  dayNumber: 7,
   gateDays: 14,
   isGated: true,
   reputationScore: 70,
@@ -76,7 +77,7 @@ describe('generateReportCommentary', () => {
     )
     const call = generateJsonMock.mock.calls[0]![1] as { prompt: string }
     expect(call.prompt).toContain('Mailbox warmup in progress')
-    expect(call.prompt).toContain('Day 6 of 14')
+    expect(call.prompt).toContain('Day 7 of 14')
     expect(call.prompt).toContain('Reputation scores so far: 70')
   })
 
@@ -102,7 +103,7 @@ describe('buildFallbackCommentary', () => {
   it('should lead with warmup progress when there were zero sends and a mailbox is gated', () => {
     const result = buildFallbackCommentary('this week', { ...overview, emailsSent: 0 }, [gatedMailbox])
     expect(result.headline).toBe('Building your sending reputation')
-    expect(result.summary).toContain('day 6 of 14')
+    expect(result.summary).toContain('day 7 of 14')
     expect(result.summary).not.toContain('0 leads')
   })
 

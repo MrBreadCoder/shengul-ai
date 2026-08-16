@@ -60,6 +60,7 @@ describe('reportMetricsSnapshotSchema', () => {
           mailboxId: '11111111-1111-4111-8111-111111111111',
           emailAddress: 'sales@acme.com',
           elapsedDays: 6,
+          dayNumber: 7,
           gateDays: 14,
           isGated: true,
           reputationScore: 70,

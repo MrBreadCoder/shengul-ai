@@ -373,7 +373,7 @@ export async function AnalyticsView({ searchParams, scope }: AnalyticsViewProps)
                     <TableCell className="font-medium">{m.emailAddress}</TableCell>
                     <TableCell>
                       {m.isGated
-                        ? t('mailboxWarmupTable.statusWarming', { elapsed: m.elapsedDays, gate: m.gateDays })
+                        ? t('mailboxWarmupTable.statusWarming', { elapsed: m.dayNumber, gate: m.gateDays })
                         : t('mailboxWarmupTable.statusWarm')}
                     </TableCell>
                     <TableCell className="tnum text-right">{m.reputationScore ?? '—'}</TableCell>

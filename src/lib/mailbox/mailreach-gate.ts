@@ -45,7 +45,15 @@ export function isEligibleForCampaignSend(input: CampaignSendEligibilityInput): 
 export interface MailboxWarmupInfo {
   mailboxId: string
   emailAddress: string
+  /** Whole days elapsed since warmup started — 0 on the start day. Drives gating/ordering, not display. */
   elapsedDays: number
+  /**
+   * 1-indexed day number for display ("Day 1" on the start day) —
+   * `elapsedDays + 1`. Matches the daily-cap ramp's dayNumber
+   * (lib/mailbox/warmup.ts's getMailboxWarmthStatus) so every "Day N" shown
+   * to a client means the same thing across the app.
+   */
+  dayNumber: number
   gateDays: number
   isGated: boolean
   reputationScore: number | null
@@ -90,6 +98,7 @@ export function summarizeMailboxWarmup(
       mailboxId: mailbox.id,
       emailAddress: mailbox.email_address,
       elapsedDays,
+      dayNumber: elapsedDays + 1,
       gateDays: MAILREACH_CAMPAIGN_GATE_DAYS,
       isGated: elapsedDays < MAILREACH_CAMPAIGN_GATE_DAYS,
       reputationScore: mailbox.mailreach_reputation_score,

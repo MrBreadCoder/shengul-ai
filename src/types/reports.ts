@@ -29,6 +29,7 @@ const mailboxWarmupSchema = z.object({
   mailboxId: z.string().uuid(),
   emailAddress: z.string(),
   elapsedDays: z.number().int().nonnegative(),
+  dayNumber: z.number().int().positive(),
   gateDays: z.number().int().positive(),
   isGated: z.boolean(),
   reputationScore: z.number().nullable(),

@@ -17,6 +17,7 @@ const gatedMailbox: MailboxWarmupInfo = {
   mailboxId: 'm1',
   emailAddress: 'sales@acme.com',
   elapsedDays: 6,
+  dayNumber: 7,
   gateDays: 14,
   isGated: true,
   reputationScore: 70,
@@ -25,7 +26,7 @@ const gatedMailbox: MailboxWarmupInfo = {
   totalSpam: 0,
   currentConversations: 2,
 }
-const warmMailbox: MailboxWarmupInfo = { ...gatedMailbox, mailboxId: 'm2', elapsedDays: 20, isGated: false }
+const warmMailbox: MailboxWarmupInfo = { ...gatedMailbox, mailboxId: 'm2', elapsedDays: 20, dayNumber: 21, isGated: false }
 
 describe('pickTemplate', () => {
   it('should return a different template for each of the 7 rotation indices', () => {
@@ -73,7 +74,7 @@ describe('renderTemplate', () => {
   it('should render the warmup template with day counter, reputation, and no lead-count wording', () => {
     const warmup = buildWarmupTemplateContext([gatedMailbox])
     const rendered = renderTemplate(pickTemplate(0, true), { ...input, warmup })
-    expect(rendered.text).toContain('day 6 of 14')
+    expect(rendered.text).toContain('day 7 of 14')
     expect(rendered.text).toContain('reputation score 70')
     expect(rendered.text).not.toMatch(/0 (new )?leads?/i)
     expect(rendered.text).toContain(input.reportUrl)
@@ -94,12 +95,12 @@ describe('buildWarmupTemplateContext', () => {
   })
 
   it('should aggregate the gated mailboxes, keeping only the closest-to-ready one for the day counter', () => {
-    const almostReady: MailboxWarmupInfo = { ...gatedMailbox, mailboxId: 'm3', elapsedDays: 12, reputationScore: 88 }
+    const almostReady: MailboxWarmupInfo = { ...gatedMailbox, mailboxId: 'm3', elapsedDays: 12, dayNumber: 13, reputationScore: 88 }
     const result = buildWarmupTemplateContext([gatedMailbox, almostReady, warmMailbox])
     expect(result).toEqual({
       gatedCount: 2,
       totalEnrolled: 3,
-      closestElapsedDays: 12,
+      closestDayNumber: 13,
       closestGateDays: 14,
       closestReputationScore: 88,
       messagesExchanged: (10 + 8) * 2, // gatedMailbox + almostReady share the same sent/received values

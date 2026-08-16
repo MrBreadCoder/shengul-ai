@@ -55,7 +55,7 @@ function formatWarmupBlock(warmup: MailboxWarmupInfo[]): string {
   return (
     `\n\nMailbox warmup in progress:\n` +
     `- ${gated.length} of ${warmup.length} connected mailboxes still building sending reputation\n` +
-    gated.map((w) => `  - Day ${w.elapsedDays} of ${w.gateDays}`).join('\n') +
+    gated.map((w) => `  - Day ${w.dayNumber} of ${w.gateDays}`).join('\n') +
     (scores.length > 0 ? `\n- Reputation scores so far: ${scores.join(', ')}` : '') +
     `\n- Messages exchanged as part of warmup: ${totalMessagesExchanged(gated)}`
   )
@@ -109,10 +109,10 @@ export function buildFallbackCommentary(
         headline: 'Building your sending reputation',
         summary:
           `${gated.length} mailbox${gated.length === 1 ? '' : 'es'} still warming up with Mailreach — ` +
-          `the closest is on day ${closest.elapsedDays} of ${closest.gateDays}. ` +
+          `the closest is on day ${closest.dayNumber} of ${closest.gateDays}. ` +
           `Outreach begins automatically once warmup clears.`,
         highlights: [
-          `Day ${closest.elapsedDays} of ${closest.gateDays} for the closest mailbox`,
+          `Day ${closest.dayNumber} of ${closest.gateDays} for the closest mailbox`,
           closest.reputationScore !== null
             ? `Reputation score: ${closest.reputationScore}`
             : `${gated.length} mailbox${gated.length === 1 ? '' : 'es'} warming up`,

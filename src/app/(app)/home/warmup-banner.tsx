@@ -25,7 +25,7 @@ export async function WarmupBanner({ mailboxes, gated }: WarmupBannerProps): Pro
             copy. */}
         <div className="shrink-0">
           <p className="text-muted-foreground text-xs">{t('warmupBanner.dayLabel')}</p>
-          <p className="tnum text-5xl leading-none font-semibold tracking-tight">{closest.elapsedDays}</p>
+          <p className="tnum text-5xl leading-none font-semibold tracking-tight">{closest.dayNumber}</p>
           <p className="text-muted-foreground mt-1.5 text-xs">
             {t('warmupBanner.gateDaysCaption', { gate: closest.gateDays })}
           </p>
