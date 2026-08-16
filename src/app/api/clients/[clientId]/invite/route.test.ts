@@ -8,6 +8,7 @@ const createUserMock = vi.fn()
 const deleteUserMock = vi.fn()
 const insertInviteLinkMock = vi.fn()
 const deleteInviteLinksForUserMock = vi.fn()
+const sendReportEmailMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({
@@ -25,6 +26,7 @@ vi.mock('@/lib/db/invite-links', () => ({
 }))
 vi.mock('@/lib/events/log-event', () => ({ logEvent: (...a: unknown[]) => logEventMock(...a) }))
 vi.mock('@/lib/env', () => ({ env: { APP_URL: 'https://app.example.com' } }))
+vi.mock('@/lib/reports/mailer', () => ({ sendReportEmail: (...a: unknown[]) => sendReportEmailMock(...a) }))
 
 import { POST } from './route'
 import { hashInviteToken } from '@/lib/auth/invite-token'
@@ -49,6 +51,7 @@ beforeEach(() => {
   deleteUserMock.mockReset().mockResolvedValue({ error: null })
   insertInviteLinkMock.mockReset().mockResolvedValue(undefined)
   deleteInviteLinksForUserMock.mockReset().mockResolvedValue(undefined)
+  sendReportEmailMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('POST /api/clients/[clientId]/invite', () => {
@@ -156,5 +159,27 @@ describe('POST /api/clients/[clientId]/invite', () => {
     logEventMock.mockRejectedValue(new Error('events down'))
     const res = await POST(req({ email: 'a@x.com' }), ctx('c1'))
     expect(res.status).toBe(200)
+  })
+
+  it('should email the invite link to the client address', async () => {
+    const res = await POST(req({ email: 'a@x.com' }), ctx('c1'))
+    const json = await res.json()
+    expect(sendReportEmailMock).toHaveBeenCalledTimes(1)
+    const [sent] = sendReportEmailMock.mock.calls[0] as [{ to: string; subject: string; text: string; html: string }]
+    expect(sent.to).toBe('a@x.com')
+    expect(sent.text).toContain(linkFrom(json).toString())
+    expect(json.emailSent).toBe(true)
+  })
+
+  it('should still return the link and succeed when the invite email fails to send', async () => {
+    sendReportEmailMock.mockRejectedValue(new Error('smtp down'))
+    const res = await POST(req({ email: 'a@x.com' }), ctx('c1'))
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.emailSent).toBe(false)
+    expect(linkFrom(json).searchParams.get('token')).toBeTruthy()
+    expect(logEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ emailSent: false }) }),
+    )
   })
 })

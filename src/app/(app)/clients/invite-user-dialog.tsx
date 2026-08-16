@@ -21,7 +21,7 @@ type InviteState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'error'; message: string }
-  | { status: 'success'; link: string; expiresInMinutes: number }
+  | { status: 'success'; link: string; expiresInMinutes: number; emailSent: boolean }
 
 export function InviteUserDialog({ clientId }: { clientId: string }): React.ReactElement {
   const t = useTranslations('clients')
@@ -56,7 +56,11 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
         typeof json === 'object' && json !== null && typeof (json as { expiresInMinutes?: unknown }).expiresInMinutes === 'number'
           ? (json as { expiresInMinutes: number }).expiresInMinutes
           : INVITE_TTL_MINUTES
-      setState({ status: 'success', link, expiresInMinutes })
+      const emailSent =
+        typeof json === 'object' && json !== null && typeof (json as { emailSent?: unknown }).emailSent === 'boolean'
+          ? (json as { emailSent: boolean }).emailSent
+          : false
+      setState({ status: 'success', link, expiresInMinutes, emailSent })
     } catch {
       setState({ status: 'error', message: t('inviteDialog.networkError') })
     }
@@ -91,7 +95,9 @@ export function InviteUserDialog({ clientId }: { clientId: string }): React.Reac
         {state.status === 'success' ? (
           <div className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">
-              {t('inviteDialog.successHint', { ttl: formatInviteTtl(state.expiresInMinutes) })}
+              {state.emailSent
+                ? t('inviteDialog.successHintEmailed', { ttl: formatInviteTtl(state.expiresInMinutes) })
+                : t('inviteDialog.successHintEmailFailed', { ttl: formatInviteTtl(state.expiresInMinutes) })}
             </p>
             <div className="flex items-center gap-2">
               <Input readOnly value={state.link} className="text-xs" />

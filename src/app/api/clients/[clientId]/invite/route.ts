@@ -6,6 +6,8 @@ import { getClientById, insertAppUser } from '@/lib/db/clients'
 import { insertInviteLink, deleteInviteLinksForUser } from '@/lib/db/invite-links'
 import { generateInviteToken, hashInviteToken } from '@/lib/auth/invite-token'
 import { inviteExpiryFrom, INVITE_TTL_MINUTES } from '@/lib/auth/invite-ttl'
+import { renderInviteEmail } from '@/lib/auth/invite-email'
+import { sendReportEmail } from '@/lib/reports/mailer'
 import { logEvent } from '@/lib/events/log-event'
 import { env } from '@/lib/env'
 import { isAppError } from '@/lib/errors/app-error'
@@ -95,12 +97,26 @@ export async function POST(request: Request, context: { params: Promise<{ client
       throw linkError
     }
 
+    const link = buildInviteLink(token)
+
+    // Delivery is best-effort: the login already exists and works from the
+    // link either way, so an SMTP failure here must not roll back or fail
+    // the request — it only means the operator has to hand the link over
+    // some other way, which the UI still lets them do by showing it.
+    let emailSent = true
+    try {
+      const rendered = renderInviteEmail({ clientName: client.name, link, expiresInMinutes: INVITE_TTL_MINUTES })
+      await sendReportEmail({ to: body.email, subject: rendered.subject, text: rendered.text, html: rendered.html })
+    } catch {
+      emailSent = false
+    }
+
     try {
       await logEvent({
         clientId,
         actor: `human:${appUser.id}`,
         type: 'client.user_invited',
-        payload: { email: body.email, expiresInMinutes: INVITE_TTL_MINUTES },
+        payload: { email: body.email, expiresInMinutes: INVITE_TTL_MINUTES, emailSent },
       })
     } catch {
       // Audit logging is best-effort — the invite was already created successfully.
@@ -108,9 +124,10 @@ export async function POST(request: Request, context: { params: Promise<{ client
 
     return NextResponse.json({
       ok: true,
-      link: buildInviteLink(token),
+      link,
       email: body.email,
       expiresInMinutes: INVITE_TTL_MINUTES,
+      emailSent,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

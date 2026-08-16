@@ -448,10 +448,11 @@
     "inviteDialog": {
       "trigger": "Invite user",
       "title": "Create an account-creation link",
-      "successHint": "Send this link to the client. It lets them set their own password and sign in, and works for the next {ttl} — they can open it more than once in that time. After that it stops working and you issue a new one.",
+      "successHintEmailed": "The link was emailed to the client. It lets them set their own password and sign in, and works for the next {ttl} — they can open it more than once in that time. After that it stops working and you issue a new one. You can also copy it below and send it yourself.",
+      "successHintEmailFailed": "The invite was created, but the email to the client could not be sent. Copy the link below and send it to them yourself. It works for the next {ttl} and can be opened more than once in that time.",
       "copy": "Copy",
       "copiedToast": "Link copied",
-      "toolDescription": "Generates a link that lets this client set their own password and sign in. It stays usable for a couple of hours and can be opened more than once in that time, then expires. The link is shown on screen to copy; nothing is emailed.",
+      "toolDescription": "Generates a link that lets this client set their own password and sign in, and emails it to them. It stays usable for a few days and can be opened more than once in that time, then expires. The link is also shown on screen to copy in case the email cannot be sent.",
       "emailLabel": "Client's email",
       "emailToolParamDescription": "The email address that will own the login. It becomes the account's identity, so it has to be one the client controls.",
       "generating": "Generating…",

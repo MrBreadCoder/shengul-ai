@@ -165,6 +165,27 @@ const TEMPLATE_USAGE_INSTRUCTION = [
   'audience — use whichever one\'s framing and proof points best match this recipient\'s actual company or',
   'industry from the dossier below, and do not blend proof points from the others. The template\'s own sign-off is',
   'never part of your output — a signature block is appended separately, after you write the body.',
+  // Ported from the "Formal introduction" style's own hand-tuned fix
+  // (2026-08-11 production bug: the model bolted a bare "Company X has done
+  // Y since Z" sentence onto an otherwise-personalized email) — moved here,
+  // to the shared wrapper, so every template gets it rather than only the
+  // one style whose author happened to write it in. Restated for the
+  // template case specifically: a literal reference email is exactly the
+  // shape that invites tacking a stray researched sentence onto the end
+  // instead of rewriting a clause of the template itself.
+  'Never isolate the dossier personalization into its own flat, bolted-on sentence — that reads like a database',
+  'record stapled to a form letter, not a personal email. Instead, rewrite the specific clause of the template',
+  'that the fact naturally belongs to (the hook, a capability line, or the ask) so the fact is load-bearing in that',
+  'sentence, not appended after it. If the template has more than one capability or proof point, prefer folding the',
+  'personalization into whichever one it most directly supports, rather than adding a new sentence anywhere.',
+  // Added same day as the rule above, after testing it: rewriting a
+  // template clause to carry a fact makes it easy to over-smooth the fact
+  // into a vaguer restatement that fits the sentence better than it fits
+  // the recipient. Weaving must not cost specificity.
+  'When you rewrite a clause to carry a dossier fact, keep the fact\'s concrete specifics intact — named events,',
+  'programs, dates, and figures — rather than generalizing it into a softer statement that could describe any',
+  'company in the recipient\'s industry. The rewritten sentence must be true of this recipient specifically, not',
+  'merely plausible for their category.',
   'Reference template:',
 ].join(' ')
 

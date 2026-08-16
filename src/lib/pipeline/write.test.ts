@@ -406,6 +406,18 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('never leave a')
     expect(result).toContain('[Name]')
   })
+
+  it('should instruct the model to weave personalization into an existing clause, not bolt on a stacked sentence', () => {
+    const result = buildSystemPrompt('Dear [Name], ...')
+    expect(result).toContain('Never isolate the dossier personalization into its own flat, bolted-on sentence')
+    expect(result).toContain('rewrite the specific clause of the template')
+  })
+
+  it('should instruct the model to keep concrete specifics intact when weaving, not genericize the fact', () => {
+    const result = buildSystemPrompt('Dear [Name], ...')
+    expect(result).toContain("keep the fact's concrete specifics intact")
+    expect(result).toContain('true of this recipient specifically, not')
+  })
 })
 
 function knowledgeRow(kind: KnowledgeRow['kind'], content: string): KnowledgeRow {

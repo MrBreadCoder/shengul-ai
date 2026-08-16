@@ -448,10 +448,11 @@
     "inviteDialog": {
       "trigger": "Kullanıcı davet et",
       "title": "Hesap oluşturma bağlantısı oluştur",
-      "successHint": "Bu bağlantıyı müşteriye gönderin. Kendi şifrelerini belirleyip giriş yapmalarını sağlar ve önümüzdeki {ttl} boyunca çalışır — bu süre içinde birden fazla kez açabilirler. Bu sürenin sonunda çalışmayı durdurur ve yenisini oluşturmanız gerekir.",
+      "successHintEmailed": "Bağlantı müşteriye e-postayla gönderildi. Kendi şifrelerini belirleyip giriş yapmalarını sağlar ve önümüzdeki {ttl} boyunca çalışır — bu süre içinde birden fazla kez açabilirler. Bu sürenin sonunda çalışmayı durdurur ve yenisini oluşturmanız gerekir. Aşağıdan kopyalayıp kendiniz de gönderebilirsiniz.",
+      "successHintEmailFailed": "Davet oluşturuldu, ancak müşteriye e-posta gönderilemedi. Aşağıdaki bağlantıyı kopyalayıp kendiniz gönderin. Önümüzdeki {ttl} boyunca çalışır ve bu süre içinde birden fazla kez açılabilir.",
       "copy": "Kopyala",
       "copiedToast": "Bağlantı kopyalandı",
-      "toolDescription": "Bu müşterinin kendi şifresini belirleyip giriş yapmasını sağlayan bir bağlantı oluşturur. Birkaç saat boyunca kullanılabilir kalır ve bu süre içinde birden fazla kez açılabilir, sonra süresi dolar. Bağlantı kopyalanmak üzere ekranda gösterilir; hiçbir şey e-postayla gönderilmez.",
+      "toolDescription": "Bu müşterinin kendi şifresini belirleyip giriş yapmasını sağlayan bir bağlantı oluşturur ve müşteriye e-postayla gönderir. Birkaç gün boyunca kullanılabilir kalır ve bu süre içinde birden fazla kez açılabilir, sonra süresi dolar. E-posta gönderilemezse kullanılabilmesi için bağlantı ekranda da gösterilir.",
       "emailLabel": "Müşterinin e-postası",
       "emailToolParamDescription": "Girişin sahibi olacak e-posta adresi. Hesabın kimliği haline gelir, bu yüzden müşterinin kontrol ettiği bir adres olmalıdır.",
       "generating": "Oluşturuluyor…",

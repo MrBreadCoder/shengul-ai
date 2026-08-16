@@ -6,15 +6,21 @@
 // signed body (via the same appendSignatureBlock() a real send would use), and the
 // same cliché/tell scan regenerate-sample-emails.ts uses.
 //
-//   pnpm test-fake-email                       # concise (default) template
-//   pnpm test-fake-email --template=formal     # formal introduction template
+//   pnpm test-fake-email                                          # concise (default) template
+//   pnpm test-fake-email --template=formal                        # formal introduction template
+//   pnpm test-fake-email --template-name="Uniforms Fashion — Cargo & Courier"
+//                                                                  # any live email_templates row, fetched by
+//                                                                  # exact name — needs NEXT_PUBLIC_SUPABASE_URL /
+//                                                                  # SUPABASE_SERVICE_ROLE_KEY in .env.local
 //
 // Static imports here are limited to packages and type-only app imports — every app
 // module that transitively reads @/lib/env (generateJson itself) is dynamically
 // imported inside main(), AFTER .env.local is loaded, matching the pattern
 // regenerate-sample-emails.ts uses and for the same reason (see that file's header).
+import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { AppError } from '../src/lib/errors/app-error'
+import type { Database } from '../src/types/database'
 import type { RunWriteInput } from '../src/lib/pipeline/write'
 import type { LeadRow } from '../src/lib/db/leads'
 import type { ClientRow } from '../src/lib/db/clients'
@@ -79,16 +85,28 @@ const TEMPLATE_TEXT_BY_NAME: Record<'concise' | 'formal', string> = {
     'fewer, including the greeting.',
 }
 
-const argsSchema = z.object({ template: z.enum(['concise', 'formal']) })
+const argsSchema = z.object({
+  template: z.enum(['concise', 'formal']),
+  // Exact email_templates.name to fetch live from the DB instead — takes
+  // precedence over --template when given, so a campaign's real, currently-
+  // live template text can be exercised, not just the two local snapshots.
+  templateName: z.string().min(1).nullable(),
+})
 
 function parseArgs(argv: readonly string[]): z.infer<typeof argsSchema> {
   const raw = argv.find((arg) => arg.startsWith('--template='))?.slice('--template='.length) ?? 'concise'
-  const parsed = argsSchema.safeParse({ template: raw })
+  const templateName = argv.find((arg) => arg.startsWith('--template-name='))?.slice('--template-name='.length) ?? null
+  const parsed = argsSchema.safeParse({ template: raw, templateName })
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', `Invalid --template (expected "concise" or "formal"), got "${raw}"`, {})
   }
   return parsed.data
 }
+
+const dbEnvSchema = z.object({
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+})
 
 function loadEnv(): void {
   try {
@@ -96,6 +114,24 @@ function loadEnv(): void {
   } catch {
     // No .env.local — fall through to whatever is already in process.env.
   }
+}
+
+// Only called when --template-name is passed — the two local snapshots need
+// no DB access at all, so this stays opt-in rather than a hard requirement.
+async function fetchLiveTemplateText(name: string): Promise<string> {
+  const env = dbEnvSchema.safeParse(process.env)
+  if (!env.success) {
+    throw new AppError('CONFIG_ERROR', 'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for --template-name', {
+      issues: env.error.issues.map((issue) => issue.path.join('.')),
+    })
+  }
+  const supabase = createClient<Database>(env.data.NEXT_PUBLIC_SUPABASE_URL, env.data.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  })
+  const { data, error } = await supabase.from('email_templates').select('template_text').eq('name', name).maybeSingle()
+  if (error) throw new AppError('DB_ERROR', 'Failed to fetch email template', { name, cause: error.message })
+  if (!data) throw new AppError('NOT_FOUND', `No email_templates row named "${name}"`, { name })
+  return data.template_text
 }
 
 // Fully synthetic — never touches the database. Column shape matches the generated
@@ -277,11 +313,16 @@ async function main(): Promise<void> {
   const knowledge = buildFakeKnowledge()
   const input = buildFakeInput()
 
-  const systemPrompt = deps.buildSystemPrompt(TEMPLATE_TEXT_BY_NAME[args.template])
+  const templateText = args.templateName
+    ? await fetchLiveTemplateText(args.templateName)
+    : TEMPLATE_TEXT_BY_NAME[args.template]
+  const templateLabel = args.templateName ?? args.template
+
+  const systemPrompt = deps.buildSystemPrompt(templateText)
   const userPrompt = deps.buildPrompt(input, lead, knowledge, client)
 
   console.log(`\n${'='.repeat(72)}`)
-  console.log(`FAKE SCENARIO — template: ${args.template}`)
+  console.log(`FAKE SCENARIO — template: ${templateLabel}`)
   console.log('='.repeat(72))
   console.log('\n--- SYSTEM PROMPT (buildSystemPrompt output) ---\n')
   console.log(systemPrompt)
