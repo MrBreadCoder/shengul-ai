@@ -699,6 +699,7 @@
       "cancelEditing": "Cancel editing"
     },
     "page": {
+      "live": "Live",
       "noteAuthorYou": "You",
       "noteAuthorTeammate": "Teammate",
       "pipeline": "Pipeline",
@@ -739,6 +740,7 @@
     "emptyStageTitleGeneric": "Nothing in this view",
     "emptyStageDescription": "No cases have reached this stage yet. Pick another stage above, or choose All to see everything.",
     "noContacts": "No contacts",
+    "live": "Live",
     "errorTitle": "Pipeline unavailable",
     "errorDescription": "The case board could not be loaded. This is usually a transient database issue."
   },
@@ -746,6 +748,7 @@
     "title": "Inbox",
     "description": "The only two things the agent cannot do alone: send a first email, and answer a question it has no facts for.",
     "awaitingCount": "{count} awaiting you",
+    "live": "Live",
     "emptyTitle": "Nothing needs your attention",
     "emptyDescription": "Drafts awaiting approval and questions the agent cannot answer will collect here. It is running on its own until then.",
     "questionsSectionTitle": "Questions the agent cannot answer",
@@ -825,6 +828,7 @@
     "authorHuman": "Human",
     "latestCount": "Latest {count}",
     "factCount": "{count, plural, one {# fact} other {# facts}}",
+    "live": "Live",
     "emptyTitle": "No knowledge matches this view",
     "emptyDescription": "Clear the filters above, or run research on a case to start building the library.",
     "errorTitle": "Knowledge unavailable",
@@ -839,6 +843,7 @@
       "title": "Resources",
       "description": "Files the agent can send to a lead who asks to see something. The agent reads the ones whose format it can read, so it can also answer from what is inside.",
       "resourceCount": "{count, plural, one {# resource} other {# resources}}",
+      "live": "Live",
       "errorTitle": "Resources unavailable",
       "errorDescription": "The files the agent can send could not be loaded."
     },
@@ -846,6 +851,7 @@
       "title": "Knowledge sources",
       "description": "Pages and files the agent reads to answer better. These are never sent to a lead.",
       "sourceCount": "{count, plural, one {# source} other {# sources}}",
+      "live": "Live",
       "errorTitle": "Knowledge sources unavailable",
       "errorDescription": "The list of pages and files the agent reads could not be loaded.",
       "emptyTitle": "No knowledge sources yet",
@@ -887,6 +893,7 @@
     "emptyDescription": "Clear the filters above, or wait for the writer agent to draft its next batch.",
     "unknownCompany": "Unknown company",
     "notLinkedToCase": "Not linked to a case",
+    "live": "Live",
     "errorTitle": "Mail unavailable",
     "errorDescription": "The message history could not be loaded."
   },

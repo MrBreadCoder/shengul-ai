@@ -6,6 +6,7 @@ import { canManageOwnRow } from '@/lib/auth/can-manage-client'
 import { listActiveResourcesForVisibleClients } from '@/lib/db/client-resources'
 import { listClients } from '@/lib/db/clients'
 import { PageHeader } from '@/components/page-header'
+import { ResourcesRealtimeRefresher } from '@/components/resources-realtime-refresher'
 import { ResourceList, type ResourceSummary } from '@/components/resource-list'
 import { ResourceUpload } from '@/components/resource-upload'
 import { KnowledgeTabs } from '../knowledge-tabs'
@@ -48,13 +49,20 @@ export default async function ResourcesPage(): Promise<React.ReactElement> {
 
   return (
     <div className="flex flex-col gap-8">
+      <ResourcesRealtimeRefresher />
       <PageHeader
         title={t('resources.title')}
         description={t('resources.description')}
         actions={
-          <span className="text-muted-foreground tnum text-sm">
-            {t('resources.resourceCount', { count: summaries.length })}
-          </span>
+          <>
+            <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
+              <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+              {t('resources.live')}
+            </span>
+            <span className="text-muted-foreground tnum text-sm">
+              {t('resources.resourceCount', { count: summaries.length })}
+            </span>
+          </>
         }
       />
 

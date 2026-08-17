@@ -7,6 +7,7 @@ import { createServerClient } from '@/lib/supabase/server'
 import { listCasesWithLeads } from '@/lib/db/crm'
 import { CASE_STATUS } from '@/lib/ui/status'
 import { PageHeader } from '@/components/page-header'
+import { RealtimeRefresher } from '@/components/realtime-refresher'
 import { EmptyState } from '@/components/empty-state'
 import { CaseRow } from '@/components/case-row'
 import { FilterChips, type FilterOption } from '@/components/filter-chips'
@@ -86,15 +87,22 @@ export default async function CrmPage({ searchParams }: CrmPageProps): Promise<R
 
   return (
     <div className="flex flex-col gap-8">
+      <RealtimeRefresher channel="crm-pipeline" />
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
-          <span className="text-muted-foreground tnum text-sm">
-            {status
-              ? t('caseCount', { count: ordered.length })
-              : t('liveClosedCount', { live: live.length, closed: closed.length, hasClosed: closed.length > 0 ? 1 : 0 })}
-          </span>
+          <>
+            <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
+              <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+              {t('live')}
+            </span>
+            <span className="text-muted-foreground tnum text-sm">
+              {status
+                ? t('caseCount', { count: ordered.length })
+                : t('liveClosedCount', { live: live.length, closed: closed.length, hasClosed: closed.length > 0 ? 1 : 0 })}
+            </span>
+          </>
         }
       />
 

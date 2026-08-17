@@ -21,6 +21,7 @@ import { CLIENT_STATUS, CAMPAIGN_STATUS } from '@/lib/ui/status'
 import { StatusPill } from '@/components/status-dot'
 import { CompanyMark } from '@/components/company-mark'
 import { EmptyState } from '@/components/empty-state'
+import { KnowledgeSourcesRealtimeRefresher } from '@/components/knowledge-sources-realtime-refresher'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AnalyticsView } from '../../analytics/analytics-view'
 import { NewCampaignForm } from '../../campaigns/new-campaign-form'
@@ -44,7 +45,6 @@ import { KnowledgeSitemapPicker } from './knowledge-sitemap-picker'
 import { KnowledgeFileUpload } from './knowledge-file-upload'
 import { KnowledgeSourcesList } from './knowledge-sources-list'
 import { KnowledgeRescrapeAllButton } from './knowledge-rescrape-all-button'
-import { KnowledgeRealtimeRefresher } from './knowledge-realtime-refresher'
 import { ResourcesSection } from './resources-section'
 
 export const dynamic = 'force-dynamic'
@@ -310,7 +310,7 @@ export default async function ClientDetailPage({ params, searchParams }: ClientD
 
         <TabsContent value="knowledge">
           <div className="flex flex-col gap-4">
-            <KnowledgeRealtimeRefresher clientId={client.id} />
+            <KnowledgeSourcesRealtimeRefresher clientId={client.id} />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-muted-foreground max-w-[60ch] text-[13px]">{t('detail.knowledgeIntro')}</p>
               <div className="flex items-center gap-2">

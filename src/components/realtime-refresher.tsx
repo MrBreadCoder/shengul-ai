@@ -39,6 +39,8 @@ export function RealtimeRefresher({ channel }: RealtimeRefresherProps) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads' }, scheduleRefresh)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'cases' }, scheduleRefresh)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'cases' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'knowledge_requests' }, scheduleRefresh)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'knowledge_requests' }, scheduleRefresh)
       .subscribe()
 
     return () => {

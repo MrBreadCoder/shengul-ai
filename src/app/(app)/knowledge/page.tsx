@@ -7,6 +7,7 @@ import { createServerClient } from '@/lib/supabase/server'
 import { listKnowledgeForClient } from '@/lib/db/case-knowledge'
 import { listCaseCompanyNames } from '@/lib/db/crm'
 import { PageHeader } from '@/components/page-header'
+import { CaseKnowledgeRealtimeRefresher } from '@/components/case-knowledge-realtime-refresher'
 import { EmptyState } from '@/components/empty-state'
 import { KnowledgeItem } from '@/components/knowledge-item'
 import { FilterChips, type FilterOption } from '@/components/filter-chips'
@@ -70,15 +71,22 @@ export default async function KnowledgePage({
 
   return (
     <div className="flex flex-col gap-8">
+      <CaseKnowledgeRealtimeRefresher />
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
-          <span className="text-muted-foreground tnum text-sm">
-            {knowledge.length === PAGE_SIZE
-              ? t('latestCount', { count: PAGE_SIZE })
-              : t('factCount', { count: knowledge.length })}
-          </span>
+          <>
+            <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
+              <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+              {t('live')}
+            </span>
+            <span className="text-muted-foreground tnum text-sm">
+              {knowledge.length === PAGE_SIZE
+                ? t('latestCount', { count: PAGE_SIZE })
+                : t('factCount', { count: knowledge.length })}
+            </span>
+          </>
         }
       />
 

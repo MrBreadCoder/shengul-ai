@@ -38,6 +38,7 @@ import { LeadFollowupControl } from './lead-followup-control'
 import { NotesPanel, type NotePanelItem } from './notes-panel'
 import { MailTab } from './mail-tab'
 import { CrmLinkBadge } from './crm-link-badge'
+import { CaseRealtimeRefresher } from './case-realtime-refresher'
 
 export const dynamic = 'force-dynamic'
 
@@ -151,6 +152,7 @@ export default async function CasePage({
 
   return (
     <div className="flex flex-col gap-8">
+      <CaseRealtimeRefresher caseId={kase.id} />
       <header className="flex flex-col gap-5">
         <Link
           href="/crm"
@@ -188,6 +190,10 @@ export default async function CasePage({
               ) : null}
             </div>
           </div>
+          <span className="text-primary mt-1 inline-flex items-center gap-1.5 text-xs font-medium">
+            <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+            {t('page.live')}
+          </span>
           <StatusPill meta={CASE_STATUS[kase.status]} className="mt-1 px-2.5 py-1 text-xs" />
         </div>
 

@@ -699,6 +699,7 @@
       "cancelEditing": "Düzenlemeyi iptal et"
     },
     "page": {
+      "live": "Canlı",
       "noteAuthorYou": "Siz",
       "noteAuthorTeammate": "Ekip arkadaşı",
       "pipeline": "Fırsatlar",
@@ -739,6 +740,7 @@
     "emptyStageTitleGeneric": "Bu görünümde hiçbir şey yok",
     "emptyStageDescription": "Bu aşamaya henüz hiçbir vaka ulaşmadı. Yukarıdan başka bir aşama seçin veya her şeyi görmek için Tümü'nü seçin.",
     "noContacts": "Kişi yok",
+    "live": "Canlı",
     "errorTitle": "Fırsatlara ulaşılamıyor",
     "errorDescription": "Vaka panosu yüklenemedi. Bu genellikle geçici bir veritabanı sorunudur."
   },
@@ -746,6 +748,7 @@
     "title": "Gelen Kutusu",
     "description": "Ajanın tek başına yapamadığı iki şey: ilk e-postayı göndermek ve hakkında bilgisi olmayan bir soruyu yanıtlamak.",
     "awaitingCount": "{count} işlem bekliyor",
+    "live": "Canlı",
     "emptyTitle": "Dikkatinizi gerektiren bir şey yok",
     "emptyDescription": "Onay bekleyen taslaklar ve ajanın yanıtlayamadığı sorular burada toplanır. O zamana kadar kendi başına çalışmaya devam eder.",
     "questionsSectionTitle": "Ajanın yanıtlayamadığı sorular",
@@ -825,6 +828,7 @@
     "authorHuman": "İnsan",
     "latestCount": "Son {count}",
     "factCount": "{count, plural, other {# bilgi}}",
+    "live": "Canlı",
     "emptyTitle": "Bu görünümle eşleşen bilgi yok",
     "emptyDescription": "Yukarıdaki filtreleri temizleyin veya kütüphaneyi oluşturmaya başlamak için bir vakada araştırma çalıştırın.",
     "errorTitle": "Bilgi bankasına ulaşılamıyor",
@@ -839,6 +843,7 @@
       "title": "Belgeler",
       "description": "Bir şey görmek isteyen bir kişiye ajanın gönderebileceği dosyalar. Ajan, okuyabildiği formattaki dosyaları okur, böylece hem içeriğinden yanıt verebilir hem de dosyayı ekleyebilir.",
       "resourceCount": "{count, plural, other {# belge}}",
+      "live": "Canlı",
       "errorTitle": "Belgelere ulaşılamıyor",
       "errorDescription": "Ajanın gönderebileceği dosyalar yüklenemedi."
     },
@@ -846,6 +851,7 @@
       "title": "Bilgi kaynakları",
       "description": "Ajanın daha iyi yanıt vermek için okuduğu sayfalar ve dosyalar. Bunlar hiçbir zaman bir kişiye gönderilmez.",
       "sourceCount": "{count, plural, other {# kaynak}}",
+      "live": "Canlı",
       "errorTitle": "Bilgi kaynaklarına ulaşılamıyor",
       "errorDescription": "Ajanın okuduğu sayfa ve dosya listesi yüklenemedi.",
       "emptyTitle": "Henüz bilgi kaynağı yok",
@@ -887,6 +893,7 @@
     "emptyDescription": "Yukarıdaki filtreleri temizleyin veya yazar ajanının bir sonraki taslak grubunu hazırlamasını bekleyin.",
     "unknownCompany": "Bilinmeyen şirket",
     "notLinkedToCase": "Bir vakaya bağlı değil",
+    "live": "Canlı",
     "errorTitle": "E-posta yüklenemiyor",
     "errorDescription": "Mesaj geçmişi yüklenemedi."
   },

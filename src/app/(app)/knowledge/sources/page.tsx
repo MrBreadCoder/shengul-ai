@@ -6,6 +6,7 @@ import { canManageOwnRow } from '@/lib/auth/can-manage-client'
 import { listSourcesForVisibleClients } from '@/lib/db/client-knowledge'
 import { listClients } from '@/lib/db/clients'
 import { PageHeader } from '@/components/page-header'
+import { KnowledgeSourcesRealtimeRefresher } from '@/components/knowledge-sources-realtime-refresher'
 import { KnowledgeTabs } from '../knowledge-tabs'
 import { KnowledgeSourcesTable, type KnowledgeSourceSummary } from './sources-list'
 import { KnowledgeFileUpload } from '@/app/(app)/clients/[id]/knowledge-file-upload'
@@ -41,13 +42,20 @@ export default async function KnowledgeSourcesPage(): Promise<React.ReactElement
 
   return (
     <div className="flex flex-col gap-8">
+      <KnowledgeSourcesRealtimeRefresher />
       <PageHeader
         title={t('sources.title')}
         description={t('sources.description')}
         actions={
-          <span className="text-muted-foreground tnum text-sm">
-            {t('sources.sourceCount', { count: summaries.length })}
-          </span>
+          <>
+            <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
+              <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+              {t('sources.live')}
+            </span>
+            <span className="text-muted-foreground tnum text-sm">
+              {t('sources.sourceCount', { count: summaries.length })}
+            </span>
+          </>
         }
       />
 

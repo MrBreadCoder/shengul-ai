@@ -10,6 +10,7 @@ import { listActiveResourcesForClients } from '@/lib/db/client-resources'
 import { listAttachmentsForEmails } from '@/lib/db/email-attachments'
 import { formatRelative } from '@/lib/format'
 import { PageHeader, Section } from '@/components/page-header'
+import { RealtimeRefresher } from '@/components/realtime-refresher'
 import { EmptyState } from '@/components/empty-state'
 import type { ResourceSummary } from '@/components/resource-list'
 import { DraftRow, type DraftAttachment } from './draft-row'
@@ -83,15 +84,22 @@ export default async function InboxPage(): Promise<React.ReactElement> {
 
   return (
     <div className="flex flex-col gap-8">
+      <RealtimeRefresher channel="inbox-requests" />
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
-          total > 0 ? (
-            <span className="text-muted-foreground tnum text-sm">
-              {t('awaitingCount', { count: total })}
+          <>
+            <span className="text-primary inline-flex items-center gap-1.5 text-xs font-medium">
+              <span aria-hidden className="bg-primary size-1.5 animate-pulse rounded-full" style={{ animationDuration: '2.4s' }} />
+              {t('live')}
             </span>
-          ) : null
+            {total > 0 ? (
+              <span className="text-muted-foreground tnum text-sm">
+                {t('awaitingCount', { count: total })}
+              </span>
+            ) : null}
+          </>
         }
       />
 
