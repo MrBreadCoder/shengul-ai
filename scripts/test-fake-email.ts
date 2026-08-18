@@ -254,6 +254,11 @@ function buildFakeInput(): RunWriteInput {
     signaturePhone: null,
     signatureAddress: null,
     campaignEmailTemplateId: null,
+    // Fake input for a synthetic case that doesn't exist in the DB — 'ready'
+    // is the natural pre-write state, matching how a real case would look
+    // right before runWriteForCase's caller (write/route.ts) invokes it.
+    currentStatus: 'ready',
+    currentWaitReason: null,
   }
 }
 

@@ -55,6 +55,7 @@
   --status-researching: oklch(0.62 0.13 75);
   --status-ready: oklch(0.6 0.12 235);
   --status-writing: oklch(0.59 0.13 250);
+  --status-waiting: oklch(0.575 0.13 258);
   --status-contacted: oklch(0.56 0.14 265);
   --status-in-conversation: oklch(0.58 0.13 165);
   --status-hot-handoff: oklch(0.63 0.18 45);
@@ -111,6 +112,7 @@
   --status-researching: oklch(0.76 0.13 78);
   --status-ready: oklch(0.72 0.12 235);
   --status-writing: oklch(0.73 0.13 250);
+  --status-waiting: oklch(0.715 0.13 258);
   --status-contacted: oklch(0.7 0.13 265);
   --status-in-conversation: oklch(0.74 0.13 166);
   --status-hot-handoff: oklch(0.76 0.16 50);
@@ -194,6 +196,7 @@
   --color-status-researching: var(--status-researching);
   --color-status-ready: var(--status-ready);
   --color-status-writing: var(--status-writing);
+  --color-status-waiting: var(--status-waiting);
   --color-status-contacted: var(--status-contacted);
   --color-status-in-conversation: var(--status-in-conversation);
   --color-status-hot-handoff: var(--status-hot-handoff);

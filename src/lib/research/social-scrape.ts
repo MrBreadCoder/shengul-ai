@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { env } from '@/lib/env'
 import { fetchJson } from '@/lib/http/fetch-json'
 import { AppError } from '@/lib/errors/app-error'
-import { limitBrightdataConcurrency } from './brightdata-limiter'
+import { limitBrightdataSocialConcurrency } from './brightdata-limiter'
 
 const DATASETS_BASE_URL = 'https://api.brightdata.com/datasets/v3'
 
@@ -103,18 +103,19 @@ async function downloadSnapshot(snapshotId: string): Promise<ScrapedPost[]> {
     .map((r) => ({ url: r.url, text: r.post_text ?? r.description ?? null, datePosted: r.date_posted ?? null }))
 }
 
-// Gated by the shared Bright Data limiter for the job's whole lifecycle
-// (trigger through poll through download), not per HTTP call — a slot
-// represents one in-flight discovery job, matching how Bright Data's own
-// "too many running jobs for this dataset" 429 counts concurrency. See
-// brightdata-limiter.ts for why this cap exists.
+// Gated by the social-discovery Bright Data limiter (a separate pool from
+// search/scrape — see brightdata-limiter.ts's BRIGHTDATA_SOCIAL_MAX_CONCURRENT
+// comment for why sharing one pool between the two was a bug) for the job's
+// whole lifecycle (trigger through poll through download), not per HTTP call
+// — a slot represents one in-flight discovery job, matching how Bright
+// Data's own "too many running jobs for this dataset" 429 counts concurrency.
 async function discoverPosts(
   datasetId: string,
   discoverParams: Record<string, string>,
   profileUrl: string,
   extraInput: Record<string, unknown> = {},
 ): Promise<ScrapedPost[]> {
-  return limitBrightdataConcurrency(async () => {
+  return limitBrightdataSocialConcurrency(async () => {
     const snapshotId = await triggerDiscovery(datasetId, discoverParams, profileUrl, extraInput)
     await pollUntilReady(snapshotId)
     return downloadSnapshot(snapshotId)

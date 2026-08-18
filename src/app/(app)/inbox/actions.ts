@@ -14,6 +14,8 @@ import {
 } from '@/lib/db/emails'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { getLeadById } from '@/lib/db/leads'
+import { claimCaseContacted } from '@/lib/db/cases'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox } from '@/lib/mailbox/sender'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from '@/lib/pipeline/followup'
 import { AppError } from '@/lib/errors/app-error'
@@ -107,9 +109,12 @@ export async function approveDraft(formData: FormData): Promise<void> {
   }
 
   // Mirror the automated write path: approving the first touch starts the
-  // 3/7/14-day cadence. A later manual step must not start a second sequence.
-  // Best-effort: the email already sent successfully, so a scheduling failure
-  // here must not surface as a failed send to the operator.
+  // 3/7/14-day cadence, and — for a case that was sitting on
+  // 'waiting'/'awaiting_manual_approval' (see
+  // docs/superpowers/specs/2026-08-17-outreach-send-waiting-system-design.md)
+  // — is also the event that actually contacts the lead, closing the gap
+  // where the case (and its CRM sync) previously claimed 'contacted' the
+  // moment a draft was written, before any human approved it.
   if (email.sequence_step === FIRST_TOUCH_STEP) {
     try {
       await scheduleFirstFollowup(supabase, {
@@ -117,6 +122,15 @@ export async function approveDraft(formData: FormData): Promise<void> {
         caseId: email.case_id,
         leadId: email.lead_id,
       })
+      // Atomic conditional update, not read-then-write: two concurrent
+      // approvals for different leads on the same case (each reaching this
+      // point via its own claimDraftForSend) must not both pass a stale
+      // status read and double-fire the CRM sync. Only the approval whose
+      // update actually flips the case to 'contacted' gets true here.
+      const advancedToContacted = await claimCaseContacted(supabase, email.case_id)
+      if (advancedToContacted) {
+        await enqueueCrmSync(email.case_id, 'contacted')
+      }
     } catch (error) {
       await logEventSafe({
         clientId: email.client_id,

@@ -11,6 +11,8 @@ const advanceSequenceMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const generateJsonMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
+const updateCaseWaitingMock = vi.fn()
+const getOutreachEligibilityMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
@@ -30,7 +32,11 @@ vi.mock('@/lib/db/sequences', () => ({
   createSequence: (...a: unknown[]) => createSequenceMock(...a),
   advanceSequence: (...a: unknown[]) => advanceSequenceMock(...a),
 }))
-vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
+vi.mock('@/lib/mailbox/eligibility', () => ({ getOutreachEligibility: (...a: unknown[]) => getOutreachEligibilityMock(...a) }))
+vi.mock('@/lib/db/cases', () => ({
+  updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a),
+  updateCaseWaiting: (...a: unknown[]) => updateCaseWaitingMock(...a),
+}))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/email-templates', () => ({
   getEmailTemplateById: (...a: unknown[]) => getEmailTemplateByIdMock(...a),
@@ -64,16 +70,18 @@ const input = {
   valueProp: 'We save time', bookingLink: 'https://cal.com/x', mailboxIds: ['m1'], companyName: 'Acme',
   signatureName: null, signatureTitle: null, signaturePhone: null, signatureAddress: null,
   campaignEmailTemplateId: null,
+  currentStatus: 'writing' as const, currentWaitReason: null,
 }
 
 beforeEach(() => {
   for (const m of [listKnowledgeMock, listActiveLeadsMock, isSuppressedMock, claimOutboundEmailMock,
     markEmailSentMock, markEmailFailedMock, createSequenceMock, advanceSequenceMock, sendViaMailboxMock,
-    generateJsonMock, updateCaseStatusMock, publishDelayMock, logEventMock, enqueueCrmSyncMock,
-    getClientByIdMock, getEmailTemplateByIdMock, getDefaultEmailTemplateMock]) m.mockReset()
+    generateJsonMock, updateCaseStatusMock, updateCaseWaitingMock, publishDelayMock, logEventMock, enqueueCrmSyncMock,
+    getClientByIdMock, getEmailTemplateByIdMock, getDefaultEmailTemplateMock, getOutreachEligibilityMock]) m.mockReset()
   listKnowledgeMock.mockResolvedValue([{ kind: 'company', content: 'builds widgets' }])
   isSuppressedMock.mockResolvedValue(false)
   generateJsonMock.mockResolvedValue({ subject: 'Quick idea for Acme', body: 'Hi Jane...' })
+  getOutreachEligibilityMock.mockResolvedValue({ eligible: true })
   // scheduleFirstFollowup's DEFAULT_FOLLOWUP_DELAYS_DAYS fallback covers a
   // null client lookup, so this default keeps every existing test's timing
   // assertions (3-day first follow-up) unchanged.
@@ -98,6 +106,7 @@ describe('runWriteForCase', () => {
       expect.objectContaining({ qstashMessageId: 'qmsg1' }),
     )
     expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
   })
 
   it('should use medium thinking with a token ceiling that keeps the JSON draft from truncating', async () => {
@@ -134,12 +143,14 @@ describe('runWriteForCase', () => {
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
   })
 
-  it('should skip a suppressed lead', async () => {
+  it('should skip a suppressed lead and mark the case waiting with no_viable_leads', async () => {
     listActiveLeadsMock.mockResolvedValue([lead])
     isSuppressedMock.mockResolvedValue(true)
     const result = await runWriteForCase({} as never, input)
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
     expect(claimOutboundEmailMock).not.toHaveBeenCalled()
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'no_viable_leads')
+    expect(updateCaseStatusMock).not.toHaveBeenCalled()
   })
 
   it('should skip a lead whose email slot is already claimed (idempotent retry)', async () => {
@@ -160,7 +171,7 @@ describe('runWriteForCase', () => {
     expect(markEmailFailedMock).not.toHaveBeenCalled()
   })
 
-  it('should mark the email failed and skip when every mailbox is rate limited', async () => {
+  it('should mark the email failed, skip, and mark the case waiting with an auto-retry reason when every mailbox is rate limited', async () => {
     const { AppError } = await import('@/lib/errors/app-error')
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
@@ -170,6 +181,94 @@ describe('runWriteForCase', () => {
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
     expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e1')
     expect(markEmailSentMock).not.toHaveBeenCalled()
+    // Re-probed after the loop (getOutreachEligibilityMock's beforeEach
+    // default of `{ eligible: true }` applies to this recheck too) — labeled
+    // 'daily_cap' rather than left unlabeled, so the fanout still retries it.
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'daily_cap')
+    expect(updateCaseStatusMock).not.toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+  })
+
+  it('should send the same claimed email on a later eligible tick after being rate limited', async () => {
+    // markEmailFailed on a RATE_LIMITED send does not strand the (lead, step
+    // 0, outbound) slot: claimOutboundEmail's reclaimFailedOutboundEmail
+    // (lib/db/emails.ts) atomically reclaims a 'failed' row on the next
+    // attempt, so a later, eligible fanout tick sends through the same
+    // claimed row rather than being permanently blocked.
+    const { AppError } = await import('@/lib/errors/app-error')
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockRejectedValueOnce(new AppError('RATE_LIMITED', 'no mailbox available'))
+
+    const firstTick = await runWriteForCase({} as never, input)
+    expect(firstTick).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
+    expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e1')
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'daily_cap')
+
+    sendViaMailboxMock.mockResolvedValueOnce({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    const secondTick = await runWriteForCase(
+      {} as never,
+      { ...input, currentStatus: 'waiting' as const, currentWaitReason: 'daily_cap' as const },
+    )
+    expect(secondTick).toEqual({ caseId: 'case1', drafted: 0, sent: 1 })
+    expect(markEmailSentMock).toHaveBeenCalledWith(expect.anything(), 'e1', expect.anything())
+    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+  })
+
+  it('should mark the case waiting and skip all lead work when the eligibility probe says ineligible', async () => {
+    getOutreachEligibilityMock.mockResolvedValue({
+      eligible: false, reason: 'mailreach_gate', retryAfter: new Date('2026-08-19T00:00:00Z'),
+    })
+    const result = await runWriteForCase({} as never, input)
+    expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
+    expect(listKnowledgeMock).not.toHaveBeenCalled()
+    expect(listActiveLeadsMock).not.toHaveBeenCalled()
+    expect(generateJsonMock).not.toHaveBeenCalled()
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'mailreach_gate')
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'pipeline.write.waiting',
+      payload: { reason: 'mailreach_gate', retryAfter: '2026-08-19T00:00:00.000Z' },
+    }))
+  })
+
+  it('should not log a transition event when the case is already waiting for the same reason', async () => {
+    getOutreachEligibilityMock.mockResolvedValue({
+      eligible: false, reason: 'mailreach_gate', retryAfter: new Date('2026-08-19T00:00:00Z'),
+    })
+    await runWriteForCase({} as never, { ...input, currentStatus: 'waiting' as const, currentWaitReason: 'mailreach_gate' as const })
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'mailreach_gate')
+    expect(logEventMock).not.toHaveBeenCalled()
+  })
+
+  it('should log a transition event when the wait reason changes from the previous tick', async () => {
+    getOutreachEligibilityMock.mockResolvedValue({
+      eligible: false, reason: 'daily_cap', retryAfter: new Date('2026-08-18T00:00:00Z'),
+    })
+    await runWriteForCase({} as never, { ...input, currentStatus: 'waiting' as const, currentWaitReason: 'mailreach_gate' as const })
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'pipeline.write.waiting' }))
+  })
+
+  it('should probe eligibility with the campaign mailbox ids and the client mailreach flag before touching leads', async () => {
+    getClientByIdMock.mockResolvedValue({
+      id: 'c1', followup_delays_days: [3, 7, 14], name: 'Acme', domain: null, phone: null, address: null,
+      signature_name: null, signature_title: null, company_info: null, email_template_id: null, mailreach_enabled: true,
+    })
+    listActiveLeadsMock.mockResolvedValue([])
+    await runWriteForCase({} as never, input)
+    expect(getOutreachEligibilityMock).toHaveBeenCalledWith(expect.anything(), {
+      mailboxIds: ['m1'], clientMailreachEnabled: true, now: expect.any(Date),
+    })
+    expect(listActiveLeadsMock).toHaveBeenCalled() // eligible, so the loop still proceeds
+  })
+
+  it('should draft and mark the case waiting with awaiting_manual_approval on human_approve (not contacted)', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    const result = await runWriteForCase({} as never, { ...input, replyMode: 'human_approve' })
+    expect(result).toEqual({ caseId: 'case1', drafted: 1, sent: 0 })
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_manual_approval')
+    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 
   it('should append the phone signature to the email body when the client has a phone on file', async () => {

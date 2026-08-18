@@ -8,9 +8,10 @@ import { requireUser } from '@/lib/auth/require-user'
 import type { AppUser } from '@/lib/db/app-users'
 import { createServerClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCaseById, updateCaseStatus, type CaseRow } from '@/lib/db/cases'
+import { getCaseById, claimCaseContactedFrom, type CaseRow, type CaseStatus } from '@/lib/db/cases'
 import { getLeadById } from '@/lib/db/leads'
 import { getCampaignForCase, type CampaignRow } from '@/lib/db/campaigns'
+import { enqueueCrmSync } from '@/lib/crm/sync'
 import {
   listThreadEmails,
   hasInboundReply,
@@ -34,11 +35,19 @@ import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS } from '@/lib/validation/email-limits
 
 // Statuses a manual first touch advances to 'contacted'. A case already past
 // this point keeps whatever the pipeline gave it — a manual email is not a
-// reason to walk a 'replied' case backwards. 'writing' included: it means
-// the automated write pipeline has this case claimed and may be mid-send —
-// a human's manual first touch is just as much "this case has now been
-// contacted" as the automated one would have produced.
-const PRE_CONTACT_STATUSES: readonly string[] = ['new', 'researching', 'ready', 'writing']
+// reason to walk an in-conversation/won/lost/etc. case backwards. 'writing'
+// included: it means the automated write pipeline has this case claimed and
+// may be mid-send — a human's manual first touch is just as much "this case
+// has now been contacted" as the automated one would have produced.
+// 'waiting' (added alongside the outreach waiting system) covers a case
+// blocked on the mailbox gate/cap/health, or on a human's own draft approval
+// — a manual send from here is exactly the rescue path for the first three.
+// Passed straight to claimCaseContactedFrom's atomic `.in('status', ...)`
+// claim — not read as an in-memory pre-check — so a case that advanced past
+// this list between the earlier `getCaseById` read and this point (another
+// lead's reply/approval on the same case) is re-verified against its live
+// DB status, not a stale snapshot.
+const PRE_CONTACT_STATUSES: readonly CaseStatus[] = ['new', 'researching', 'ready', 'writing', 'waiting']
 
 const sendSchema = z.object({
   caseId: z.string().uuid(),
@@ -291,6 +300,28 @@ async function sendClaimedEmail(
   }
 }
 
+interface ManualSendBookkeepingContext {
+  kase: CaseRow
+  caseId: string
+  leadId: string
+  appUser: AppUser
+  email: EmailRow
+}
+
+// Shared by every best-effort step below: none of them may surface to the
+// client as a failed send, so each failure is logged and swallowed here.
+async function logManualBookkeepingFailure(input: ManualSendBookkeepingContext, error: unknown): Promise<void> {
+  await logEventSafe({
+    clientId: input.kase.client_id,
+    caseId: input.caseId,
+    actor: `human:${input.appUser.id}`,
+    type: 'email.manual_bookkeeping_failed',
+    payload: {
+      emailId: input.email.id, leadId: input.leadId, cause: error instanceof Error ? error.message : String(error),
+    },
+  })
+}
+
 // Best-effort past this point: the mail is already out, so a bookkeeping
 // failure must not surface to the client as a failed send.
 async function finalizeManualSend(
@@ -312,25 +343,43 @@ async function finalizeManualSend(
     mailboxId: input.sent.mailboxId,
   })
 
-  try {
-    if (input.isFirstTouch) {
-      await scheduleFirstFollowup(supabase, { clientId: input.kase.client_id, caseId: input.caseId, leadId: input.leadId })
-      if (PRE_CONTACT_STATUSES.includes(input.kase.status)) {
-        await updateCaseStatus(supabase, input.caseId, 'contacted')
+  if (input.isFirstTouch) {
+    // Advancing the case runs independently of follow-up scheduling below: a
+    // case that was genuinely just contacted must not be stuck on
+    // 'new'/'writing'/'waiting' just because scheduleFirstFollowup (a
+    // separate, best-effort QStash publish) happened to throw.
+    //
+    // Atomic conditional update, not read-then-write: `input.kase.status` is
+    // a snapshot from earlier in the request (loadAuthorizedSendTargets), and
+    // this case can advance past first contact in the meantime — a reply or
+    // an approval on another lead sharing the same case. Reading that stale
+    // status here would let this call "win" a claim the case has already
+    // moved past. Only the call whose update actually flips the case to
+    // 'contacted' gets true and should fire the CRM sync — same pattern as
+    // approveDraft (inbox/actions.ts) and claimCaseContacted.
+    try {
+      const advancedToContacted = await claimCaseContactedFrom(supabase, input.caseId, PRE_CONTACT_STATUSES)
+      if (advancedToContacted) {
+        // Mirrors approveDraft (inbox/actions.ts): a manual send is just as
+        // much "this case has now been contacted" as an approved draft, and
+        // must fire the same CRM sync — including the waiting case this
+        // manual send exists to rescue.
+        await enqueueCrmSync(input.caseId, 'contacted')
       }
-    } else {
-      await requestFollowupSkip(supabase, input.leadId)
+    } catch (error) {
+      await logManualBookkeepingFailure(input, error)
     }
-  } catch (error) {
-    await logEventSafe({
-      clientId: input.kase.client_id,
-      caseId: input.caseId,
-      actor: `human:${input.appUser.id}`,
-      type: 'email.manual_bookkeeping_failed',
-      payload: {
-        emailId: input.email.id, leadId: input.leadId, cause: error instanceof Error ? error.message : String(error),
-      },
-    })
+    try {
+      await scheduleFirstFollowup(supabase, { clientId: input.kase.client_id, caseId: input.caseId, leadId: input.leadId })
+    } catch (error) {
+      await logManualBookkeepingFailure(input, error)
+    }
+  } else {
+    try {
+      await requestFollowupSkip(supabase, input.leadId)
+    } catch (error) {
+      await logManualBookkeepingFailure(input, error)
+    }
   }
 
   await logEventSafe({

@@ -219,6 +219,11 @@ async function regenerateAndMaybeApply(
     signaturePhone: campaign.phone,
     signatureAddress: campaign.address,
     campaignEmailTemplateId: campaign.email_template_id,
+    // Only buildSystemPrompt/resolveEmailTemplate are driven from this input
+    // below — runWriteForCase itself is never called from this script — so
+    // these two fields are structurally required but functionally unused here.
+    currentStatus: kase.status,
+    currentWaitReason: kase.wait_reason,
   }
 
   const template = await deps.resolveEmailTemplate(supabase, campaign.email_template_id, client)

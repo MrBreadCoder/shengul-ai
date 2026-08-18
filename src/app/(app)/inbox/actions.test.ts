@@ -24,6 +24,8 @@ const loadResourceAttachmentsMock = vi.fn()
 const resolveSelectedResourcesMock = vi.fn()
 const updateDraftContentRowMock = vi.fn()
 const regenerateDraftContentPipelineMock = vi.fn()
+const claimCaseContactedMock = vi.fn()
+const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
@@ -63,6 +65,10 @@ vi.mock('@/lib/resources/select', () => ({
 vi.mock('@/lib/pipeline/redesign', () => ({
   regenerateDraftContent: (...a: unknown[]) => regenerateDraftContentPipelineMock(...a),
 }))
+vi.mock('@/lib/db/cases', () => ({
+  claimCaseContacted: (...a: unknown[]) => claimCaseContactedMock(...a),
+}))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
 import {
   approveDraft, answerKnowledgeRequest, updateDraftAttachments, updateDraftContent, regenerateDraftContent,
@@ -98,7 +104,8 @@ beforeEach(() => {
     revalidatePathMock, logEventSafeMock, claimAnswerMock, getKnowledgeRequestByIdMock,
     hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock,
     listAttachmentsForEmailMock, replaceEmailAttachmentsMock, loadResourceAttachmentsMock,
-    resolveSelectedResourcesMock, updateDraftContentRowMock, regenerateDraftContentPipelineMock]) m.mockReset()
+    resolveSelectedResourcesMock, updateDraftContentRowMock, regenerateDraftContentPipelineMock,
+    claimCaseContactedMock, enqueueCrmSyncMock]) m.mockReset()
   requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator', client_id: null } })
   listAttachmentsForEmailMock.mockResolvedValue([])
   replaceEmailAttachmentsMock.mockResolvedValue(undefined)
@@ -112,6 +119,7 @@ beforeEach(() => {
   claimDraftForSendMock.mockResolvedValue(draftEmail({ status: 'queued' }))
   scheduleFirstFollowupMock.mockResolvedValue(undefined)
   claimAnswerMock.mockResolvedValue({ id: KR_ID, client_id: 'c1', case_id: 'case1' })
+  claimCaseContactedMock.mockResolvedValue(true)
 })
 
 describe('approveDraft', () => {
@@ -126,6 +134,44 @@ describe('approveDraft', () => {
     expect(scheduleFirstFollowupMock).toHaveBeenCalledWith({}, {
       clientId: 'c1', caseId: 'case1', leadId: 'lead1',
     })
+    expect(claimCaseContactedMock).toHaveBeenCalledWith({}, 'case1')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
+    expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+  })
+
+  it('should not re-sync the CRM when the atomic claim loses (case already contacted)', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    claimCaseContactedMock.mockResolvedValue(false)
+
+    await approveDraft(fd(EMAIL_ID))
+
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('should not double-fire the CRM sync when two leads on the same case approve concurrently', async () => {
+    // Regression test: a read-then-write ('read status, write if not
+    // contacted') would let both approvals pass the read before either
+    // writes. The atomic claim must let exactly one caller win.
+    getEmailByIdMock.mockResolvedValue(draftEmail({ id: EMAIL_ID, lead_id: 'lead1' }))
+    claimCaseContactedMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+    await approveDraft(fd(EMAIL_ID))
+    await approveDraft(fd(EMAIL_ID))
+
+    expect(claimCaseContactedMock).toHaveBeenCalledTimes(2)
+    expect(enqueueCrmSyncMock).toHaveBeenCalledTimes(1)
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
+  })
+
+  it('should not fail the send when advancing the case to contacted throws', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    claimCaseContactedMock.mockRejectedValue(new Error('db down'))
+
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toBeUndefined()
+    expect(markEmailSentMock).toHaveBeenCalled()
+    expect(logEventSafeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),
+    )
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
@@ -187,6 +233,7 @@ describe('approveDraft', () => {
     expect(logEventSafeMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),
     )
+    expect(claimCaseContactedMock).not.toHaveBeenCalled()
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
@@ -199,6 +246,8 @@ describe('approveDraft', () => {
     expect(sendViaMailboxMock).toHaveBeenCalled()
     expect(markEmailSentMock).toHaveBeenCalled()
     expect(scheduleFirstFollowupMock).not.toHaveBeenCalled()
+    expect(claimCaseContactedMock).not.toHaveBeenCalled()
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 
   it('should throw when the email is not a draft', async () => {

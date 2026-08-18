@@ -5,7 +5,7 @@ vi.mock('@/lib/http/fetch-json', () => ({ fetchJson: mockFetchJson }))
 vi.mock('@/lib/env', () => ({ env: { BRIGHTDATA_API_KEY: 'test-brightdata-key' } }))
 
 import { discoverLinkedInPersonPosts, discoverLinkedInCompanyPosts, discoverXPersonPosts, discoverXCompanyPosts } from './social-scrape'
-import { BRIGHTDATA_MAX_CONCURRENT } from './brightdata-limiter'
+import { BRIGHTDATA_SOCIAL_MAX_CONCURRENT } from './brightdata-limiter'
 
 beforeEach(() => { mockFetchJson.mockReset() })
 
@@ -172,9 +172,9 @@ describe('polling behavior', () => {
 })
 
 describe('discovery job concurrency', () => {
-  it('should cap concurrent discovery jobs at BRIGHTDATA_MAX_CONCURRENT and queue the rest', async () => {
+  it('should cap concurrent discovery jobs at BRIGHTDATA_SOCIAL_MAX_CONCURRENT and queue the rest', async () => {
     const overflow = 2
-    const total = BRIGHTDATA_MAX_CONCURRENT + overflow
+    const total = BRIGHTDATA_SOCIAL_MAX_CONCURRENT + overflow
     const profileUrls = Array.from({ length: total }, (_, i) => `https://www.linkedin.com/in/person-${i}/`)
     const startedProfiles: string[] = []
     const triggerDeferreds = new Map<string, () => void>()
@@ -203,12 +203,12 @@ describe('discovery job concurrency', () => {
     })
 
     const calls = profileUrls.map((profileUrl) => discoverLinkedInPersonPosts(profileUrl))
-    await vi.waitFor(() => expect(startedProfiles).toHaveLength(BRIGHTDATA_MAX_CONCURRENT))
+    await vi.waitFor(() => expect(startedProfiles).toHaveLength(BRIGHTDATA_SOCIAL_MAX_CONCURRENT))
 
-    for (const profileUrl of profileUrls.slice(0, BRIGHTDATA_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
+    for (const profileUrl of profileUrls.slice(0, BRIGHTDATA_SOCIAL_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
     await vi.waitFor(() => expect(startedProfiles).toHaveLength(total))
 
-    for (const profileUrl of profileUrls.slice(BRIGHTDATA_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
+    for (const profileUrl of profileUrls.slice(BRIGHTDATA_SOCIAL_MAX_CONCURRENT)) triggerDeferreds.get(profileUrl)!()
     await Promise.all(calls)
   })
 })

@@ -1,6 +1,7 @@
 import type { Database } from '@/types/database'
 
 type CaseStatus = Database['public']['Enums']['case_status']
+type CaseWaitReason = Database['public']['Enums']['case_wait_reason']
 type EmailStatus = Database['public']['Enums']['email_status']
 type LeadEmailStatus = Database['public']['Enums']['lead_email_status']
 type MailboxHealth = Database['public']['Enums']['mailbox_health']
@@ -23,12 +24,28 @@ export const CASE_STATUS: Record<CaseStatus, StatusMeta> = {
   researching: { label: 'Researching', color: 'var(--status-researching)' },
   ready: { label: 'Ready', color: 'var(--status-ready)' },
   writing: { label: 'Writing', color: 'var(--status-writing)' },
+  waiting: { label: 'Waiting', color: 'var(--status-waiting)' },
   contacted: { label: 'Contacted', color: 'var(--status-contacted)' },
   in_conversation: { label: 'In conversation', color: 'var(--status-in-conversation)' },
   hot_handoff: { label: 'Hot handoff', color: 'var(--status-hot-handoff)' },
   won: { label: 'Won', color: 'var(--status-won)' },
   lost: { label: 'Lost', color: 'var(--status-lost)' },
   dead: { label: 'Dead', color: 'var(--status-dead)' },
+}
+
+// Why a 'waiting' case is waiting — distinct from the status label because it
+// matters operationally: no_healthy_mailbox needs an operator now; the other
+// four don't need anyone (mailreach_gate/daily_cap resolve automatically,
+// awaiting_manual_approval is a human's own queue in /inbox, no_viable_leads
+// only changes if discovery adds a lead). Reuses existing status colors
+// rather than adding new tokens — dead/lost read as "needs attention",
+// ready/writing read as "in motion, no action needed".
+export const CASE_WAIT_REASON: Record<CaseWaitReason, StatusMeta> = {
+  mailreach_gate: { label: 'Mailbox still warming up', color: 'var(--status-writing)' },
+  daily_cap: { label: 'Daily send cap reached', color: 'var(--status-writing)' },
+  no_healthy_mailbox: { label: 'No healthy mailbox — needs attention', color: 'var(--status-lost)' },
+  awaiting_manual_approval: { label: 'Drafts ready for approval', color: 'var(--status-ready)' },
+  no_viable_leads: { label: 'No contactable leads', color: 'var(--status-dead)' },
 }
 
 export const EMAIL_STATUS: Record<EmailStatus, StatusMeta> = {

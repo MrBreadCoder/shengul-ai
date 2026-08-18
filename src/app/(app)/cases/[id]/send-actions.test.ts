@@ -17,7 +17,8 @@ const markEmailFailed = vi.fn()
 const sendViaMailbox = vi.fn()
 const scheduleFirstFollowup = vi.fn()
 const requestFollowupSkip = vi.fn()
-const updateCaseStatus = vi.fn()
+const claimCaseContactedFrom = vi.fn()
+const enqueueCrmSync = vi.fn()
 const revalidatePath = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: () => requireUser() }))
@@ -26,8 +27,9 @@ vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('next/cache', () => ({ revalidatePath: (...a: unknown[]) => revalidatePath(...a) }))
 vi.mock('@/lib/db/cases', () => ({
   getCaseById: (...a: unknown[]) => getCaseById(...a),
-  updateCaseStatus: (...a: unknown[]) => updateCaseStatus(...a),
+  claimCaseContactedFrom: (...a: unknown[]) => claimCaseContactedFrom(...a),
 }))
+vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSync(...a) }))
 vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadById(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCase(...a) }))
 vi.mock('@/lib/db/emails', () => ({
@@ -84,6 +86,7 @@ beforeEach(() => {
   claimOutboundEmail.mockResolvedValue({ id: 'e1' })
   insertManualEmail.mockResolvedValue({ id: 'e2' })
   sendViaMailbox.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<pm@mail>', threadId: 'thr1' })
+  claimCaseContactedFrom.mockResolvedValue(true)
 })
 
 describe('sendManualEmail — authorization', () => {
@@ -156,24 +159,59 @@ describe('sendManualEmail — first touch', () => {
     expect(scheduleFirstFollowup).toHaveBeenCalledWith(expect.anything(), {
       clientId: 'c1', caseId: CASE_ID, leadId: LEAD_ID,
     })
-    expect(updateCaseStatus).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'contacted')
+    expect(claimCaseContactedFrom).toHaveBeenCalledWith(
+      expect.anything(), CASE_ID, ['new', 'researching', 'ready', 'writing', 'waiting'],
+    )
     expect(requestFollowupSkip).not.toHaveBeenCalled()
   })
 
-  it('should leave the status alone on a case already past first contact', async () => {
-    getCaseById.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'replied' })
-    await sendManualEmail(form())
-    expect(updateCaseStatus).not.toHaveBeenCalled()
-  })
-
-  it('should still advance to contacted when the automated write pipeline has the case claimed as writing', async () => {
-    // Regression test: 'writing' (roadmap 2026-08-12) is a pre-contact
-    // status too — a manual first touch landing while the pipeline's own
-    // write attempt is in flight should still mark the case contacted,
-    // same as 'new'/'researching'/'ready'.
+  it('should claim atomically against the DB regardless of the case row read earlier in the request, not a stale in-memory status check', async () => {
+    // Regression test for the race this fix closes: the case can advance
+    // past first contact (another lead's reply/approval) between the read at
+    // the top of the request and this point — status pulled from the
+    // request's own `kase` snapshot is no longer what gates the claim.
     getCaseById.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'writing' })
     await sendManualEmail(form())
-    expect(updateCaseStatus).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'contacted')
+    expect(claimCaseContactedFrom).toHaveBeenCalledWith(
+      expect.anything(), CASE_ID, ['new', 'researching', 'ready', 'writing', 'waiting'],
+    )
+  })
+
+  it('should fire the CRM sync when the atomic claim wins', async () => {
+    claimCaseContactedFrom.mockResolvedValue(true)
+    await sendManualEmail(form())
+    // Mirrors approveDraft: the case's first real contact must fire the same
+    // CRM sync a draft approval would have, manual send included.
+    expect(enqueueCrmSync).toHaveBeenCalledWith(CASE_ID, 'contacted')
+  })
+
+  it('should not fire the CRM sync when the atomic claim loses (case already past first contact)', async () => {
+    // e.g. another lead on the same case already advanced it to
+    // in_conversation/won/etc. between the earlier read and this claim —
+    // must not double-fire (or wrongly fire) the sync.
+    claimCaseContactedFrom.mockResolvedValue(false)
+    await sendManualEmail(form())
+    expect(enqueueCrmSync).not.toHaveBeenCalled()
+  })
+
+  it('should advance to contacted even when follow-up scheduling throws', async () => {
+    // Case advancement must not depend on scheduleFirstFollowup succeeding —
+    // a successfully sent email means the case really was contacted, cadence
+    // or no cadence.
+    scheduleFirstFollowup.mockRejectedValue(new Error('qstash down'))
+
+    await expect(sendManualEmail(form())).resolves.toEqual({ ok: true })
+
+    expect(claimCaseContactedFrom).toHaveBeenCalled()
+    expect(enqueueCrmSync).toHaveBeenCalledWith(CASE_ID, 'contacted')
+  })
+
+  it('should not fail the send when the atomic claim itself throws', async () => {
+    // Best-effort past the point mail is already sent — a bookkeeping
+    // failure must not surface to the client as a failed send.
+    claimCaseContactedFrom.mockRejectedValue(new Error('db down'))
+    await expect(sendManualEmail(form())).resolves.toEqual({ ok: true })
+    expect(enqueueCrmSync).not.toHaveBeenCalled()
   })
 })
 
@@ -191,7 +229,7 @@ describe('sendManualEmail — interjection', () => {
     )
     expect(requestFollowupSkip).toHaveBeenCalledWith(expect.anything(), LEAD_ID)
     expect(scheduleFirstFollowup).not.toHaveBeenCalled()
-    expect(updateCaseStatus).not.toHaveBeenCalled()
+    expect(claimCaseContactedFrom).not.toHaveBeenCalled()
     expect(markEmailSent).toHaveBeenCalledWith(expect.anything(), 'e2', expect.anything())
   })
 

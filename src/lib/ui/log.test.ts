@@ -183,6 +183,28 @@ describe('describeEvent', () => {
   })
 })
 
+describe('mailbox.none_healthy', () => {
+  it('should mention warmup specifically when every configured mailbox is still gated', () => {
+    const result = describeEvent('mailbox.none_healthy', { mailboxCount: 2, warmupGatedCount: 2 })
+    expect(result).toBe('No healthy mailbox available — all 2 configured mailboxes still in Mailreach warmup.')
+  })
+
+  it('should mention both warmup and other causes when only some are gated', () => {
+    const result = describeEvent('mailbox.none_healthy', { mailboxCount: 3, warmupGatedCount: 1 })
+    expect(result).toBe('No healthy mailbox available — 3 configured, 1 still warming up, the rest capped or blocked.')
+  })
+
+  it('should fall back to the original wording when nothing is gated', () => {
+    const result = describeEvent('mailbox.none_healthy', { mailboxCount: 2, warmupGatedCount: 0 })
+    expect(result).toBe('No healthy mailbox available — 2 configured, all capped or blocked.')
+  })
+
+  it('should treat a missing warmupGatedCount as zero (payload from before this field existed)', () => {
+    const result = describeEvent('mailbox.none_healthy', { mailboxCount: 2 })
+    expect(result).toBe('No healthy mailbox available — 2 configured, all capped or blocked.')
+  })
+})
+
 describe('log display metadata', () => {
   it('should provide a label and colour for every severity', () => {
     for (const severity of LOG_SEVERITIES) {

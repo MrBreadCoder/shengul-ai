@@ -7,7 +7,8 @@ import { isSuppressed } from '@/lib/db/suppressions'
 import { getClientById, type ClientRow } from '@/lib/db/clients'
 import { getEmailTemplateById, getDefaultEmailTemplate, type EmailTemplateRow } from '@/lib/db/email-templates'
 import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
-import { updateCaseStatus } from '@/lib/db/cases'
+import { updateCaseStatus, updateCaseWaiting, type CaseWaitReason } from '@/lib/db/cases'
+import { getOutreachEligibility } from '@/lib/mailbox/eligibility'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
@@ -61,6 +62,12 @@ export interface RunWriteInput {
   // Per-campaign override of the owning client's email template — null
   // means inherit the client's template. See resolveEmailTemplate below.
   campaignEmailTemplateId: string | null
+  // The case's status/wait_reason as loaded by the caller (write/route.ts)
+  // just before this run — used only to suppress a redundant
+  // 'pipeline.write.waiting' log when a retried, still-ineligible case
+  // hasn't actually changed state since the last tick.
+  currentStatus: Database['public']['Enums']['case_status']
+  currentWaitReason: CaseWaitReason | null
 }
 
 export interface WriteSummary {
@@ -252,7 +259,7 @@ async function processLead(
   lead: LeadRow,
   knowledge: KnowledgeRow[],
   client: ClientRow | null,
-): Promise<'sent' | 'drafted' | 'skipped'> {
+): Promise<'sent' | 'drafted' | 'skipped' | 'rate_limited'> {
   if (!lead.email) return 'skipped'
   if (await isSuppressed(supabase, input.clientId, lead.email)) return 'skipped'
 
@@ -327,7 +334,12 @@ async function processLead(
     // A failure in the bookkeeping below means the message already went out
     // and must not be treated as a send failure.
     await markEmailFailed(supabase, claimed.id)
-    if (error instanceof AppError && error.code === 'RATE_LIMITED') return 'skipped'
+    // Distinct from a plain 'skipped' (permanently disqualified lead): this
+    // is the up-front eligibility probe (below, before the loop) racing with
+    // the real atomic send — still a mailbox-availability condition, not
+    // "nothing left to do". runWriteForCase re-probes once after the loop to
+    // label the case correctly instead of guessing.
+    if (error instanceof AppError && error.code === 'RATE_LIMITED') return 'rate_limited'
     throw error
   }
 
@@ -348,12 +360,39 @@ export async function runWriteForCase(
   supabase: SupabaseClient<Database>,
   input: RunWriteInput,
 ): Promise<WriteSummary> {
+  const client = await getClientById(supabase, input.clientId)
+
+  const eligibility = await getOutreachEligibility(supabase, {
+    mailboxIds: input.mailboxIds,
+    clientMailreachEnabled: client?.mailreach_enabled ?? false,
+    now: new Date(),
+  })
+  if (!eligibility.eligible) {
+    const changed = input.currentStatus !== 'waiting' || input.currentWaitReason !== eligibility.reason
+    await updateCaseWaiting(supabase, input.caseId, eligibility.reason)
+    // Logged only on an actual transition — a still-gated case re-checked
+    // every 5 minutes for hours must not spam the event log each tick.
+    if (changed) {
+      await logEventSafe({
+        clientId: input.clientId,
+        caseId: input.caseId,
+        actor: ACTOR,
+        type: 'pipeline.write.waiting',
+        payload: {
+          reason: eligibility.reason,
+          retryAfter: 'retryAfter' in eligibility ? eligibility.retryAfter.toISOString() : null,
+        },
+      })
+    }
+    return { caseId: input.caseId, drafted: 0, sent: 0 }
+  }
+
   const knowledge = await listKnowledgeForCase(supabase, input.caseId)
   const leads = await listActiveLeadsForCase(supabase, input.caseId)
-  const client = await getClientById(supabase, input.clientId)
 
   let sent = 0
   let drafted = 0
+  let rateLimited = 0
   for (const lead of leads) {
     // `k.lead_id ?? null` (not a bare `=== null` check) treats a row that
     // omits the field entirely the same as one that explicitly has it null —
@@ -364,10 +403,47 @@ export async function runWriteForCase(
     const outcome = await processLead(supabase, input, lead, leadKnowledge, client)
     if (outcome === 'sent') sent += 1
     if (outcome === 'drafted') drafted += 1
+    if (outcome === 'rate_limited') rateLimited += 1
   }
 
-  await updateCaseStatus(supabase, input.caseId, 'contacted')
-  await enqueueCrmSync(input.caseId, 'contacted')
+  if (sent > 0) {
+    await updateCaseStatus(supabase, input.caseId, 'contacted')
+    await enqueueCrmSync(input.caseId, 'contacted')
+  } else if (drafted > 0) {
+    // human_approve, or hybrid's first-touch step — nothing sent yet, a
+    // human owns the next move in /inbox. approveDraft is what eventually
+    // advances this case to 'contacted'.
+    await updateCaseWaiting(supabase, input.caseId, 'awaiting_manual_approval')
+  } else if (rateLimited > 0) {
+    // The up-front probe said eligible, but at least one lead's real send
+    // hit RATE_LIMITED anyway (a same-tick race — see eligibility.ts's
+    // isCapReady comment). Re-probe now so the case is labeled with an
+    // accurate, auto-retryable reason for the next fanout tick, instead of
+    // assuming.
+    const recheck = await getOutreachEligibility(supabase, {
+      mailboxIds: input.mailboxIds,
+      clientMailreachEnabled: client?.mailreach_enabled ?? false,
+      now: new Date(),
+    })
+    await updateCaseWaiting(supabase, input.caseId, recheck.eligible ? 'daily_cap' : recheck.reason)
+  } else {
+    // Every active lead was permanently disqualified this attempt (missing
+    // email, suppressed) — processLead checks suppression before
+    // generation, so this path never paid for an LLM call either. Not
+    // 'contacted' (never sent), and not left at 'writing' (would misread as
+    // stuck and get endlessly re-queued by stuck-sweep for a condition that
+    // won't change on its own). 'no_viable_leads' is deliberately excluded
+    // from the auto-retry set — nothing about waiting 5 more minutes
+    // changes a suppression list.
+    //
+    // (A narrower pre-existing imprecision: a lead skipped because a
+    // concurrent write already claimed its step-0 slot also lands here,
+    // same as it unconditionally became 'contacted' before this change —
+    // not a new regression, and case-level write concurrency is out of
+    // scope for this fix.)
+    await updateCaseWaiting(supabase, input.caseId, 'no_viable_leads')
+  }
+
   await logEventSafe({
     clientId: input.clientId,
     caseId: input.caseId,

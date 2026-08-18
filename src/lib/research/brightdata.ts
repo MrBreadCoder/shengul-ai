@@ -77,8 +77,15 @@ export const brightdataResearch: WebResearch = {
       // brd_json=1 asks Bright Data's SERP parser for structured JSON (the
       // `serpResponseSchema` shape below) instead of raw Google HTML.
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&brd_json=1`
-      response = await limitBrightdataConcurrency(() =>
-        withRetry(() =>
+      // Retry wraps the limiter, not the other way around: each attempt
+      // acquires its own slot and releases it immediately on failure, instead
+      // of one call holding a slot through its whole retry+backoff sequence
+      // (which starves every other queued caller for the delay's duration —
+      // exactly the wrong behavior under the congestion these retries exist
+      // to survive). See brightdata-limiter.ts's BRIGHTDATA_SOCIAL_MAX_CONCURRENT
+      // comment for the sibling fix to this same class of bug.
+      response = await withRetry(() =>
+        limitBrightdataConcurrency(() =>
           fetchJson(
             BRIGHTDATA_REQUEST_URL,
             {
@@ -113,8 +120,8 @@ export const brightdataResearch: WebResearch = {
     try {
       // Web Unlocker returns the page as markdown when data_format=markdown,
       // which is far cheaper to feed to the model than raw HTML.
-      const body = await limitBrightdataConcurrency(() =>
-        withRetry(() =>
+      const body = await withRetry(() =>
+        limitBrightdataConcurrency(() =>
           fetchText(
             BRIGHTDATA_REQUEST_URL,
             {

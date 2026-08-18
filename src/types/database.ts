@@ -198,6 +198,7 @@ export interface Database {
           company_domain: string | null
           company_key: string
           status: Database['public']['Enums']['case_status']
+          wait_reason: Database['public']['Enums']['case_wait_reason'] | null
           summary: string | null
           created_at: string
           updated_at: string
@@ -211,6 +212,7 @@ export interface Database {
           company_domain?: string | null
           company_key: string
           status?: Database['public']['Enums']['case_status']
+          wait_reason?: Database['public']['Enums']['case_wait_reason'] | null
           summary?: string | null
           created_at?: string
           updated_at?: string
@@ -1248,12 +1250,19 @@ export interface Database {
         | 'researching'
         | 'ready'
         | 'writing'
+        | 'waiting'
         | 'contacted'
         | 'in_conversation'
         | 'hot_handoff'
         | 'won'
         | 'lost'
         | 'dead'
+      case_wait_reason:
+        | 'mailreach_gate'
+        | 'daily_cap'
+        | 'no_healthy_mailbox'
+        | 'awaiting_manual_approval'
+        | 'no_viable_leads'
       knowledge_kind: 'company' | 'person' | 'news' | 'pain_point' | 'answer'
       email_direction: 'outbound' | 'inbound'
       email_status: 'draft' | 'queued' | 'sent' | 'delivered' | 'bounced' | 'failed'

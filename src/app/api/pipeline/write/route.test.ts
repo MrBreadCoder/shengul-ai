@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const verifyMock = vi.fn()
 const getCaseByIdMock = vi.fn()
 const updateCaseStatusMock = vi.fn()
+const claimCaseForWritingMock = vi.fn()
 const getCampaignForCaseMock = vi.fn()
 const runWriteMock = vi.fn()
 
@@ -11,6 +12,8 @@ vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/db/cases', () => ({
   getCaseById: (...a: unknown[]) => getCaseByIdMock(...a),
   updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a),
+  claimCaseForWriting: (...a: unknown[]) => claimCaseForWritingMock(...a),
+  AUTO_RETRY_WAIT_REASONS: ['mailreach_gate', 'daily_cap', 'no_healthy_mailbox'],
 }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
 vi.mock('@/lib/pipeline/write', () => ({ runWriteForCase: (...a: unknown[]) => runWriteMock(...a) }))
@@ -36,6 +39,7 @@ beforeEach(() => {
   logErrorMock.mockReset()
   isModelOverloadedErrorMock.mockReset()
   handleModelOverloadMock.mockReset()
+  claimCaseForWritingMock.mockReset().mockResolvedValue({ id: CASE_ID, status: 'writing' })
 })
 
 describe('POST /api/pipeline/write', () => {
@@ -51,7 +55,7 @@ describe('POST /api/pipeline/write', () => {
     expect(runWriteMock).toHaveBeenCalled()
   })
 
-  it('should claim the case as writing (not contacted) before running write', async () => {
+  it('should atomically claim the case as writing (not contacted) before running write', async () => {
     // Regression test for the false-'contacted'-on-failure bug (roadmap
     // 2026-08-12): claiming 'contacted' up front meant a write failure left
     // the case permanently reading 'contacted' with zero emails sent.
@@ -62,8 +66,32 @@ describe('POST /api/pipeline/write', () => {
     })
     runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
     await POST(req({ caseId: CASE_ID }))
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), CASE_ID, 'writing')
+    expect(claimCaseForWritingMock).toHaveBeenCalledWith(expect.anything(), CASE_ID)
     expect(updateCaseStatusMock).not.toHaveBeenCalledWith(expect.anything(), CASE_ID, 'contacted')
+  })
+
+  it('should only invoke runWriteForCase once when two concurrent deliveries race the atomic claim', async () => {
+    // Regression test: a read-then-write ('read status, then write
+    // unconditionally') would let both deliveries pass the `resumable` read
+    // before either claims. The atomic claim must let exactly one caller win.
+    getCaseByIdMock.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'ready', company_name: 'Acme' })
+    getCampaignForCaseMock.mockResolvedValue({
+      id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
+    })
+    claimCaseForWritingMock
+      .mockResolvedValueOnce({ id: CASE_ID, status: 'writing' })
+      .mockResolvedValueOnce(null)
+    runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
+
+    const first = await POST(req({ caseId: CASE_ID }))
+    const second = await POST(req({ caseId: CASE_ID }))
+    const secondJson = await second.json()
+
+    expect(claimCaseForWritingMock).toHaveBeenCalledTimes(2)
+    expect(runWriteMock).toHaveBeenCalledTimes(1)
+    expect(first.status).toBe(200)
+    expect(secondJson.skipped).toBe('case_not_ready')
   })
 
   it('should skip when the case is not ready', async () => {
@@ -82,6 +110,7 @@ describe('POST /api/pipeline/write', () => {
     const res = await POST(req({ caseId: CASE_ID }))
     const json = await res.json()
     expect(json.skipped).toBe('campaign_not_active')
+    expect(claimCaseForWritingMock).not.toHaveBeenCalled()
     expect(updateCaseStatusMock).not.toHaveBeenCalled()
     expect(runWriteMock).not.toHaveBeenCalled()
   })
@@ -91,6 +120,46 @@ describe('POST /api/pipeline/write', () => {
     verifyMock.mockRejectedValue(new AppError('UNAUTHORIZED', 'bad'))
     const res = await POST(req({ caseId: CASE_ID }))
     expect(res.status).toBe(401)
+  })
+
+  it('should run write for a waiting case with an auto-retry reason', async () => {
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'waiting', wait_reason: 'mailreach_gate', company_name: 'Acme',
+    })
+    getCampaignForCaseMock.mockResolvedValue({
+      id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
+    })
+    runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
+    const res = await POST(req({ caseId: CASE_ID }))
+    expect(res.status).toBe(200)
+    expect(runWriteMock).toHaveBeenCalled()
+  })
+
+  it('should skip a waiting case that needs manual approval', async () => {
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'waiting', wait_reason: 'awaiting_manual_approval', company_name: 'Acme',
+    })
+    const res = await POST(req({ caseId: CASE_ID }))
+    const json = await res.json()
+    expect(json.skipped).toBe('case_not_ready')
+    expect(runWriteMock).not.toHaveBeenCalled()
+  })
+
+  it("should pass the case's current status and wait reason through to runWriteForCase", async () => {
+    getCaseByIdMock.mockResolvedValue({
+      id: CASE_ID, client_id: 'c1', status: 'waiting', wait_reason: 'daily_cap', company_name: 'Acme',
+    })
+    getCampaignForCaseMock.mockResolvedValue({
+      id: 'camp1', reply_mode: 'auto_send', value_prop: 'v', booking_link: 'b', mailbox_ids: ['m1'], status: 'active',
+      signature_name: null, signature_title: null, phone: null, address: null,
+    })
+    runWriteMock.mockResolvedValue({ caseId: CASE_ID, sent: 1, drafted: 0 })
+    await POST(req({ caseId: CASE_ID }))
+    expect(runWriteMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ currentStatus: 'waiting', currentWaitReason: 'daily_cap' }),
+    )
   })
 
   it("should pass the campaign's signature override fields through to runWriteForCase", async () => {

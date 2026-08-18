@@ -118,8 +118,17 @@ const SENTENCE_BUILDERS: Record<string, (payload: Json) => string> = {
     `Page fetch failed for ${readString(p, 'url') ?? 'an unknown URL'}: ${readString(p, 'errorMessage') ?? 'unknown error'}${vendorDetailSuffix(p)}.`,
   'mailbox.send.failed': (p) =>
     `Sending from a mailbox failed: ${readString(p, 'errorMessage') ?? 'unknown error'}.`,
-  'mailbox.none_healthy': (p) =>
-    `No healthy mailbox available — ${readNumber(p, 'mailboxCount')} configured, all capped or blocked.`,
+  'mailbox.none_healthy': (p) => {
+    const total = readNumber(p, 'mailboxCount')
+    const gated = readNumber(p, 'warmupGatedCount')
+    if (gated > 0 && gated === total) {
+      return `No healthy mailbox available — all ${total} configured mailboxes still in Mailreach warmup.`
+    }
+    if (gated > 0) {
+      return `No healthy mailbox available — ${total} configured, ${gated} still warming up, the rest capped or blocked.`
+    }
+    return `No healthy mailbox available — ${total} configured, all capped or blocked.`
+  },
   'mailbox.connected': () => 'Mailbox connected.',
   // `serverResponse` is the mail host's own reply text (e.g. an SMTP 535
   // banner) — the actual diagnostic, and worth more than the generic

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { verifyQstashSignature } from '@/lib/qstash/verify'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCaseById, updateCaseStatus } from '@/lib/db/cases'
+import { getCaseById, updateCaseStatus, claimCaseForWriting, AUTO_RETRY_WAIT_REASONS } from '@/lib/db/cases'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { runWriteForCase } from '@/lib/pipeline/write'
 import { isAppError } from '@/lib/errors/app-error'
@@ -35,21 +35,30 @@ export async function POST(request: Request) {
     const kase = await getCaseById(admin, caseId)
     if (!kase) return NextResponse.json({ error: 'case_not_found' }, { status: 404 })
     clientId = kase.client_id
-    if (kase.status !== 'ready') return NextResponse.json({ ok: true, skipped: 'case_not_ready' })
+    const resumable = kase.status === 'ready'
+      || (kase.status === 'waiting' && kase.wait_reason !== null && AUTO_RETRY_WAIT_REASONS.includes(kase.wait_reason))
+    if (!resumable) return NextResponse.json({ ok: true, skipped: 'case_not_ready' })
 
     const campaign = await getCampaignForCase(admin, caseId)
     if (!campaign || campaign.status !== 'active') {
       return NextResponse.json({ ok: true, skipped: 'campaign_not_active' })
     }
 
-    // Claim the case so a retried/concurrent fan-out won't re-enter write.
-    // 'writing' is a genuine in-progress status distinct from the terminal
-    // 'contacted' write.ts sets only once the leads loop actually finishes
-    // — claiming 'contacted' up front (the old behavior) meant any failure
-    // mid-write left the case permanently reading 'contacted' with zero
-    // emails sent. See .claude/roadmap.md 2026-08-12 "False 'contacted'
-    // status on write failure".
-    await updateCaseStatus(admin, caseId, 'writing')
+    // Atomic claim, not the read-then-write the `resumable` check above (now
+    // just a fast-path early-exit) used to pair with an unconditional
+    // status write: a retried/concurrent delivery for the same case (a
+    // retried QStash message racing the original, or overlapping fanout
+    // ticks) must not both pass `resumable` and then both flip the case to
+    // 'writing' — only the update that actually transitions a still-
+    // eligible row wins and proceeds to runWriteForCase. 'writing' is a
+    // genuine in-progress status distinct from the terminal 'contacted'
+    // write.ts sets only once the leads loop actually finishes — claiming
+    // 'contacted' up front (the old behavior) meant any failure mid-write
+    // left the case permanently reading 'contacted' with zero emails sent.
+    // See .claude/roadmap.md 2026-08-12 "False 'contacted' status on write
+    // failure".
+    const claimed = await claimCaseForWriting(admin, caseId)
+    if (!claimed) return NextResponse.json({ ok: true, skipped: 'case_not_ready' })
 
     try {
       const summary = await runWriteForCase(admin, {
@@ -66,6 +75,8 @@ export async function POST(request: Request) {
         signaturePhone: campaign.phone,
         signatureAddress: campaign.address,
         campaignEmailTemplateId: campaign.email_template_id,
+        currentStatus: kase.status,
+        currentWaitReason: kase.wait_reason,
       })
       return NextResponse.json({ ok: true, summary })
     } catch (writeError) {

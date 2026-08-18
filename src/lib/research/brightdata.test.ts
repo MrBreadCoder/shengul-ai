@@ -53,6 +53,52 @@ describe('brightdataResearch concurrency', () => {
   })
 })
 
+describe('brightdataResearch.search concurrency-and-retry interaction', () => {
+  it('should release its concurrency slot during the retry backoff delay, letting a queued call start before the retry fires', async () => {
+    vi.useFakeTimers()
+    // Occupy every other slot with calls that hang until explicitly
+    // resolved, so the one remaining slot is what's actually being tested.
+    const hangingCount = BRIGHTDATA_MAX_CONCURRENT - 1
+    const hangingDeferreds = Array.from({ length: hangingCount }, () => deferred())
+    let callIndex = 0
+    const queuedStarted = vi.fn()
+    fetchJsonMock.mockImplementation(() => {
+      const idx = callIndex
+      callIndex += 1
+      if (idx < hangingCount) return hangingDeferreds[idx]!.promise
+      if (idx === hangingCount) return Promise.reject(new AppError('EXTERNAL_ERROR', 'boom'))
+      queuedStarted()
+      return Promise.resolve({ organic: [] })
+    })
+
+    // `limitBrightdataConcurrency` is a module-level singleton shared by
+    // every test in this file — if this test's hanging calls are ever left
+    // unresolved (e.g. the assertion below throws), those slots stay
+    // permanently occupied and every later test's search()/scrape() call
+    // hangs waiting for one, timing out. The finally block guarantees they
+    // always get released, assertion outcome notwithstanding.
+    const hangingCalls = Array.from({ length: hangingCount }, (_, i) => brightdataResearch.search(`hang ${i}`))
+    const retryingCall = brightdataResearch.search('retry me')
+    try {
+      // Let the last slot's first attempt run and fail, scheduling its
+      // RETRY_DELAY_MS backoff — without advancing past that delay.
+      await vi.advanceTimersByTimeAsync(0)
+
+      const queuedCall = brightdataResearch.search('queued')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(queuedStarted).toHaveBeenCalledTimes(1)
+      await queuedCall
+    } finally {
+      hangingDeferreds.forEach((d) => d.resolve())
+      await vi.advanceTimersByTimeAsync(600) // fire the retry delay and let its second attempt resolve
+      await Promise.allSettled(hangingCalls)
+      await retryingCall.catch(() => {})
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('brightdataResearch.search', () => {
   it('should map organic results to snippets when the API returns them', async () => {
     fetchJsonMock.mockResolvedValue({

@@ -27,6 +27,7 @@ const STATUS_FILTERS = [
   'new',
   'researching',
   'ready',
+  'waiting',
   'contacted',
   'in_conversation',
   'hot_handoff',

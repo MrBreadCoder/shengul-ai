@@ -107,6 +107,12 @@ const CASE_PLANS: Readonly<Record<CaseStatus, CasePlan>> = {
   // write loop finishes in seconds) — a small count here just demonstrates
   // the pipeline mid-flight, same reasoning as 'researching' above.
   writing: { count: 4, daysAgo: [0, 2], knowledge: 'full', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
+  // count: 0 — CASE_STATUS_ORDER below doesn't include 'waiting', so this
+  // bucket never actually seeds a row; the entry exists only because
+  // CASE_PLANS is a Record<CaseStatus, CasePlan> and TypeScript requires
+  // every case_status key. Seeding a realistic 'waiting' row would also need
+  // a wait_reason, which this generator's insert path doesn't set today.
+  waiting: { count: 0, daysAgo: [0, 2], knowledge: 'full', hasEmails: false, replyIntent: null, replyProbability: 0, sequenceState: null },
   contacted: { count: 52, daysAgo: [3, 45], knowledge: 'full', hasEmails: true, replyIntent: null, replyProbability: 0, sequenceState: 'active' },
   in_conversation: { count: 26, daysAgo: [6, 50], knowledge: 'full', hasEmails: true, replyIntent: 'interested', replyProbability: 1, sequenceState: 'completed' },
   hot_handoff: { count: 11, daysAgo: [8, 52], knowledge: 'full', hasEmails: true, replyIntent: 'price', replyProbability: 1, sequenceState: 'completed' },
