@@ -82,7 +82,7 @@ export async function getCaseById(
 
 // Every call site here sets a non-waiting status, so unconditionally
 // clearing wait_reason is always correct — and required: the
-// cases_wait_reason_matches_status check constraint (0049) rejects any row
+// cases_wait_reason_matches_status check constraint (0050) rejects any row
 // where status != 'waiting' but wait_reason is still set.
 export async function updateCaseStatus(
   supabase: SupabaseClient<Database>,
