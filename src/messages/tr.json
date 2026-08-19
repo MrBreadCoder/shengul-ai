@@ -9,6 +9,7 @@
     "loading": "Yükleniyor…",
     "retry": "Tekrar dene",
     "error": "Bir şeyler ters gitti",
+    "appErrorDescription": "Bu sayfa yüklenemedi. Hiçbir şey kaybolmadı — tekrar deneyin.",
     "language": "Dil",
     "english": "İngilizce",
     "turkish": "Türkçe",

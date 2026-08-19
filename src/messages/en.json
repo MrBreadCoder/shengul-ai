@@ -9,6 +9,7 @@
     "loading": "Loading…",
     "retry": "Retry",
     "error": "Something went wrong",
+    "appErrorDescription": "This page could not be loaded. Nothing was lost — try again.",
     "language": "Language",
     "english": "English",
     "turkish": "Turkish",

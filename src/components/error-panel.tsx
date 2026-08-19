@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { ArrowClockwise, WarningOctagon } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 
@@ -11,6 +12,10 @@ interface ErrorPanelProps {
 }
 
 export function ErrorPanel({ title, description, reset }: ErrorPanelProps): React.ReactElement {
+  // Every caller already translates title/description for its own route —
+  // the retry label is the one piece of copy ErrorPanel owns itself, so it
+  // needs its own translation rather than a hardcoded English string.
+  const tCommon = useTranslations('common')
   return (
     <div
       role="alert"
@@ -21,7 +26,7 @@ export function ErrorPanel({ title, description, reset }: ErrorPanelProps): Reac
       <p className="text-muted-foreground mt-1 max-w-[52ch] text-sm">{description}</p>
       <Button type="button" variant="outline" size="sm" onClick={reset} className="mt-5">
         <ArrowClockwise size={14} weight="light" />
-        Try again
+        {tCommon('retry')}
       </Button>
     </div>
   )
