@@ -91,11 +91,11 @@ describe('collectSocialKnowledge', () => {
     expect(result).toEqual([])
   })
 
-  it('should query both LinkedIn and X for the same lead when both URLs are present', async () => {
+  // X scraping is disabled (X_SCRAPING_ENABLED = false in social-knowledge.ts) — a
+  // twitterUrl present on the target must not trigger discoverXPersonPosts/
+  // discoverXCompanyPosts even though LinkedIn still runs normally.
+  it('should query LinkedIn but skip X for the same lead when both URLs are present', async () => {
     discoverLinkedInPersonPostsMock.mockResolvedValue([])
-    discoverXPersonPostsMock.mockResolvedValue([
-      { url: 'https://x.com/janedoe/status/1', text: 'a tweet', datePosted: '2026-08-13T00:00:00Z' },
-    ])
     const result = await collectSocialKnowledge(
       context,
       { linkedinUrl: null, twitterUrl: null },
@@ -103,22 +103,20 @@ describe('collectSocialKnowledge', () => {
       NOW,
     )
     expect(discoverLinkedInPersonPostsMock).toHaveBeenCalledWith('https://linkedin.com/in/janedoe')
-    expect(discoverXPersonPostsMock).toHaveBeenCalledWith('https://x.com/janedoe')
-    expect(result).toEqual([expect.objectContaining({ sourceUrl: 'https://x.com/janedoe/status/1', leadId: 'lead-a' })])
+    expect(discoverXPersonPostsMock).not.toHaveBeenCalled()
+    expect(result).toEqual([])
   })
 
-  it('should log and continue (return empty for that source) when one source throws', async () => {
+  it('should skip X company scraping even when twitterUrl is present, and still surface a LinkedIn failure', async () => {
     discoverLinkedInCompanyPostsMock.mockRejectedValue(new Error('bright data down'))
-    discoverXCompanyPostsMock.mockResolvedValue([
-      { url: 'https://x.com/acme/status/1', text: 'still works', datePosted: '2026-08-10T00:00:00Z' },
-    ])
     const result = await collectSocialKnowledge(
       context,
       { linkedinUrl: 'https://linkedin.com/company/acme', twitterUrl: 'https://x.com/acme' },
       [],
       NOW,
     )
-    expect(result).toEqual([expect.objectContaining({ sourceUrl: 'https://x.com/acme/status/1' })])
+    expect(discoverXCompanyPostsMock).not.toHaveBeenCalled()
+    expect(result).toEqual([])
     expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'pipeline.research.social_scrape_failed',
       payload: expect.objectContaining({ source: 'linkedin_company' }),

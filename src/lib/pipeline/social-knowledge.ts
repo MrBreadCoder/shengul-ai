@@ -8,6 +8,11 @@ import { isAppError } from '@/lib/errors/app-error'
 const MAX_POST_AGE_DAYS = 90
 const MAX_CONTENT_CHARS = 600
 
+// X post scraping disabled 2026-08-19 — kill switch, not a removal. Flip
+// back to true to re-enable; the discoverX*Posts call sites below stay
+// wired up behind this flag.
+const X_SCRAPING_ENABLED = false
+
 export interface SocialKnowledgeCandidate {
   kind: 'news'
   content: string
@@ -90,7 +95,7 @@ export async function collectSocialKnowledge(
         .then((posts) => toCandidates(posts, null, 'LinkedIn', now)),
     )
   }
-  if (company.twitterUrl) {
+  if (X_SCRAPING_ENABLED && company.twitterUrl) {
     const url = company.twitterUrl
     tasks.push(
       safeDiscover(() => discoverXCompanyPosts(url), { ...context, source: 'x_company' })
@@ -105,7 +110,7 @@ export async function collectSocialKnowledge(
           .then((posts) => toCandidates(posts, person.leadId, 'LinkedIn', now)),
       )
     }
-    if (person.twitterUrl) {
+    if (X_SCRAPING_ENABLED && person.twitterUrl) {
       const url = person.twitterUrl
       tasks.push(
         safeDiscover(() => discoverXPersonPosts(url), { ...context, source: 'x_person' })
