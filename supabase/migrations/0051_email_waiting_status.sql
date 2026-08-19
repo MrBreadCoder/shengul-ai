@@ -1,0 +1,11 @@
+-- New email_status value: content already exists on the row (generated, or
+-- client-approved), a real send was attempted and hit RATE_LIMITED, and it
+-- will be retried as-is by the drain sweep (src/lib/pipeline/resend-failed.ts)
+-- rather than regenerated. Distinct from 'failed', which is now reserved for
+-- a genuine, non-auto-retryable delivery error. See
+-- docs/superpowers/specs/2026-08-19-cap-blocked-send-waiting-design.md.
+--
+-- ALTER TYPE ... ADD VALUE cannot share a transaction with anything that
+-- references the new value (PG12+) — this file does nothing else, same
+-- lesson as migration 0049's split (see .claude/roadmap.md 2026-08-19).
+alter type email_status add value if not exists 'waiting' after 'queued';

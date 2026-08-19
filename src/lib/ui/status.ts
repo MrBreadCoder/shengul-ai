@@ -45,6 +45,7 @@ export const CASE_WAIT_REASON: Record<CaseWaitReason, StatusMeta> = {
   daily_cap: { label: 'Daily send cap reached', color: 'var(--status-writing)' },
   no_healthy_mailbox: { label: 'No healthy mailbox — needs attention', color: 'var(--status-lost)' },
   awaiting_manual_approval: { label: 'Drafts ready for approval', color: 'var(--status-ready)' },
+  awaiting_resend: { label: 'Waiting for resend', color: 'var(--status-ready)' },
   no_viable_leads: { label: 'No contactable leads', color: 'var(--status-dead)' },
 }
 
@@ -52,6 +53,7 @@ export const EMAIL_STATUS: Record<EmailStatus, StatusMeta> = {
   draft: { label: 'Draft', color: 'var(--status-researching)' },
   queued: { label: 'Queued', color: 'var(--status-ready)' },
   sent: { label: 'Sent', color: 'var(--status-contacted)' },
+  waiting: { label: 'Waiting for retry', color: 'var(--status-ready)' },
   delivered: { label: 'Delivered', color: 'var(--status-won)' },
   bounced: { label: 'Bounced', color: 'var(--status-lost)' },
   failed: { label: 'Failed', color: 'var(--status-lost)' },
