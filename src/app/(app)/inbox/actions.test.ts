@@ -3,6 +3,7 @@ import { AppError } from '@/lib/errors/app-error'
 
 const requireUserMock = vi.fn()
 const createAdminClientMock = vi.fn()
+const createServerClientMock = vi.fn()
 const getEmailByIdMock = vi.fn()
 const claimDraftForSendMock = vi.fn()
 const markEmailSentMock = vi.fn()
@@ -29,6 +30,7 @@ const enqueueCrmSyncMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
+vi.mock('@/lib/supabase/server', () => ({ createServerClient: (...a: unknown[]) => createServerClientMock(...a) }))
 vi.mock('@/lib/db/emails', () => ({
   getEmailById: (...a: unknown[]) => getEmailByIdMock(...a),
   claimDraftForSend: (...a: unknown[]) => claimDraftForSendMock(...a),
@@ -98,7 +100,7 @@ function krForm(fields: Record<string, string>) {
 }
 
 beforeEach(() => {
-  for (const m of [requireUserMock, createAdminClientMock, getEmailByIdMock, claimDraftForSendMock,
+  for (const m of [requireUserMock, createAdminClientMock, createServerClientMock, getEmailByIdMock, claimDraftForSendMock,
     markEmailSentMock, markEmailFailedMock, scheduleFirstFollowupMock,
     getCampaignForCaseMock, getLeadByIdMock, sendViaMailboxMock,
     revalidatePathMock, logEventSafeMock, claimAnswerMock, getKnowledgeRequestByIdMock,
@@ -113,6 +115,7 @@ beforeEach(() => {
   resolveSelectedResourcesMock.mockResolvedValue([])
   getKnowledgeRequestByIdMock.mockResolvedValue({ id: KR_ID, client_id: 'c1', case_id: 'case1' })
   createAdminClientMock.mockReturnValue({})
+  createServerClientMock.mockResolvedValue({})
   getLeadByIdMock.mockResolvedValue({ id: 'lead1', email: 'jane@acme.com' })
   getCampaignForCaseMock.mockResolvedValue({ mailbox_ids: ['m1'] })
   sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
@@ -183,12 +186,22 @@ describe('approveDraft', () => {
     expect(createAdminClientMock).toHaveBeenCalled()
   })
 
-  it('should reject a non-operator before any read or send', async () => {
-    requireUserMock.mockResolvedValue({ user: { id: 'u2' }, appUser: { id: 'u2', role: 'client' } })
+  it('should reject a client that does not own the draft, before any send', async () => {
+    requireUserMock.mockResolvedValue({ user: { id: 'u2' }, appUser: { id: 'u2', role: 'client', client_id: 'other-client' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail()) // client_id: 'c1'
 
     await expect(approveDraft(fd(EMAIL_ID))).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
-    expect(getEmailByIdMock).not.toHaveBeenCalled()
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
+  })
+
+  it('should let the owning client approve and send their own draft', async () => {
+    requireUserMock.mockResolvedValue({ user: { id: 'u2' }, appUser: { id: 'u2', role: 'client', client_id: 'c1' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail()) // client_id: 'c1'
+
+    await approveDraft(fd(EMAIL_ID))
+
+    expect(sendViaMailboxMock).toHaveBeenCalled()
+    expect(markEmailSentMock).toHaveBeenCalled()
   })
 
   it('should not send when the atomic draft claim is lost to a concurrent approval', async () => {
@@ -418,12 +431,27 @@ describe('updateDraftAttachments', () => {
     expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
   })
 
-  it('should reject a non-operator', async () => {
-    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+  it('should reject a client editing another client\'s draft attachments', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'other-client' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail()) // client_id: 'c1'
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
     await expect(updateDraftAttachments(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
     expect(replaceEmailAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('should let the owning client edit their own draft attachments', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.append('resourceIds', R1)
+
+    await updateDraftAttachments(formData)
+
+    expect(replaceEmailAttachmentsMock).toHaveBeenCalledWith({}, {
+      clientId: 'c1', emailId: EMAIL_ID, resourceIds: [R1],
+    })
   })
 
   it('should reject an email that is no longer a draft', async () => {
@@ -472,6 +500,7 @@ describe('approveDraft attachments', () => {
 
 describe('updateDraftContent', () => {
   it('should persist the manually edited subject and body', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
     updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'New subject', body: 'New body' }))
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
@@ -486,8 +515,9 @@ describe('updateDraftContent', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
-  it('should reject a non-operator', async () => {
-    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+  it('should reject a client editing another client\'s draft', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'other-client' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail()) // client_id: 'c1'
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
     formData.set('subject', 'New subject')
@@ -495,6 +525,22 @@ describe('updateDraftContent', () => {
 
     await expect(updateDraftContent(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
     expect(updateDraftContentRowMock).not.toHaveBeenCalled()
+  })
+
+  it('should let the owning client edit their own draft content', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'New subject', body: 'New body' }))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', 'New subject')
+    formData.set('body', 'New body')
+
+    await updateDraftContent(formData)
+
+    expect(updateDraftContentRowMock).toHaveBeenCalledWith(
+      {}, EMAIL_ID, { subject: 'New subject', body: 'New body' },
+    )
   })
 
   it('should reject an empty subject before touching the database', async () => {
@@ -507,7 +553,19 @@ describe('updateDraftContent', () => {
     expect(updateDraftContentRowMock).not.toHaveBeenCalled()
   })
 
-  it('should throw VALIDATION_ERROR when the draft was already sent', async () => {
+  it('should throw VALIDATION_ERROR when the draft no longer resolves (already sent)', async () => {
+    getEmailByIdMock.mockResolvedValue(null)
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('subject', 'New subject')
+    formData.set('body', 'New body')
+
+    await expect(updateDraftContent(formData)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(revalidatePathMock).not.toHaveBeenCalled()
+  })
+
+  it('should throw VALIDATION_ERROR when the draft is claimed out from under the edit', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
     updateDraftContentRowMock.mockResolvedValue(null)
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
@@ -521,6 +579,7 @@ describe('updateDraftContent', () => {
 
 describe('regenerateDraftContent', () => {
   it('should redesign the draft and persist the result', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
     regenerateDraftContentPipelineMock.mockResolvedValue({ subject: 'AI subject', body: 'AI body' })
     updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'AI subject', body: 'AI body' }))
     const formData = new FormData()
@@ -537,14 +596,29 @@ describe('regenerateDraftContent', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
-  it('should reject a non-operator', async () => {
-    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+  it('should reject a client redesigning another client\'s draft', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'other-client' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail()) // client_id: 'c1'
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
     formData.set('instruction', 'make it shorter')
 
     await expect(regenerateDraftContent(formData)).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
     expect(regenerateDraftContentPipelineMock).not.toHaveBeenCalled()
+  })
+
+  it('should let the owning client redesign their own draft', async () => {
+    requireUserMock.mockResolvedValue({ appUser: { id: 'u1', role: 'client', client_id: 'c1' } })
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    regenerateDraftContentPipelineMock.mockResolvedValue({ subject: 'AI subject', body: 'AI body' })
+    updateDraftContentRowMock.mockResolvedValue(draftEmail({ subject: 'AI subject', body: 'AI body' }))
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    const result = await regenerateDraftContent(formData)
+
+    expect(result).toEqual({ ok: true, subject: 'AI subject', body: 'AI body' })
   })
 
   it('should reject an empty instruction before calling the pipeline', async () => {
@@ -556,7 +630,20 @@ describe('regenerateDraftContent', () => {
     expect(regenerateDraftContentPipelineMock).not.toHaveBeenCalled()
   })
 
+  it('should return ok:false when the emailId no longer resolves to a draft', async () => {
+    getEmailByIdMock.mockResolvedValue(null)
+    const formData = new FormData()
+    formData.set('emailId', EMAIL_ID)
+    formData.set('instruction', 'make it shorter')
+
+    const result = await regenerateDraftContent(formData)
+
+    expect(result).toEqual({ ok: false, code: 'VALIDATION_ERROR' })
+    expect(regenerateDraftContentPipelineMock).not.toHaveBeenCalled()
+  })
+
   it('should return ok:false with the error code when the LLM call fails, without throwing', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
     regenerateDraftContentPipelineMock.mockRejectedValue(new AppError('EXTERNAL_ERROR', 'LLM generateObject failed'))
     const formData = new FormData()
     formData.set('emailId', EMAIL_ID)
@@ -569,6 +656,7 @@ describe('regenerateDraftContent', () => {
   })
 
   it('should return ok:false when the draft was approved out from under the redesign', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
     regenerateDraftContentPipelineMock.mockResolvedValue({ subject: 'AI subject', body: 'AI body' })
     updateDraftContentRowMock.mockResolvedValue(null)
     const formData = new FormData()

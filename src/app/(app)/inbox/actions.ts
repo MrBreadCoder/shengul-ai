@@ -3,7 +3,9 @@
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { requireUser } from '@/lib/auth/require-user'
+import { canManageClient } from '@/lib/auth/can-manage-client'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createServerClient } from '@/lib/supabase/server'
 import {
   getEmailById,
   claimDraftForSend,
@@ -34,25 +36,31 @@ const approveSchema = z.object({ emailId: z.string().uuid() })
 
 export async function approveDraft(formData: FormData): Promise<void> {
   const { appUser } = await requireUser()
-  // Sending live mail is operator-only. The pipeline routes gate on this same
-  // check; without it a non-operator's click would trigger a SECURITY DEFINER
-  // mailbox send while the RLS-blocked status write silently no-ops.
-  if (appUser.role !== 'operator') {
-    throw new AppError('UNAUTHORIZED', 'Only operators can approve drafts', { userId: appUser.id })
-  }
   const { emailId } = approveSchema.parse({ emailId: formData.get('emailId') })
 
-  // Admin client (bypasses RLS) for both read and write, matching every other
-  // send path. The operator check above is the authorization boundary.
-  const supabase = createAdminClient()
-
-  const email = await getEmailById(supabase, emailId)
+  // RLS-scoped read: a client-role session can only resolve an email its own
+  // policies expose, so a cross-tenant emailId already resolves to null here.
+  // The explicit canManageClient check re-confirms it before any write — same
+  // defense-in-depth pattern as sendManualEmail (cases/[id]/send-actions.ts).
+  // Approving is open to the owning client as well as operators: the client
+  // reviewing (and, via updateDraftContent, possibly editing) their own draft
+  // is exactly who is meant to approve it.
+  const scoped = await createServerClient()
+  const email = await getEmailById(scoped, emailId)
   if (!email || email.status !== 'draft' || email.direction !== 'outbound') {
     throw new AppError('VALIDATION_ERROR', 'Email is not an approvable draft', { emailId })
+  }
+  if (!canManageClient(appUser, email.client_id)) {
+    throw new AppError('UNAUTHORIZED', 'Draft belongs to another client', { emailId, userId: appUser.id })
   }
   if (!email.case_id || !email.lead_id || !email.subject || !email.body) {
     throw new AppError('VALIDATION_ERROR', 'Draft is missing required fields', { emailId })
   }
+
+  // Admin client (bypasses RLS) for downstream reads and every write below,
+  // matching every other send path. The canManageClient check above is the
+  // authorization boundary.
+  const supabase = createAdminClient()
 
   const lead = await getLeadById(supabase, email.lead_id)
   if (!lead?.email) throw new AppError('VALIDATION_ERROR', 'Lead has no email', { emailId })
@@ -162,24 +170,28 @@ const updateAttachmentsSchema = z.object({
 // touches a draft — once queued or sent, the set is history.
 export async function updateDraftAttachments(formData: FormData): Promise<void> {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
-    throw new AppError('UNAUTHORIZED', 'Only operators can edit draft attachments', { userId: appUser.id })
-  }
   const { emailId, resourceIds } = updateAttachmentsSchema.parse({
     emailId: formData.get('emailId'),
     resourceIds: formData.getAll('resourceIds'),
   })
 
-  const supabase = createAdminClient()
-  const email = await getEmailById(supabase, emailId)
+  // RLS-scoped read + explicit ownership check — see approveDraft. Open to
+  // the owning client as well as operators.
+  const scoped = await createServerClient()
+  const email = await getEmailById(scoped, emailId)
   if (!email || email.status !== 'draft' || email.direction !== 'outbound') {
     throw new AppError('VALIDATION_ERROR', 'Email is not an editable draft', { emailId })
   }
+  if (!canManageClient(appUser, email.client_id)) {
+    throw new AppError('UNAUTHORIZED', 'Draft belongs to another client', { emailId, userId: appUser.id })
+  }
+
+  const supabase = createAdminClient()
 
   // Validated against the email's own client before anything is written. An
-  // unresolvable or over-budget pick must fail here, where the operator is
-  // looking at the form, rather than at approve time where the only outcome
-  // left is a failed send.
+  // unresolvable or over-budget pick must fail here, where the operator or
+  // client is looking at the form, rather than at approve time where the
+  // only outcome left is a failed send.
   await resolveSelectedResources(supabase, email.client_id, resourceIds)
 
   await replaceEmailAttachments(supabase, {
@@ -194,17 +206,25 @@ const updateContentSchema = z.object({
   body: z.string().trim().min(1).max(MAX_BODY_CHARS),
 })
 
-// Persists a hand-edited (or just-redesigned) subject/body onto a draft.
+// Persists a hand-edited (or just-redesigned) subject/body onto a draft. Open
+// to the owning client as well as operators — see approveDraft.
 export async function updateDraftContent(formData: FormData): Promise<void> {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
-    throw new AppError('UNAUTHORIZED', 'Only operators can edit drafts', { userId: appUser.id })
-  }
   const { emailId, subject, body } = updateContentSchema.parse({
     emailId: formData.get('emailId'),
     subject: formData.get('subject'),
     body: formData.get('body'),
   })
+
+  // RLS-scoped read + explicit ownership check — see approveDraft.
+  const scoped = await createServerClient()
+  const email = await getEmailById(scoped, emailId)
+  if (!email) {
+    throw new AppError('VALIDATION_ERROR', 'Draft was already sent', { emailId })
+  }
+  if (!canManageClient(appUser, email.client_id)) {
+    throw new AppError('UNAUTHORIZED', 'Draft belongs to another client', { emailId, userId: appUser.id })
+  }
 
   const supabase = createAdminClient()
   const updated = await updateDraftContentRow(supabase, emailId, { subject, body })
@@ -224,17 +244,26 @@ export type RegenerateDraftResult =
   | { ok: false; code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT' }
 
 // A redesign failure (LLM error/timeout, or the draft having just been
-// approved out from under the operator) is an expected, user-facing outcome
-// the operator retries — not a crash — so it is returned, not thrown.
+// approved out from under the operator or client) is an expected, user-facing
+// outcome that gets retried — not a crash — so it is returned, not thrown.
 export async function regenerateDraftContent(formData: FormData): Promise<RegenerateDraftResult> {
   const { appUser } = await requireUser()
-  if (appUser.role !== 'operator') {
-    throw new AppError('UNAUTHORIZED', 'Only operators can redesign drafts', { userId: appUser.id })
-  }
   const { emailId, instruction } = regenerateSchema.parse({
     emailId: formData.get('emailId'),
     instruction: formData.get('instruction'),
   })
+
+  // RLS-scoped read + explicit ownership check — see approveDraft. A
+  // cross-tenant or nonexistent draft is folded into the same expected
+  // VALIDATION_ERROR outcome the pipeline itself returns for a missing draft.
+  const scoped = await createServerClient()
+  const scopedEmail = await getEmailById(scoped, emailId)
+  if (!scopedEmail) {
+    return { ok: false, code: 'VALIDATION_ERROR' }
+  }
+  if (!canManageClient(appUser, scopedEmail.client_id)) {
+    throw new AppError('UNAUTHORIZED', 'Draft belongs to another client', { emailId, userId: appUser.id })
+  }
 
   const supabase = createAdminClient()
   let draft: { subject: string; body: string }
