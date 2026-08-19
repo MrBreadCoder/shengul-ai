@@ -4,9 +4,12 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { CheckCircle, MagicWand, Paperclip, PaperPlaneTilt, PencilSimple } from '@phosphor-icons/react'
+import { CheckCircle, Clock, MagicWand, Paperclip, PaperPlaneTilt, PencilSimple, WarningCircle } from '@phosphor-icons/react'
 import { useTranslations } from 'next-intl'
-import { approveDraft, regenerateDraftContent, updateDraftAttachments, updateDraftContent } from './actions'
+import {
+  approveDraft, regenerateDraftContent, updateDraftAttachments, updateDraftContent,
+  type ApproveDraftResult,
+} from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -37,12 +40,70 @@ interface DraftRowProps {
   resources: readonly ResourceSummary[]
 }
 
+function assertNever(x: never): never {
+  throw new Error('Unhandled case: ' + String(x))
+}
+
+// What approveDraft actually resolved to, distinct from the row's original
+// draft-editing state (null). Kept as a discriminated value — not a boolean
+// — because a 'waiting' approval is a real, distinct outcome from 'sent':
+// the content is locked in, but nothing has gone out yet, and the footer
+// must say so rather than falsely claiming "Sent".
+type ApproveOutcome = ApproveDraftResult['status']
+
 function messageForRegenerateCode(
   t: ReturnType<typeof useTranslations<'inbox'>>,
   code: 'VALIDATION_ERROR' | 'EXTERNAL_ERROR' | 'EXTERNAL_TIMEOUT',
 ): string {
   if (code === 'VALIDATION_ERROR') return t('draftRow.regenerateValidationError')
   return t('draftRow.regenerateGenericError')
+}
+
+// Short footer-chip label per outcome — distinct from the (longer) toast
+// copy in onApprove. 'waiting' must never borrow 'sent'\'s label: the
+// content is locked in, but nothing has actually gone out yet.
+function approveOutcomeLabel(t: ReturnType<typeof useTranslations<'inbox'>>, outcome: ApproveOutcome): string {
+  switch (outcome) {
+    case 'sent':
+      return t('draftRow.sent')
+    case 'waiting':
+      return t('draftRow.waitingChip')
+    case 'failed':
+      return t('draftRow.toastSendFailed')
+    case 'in_progress':
+      return t('draftRow.inProgressChip')
+    default:
+      return assertNever(outcome)
+  }
+}
+
+function approveOutcomeIcon(outcome: ApproveOutcome): React.ReactElement {
+  switch (outcome) {
+    case 'sent':
+      return <CheckCircle size={14} weight="fill" />
+    case 'waiting':
+    case 'in_progress':
+      return <Clock size={14} weight="fill" />
+    case 'failed':
+      return <WarningCircle size={14} weight="fill" />
+    default:
+      return assertNever(outcome)
+  }
+}
+
+function approveOutcomeColor(outcome: ApproveOutcome): string {
+  switch (outcome) {
+    case 'sent':
+      return 'var(--status-won)'
+    case 'waiting':
+      return 'var(--status-waiting)'
+    case 'failed':
+      return 'var(--destructive)'
+    case 'in_progress':
+      return 'var(--muted-foreground)'
+    default:
+      return assertNever(outcome)
+  }
 }
 
 export function DraftRow({
@@ -58,7 +119,9 @@ export function DraftRow({
   const t = useTranslations('inbox')
   const tCommon = useTranslations('common')
   const [isPending, startTransition] = useTransition()
-  const [isSent, setIsSent] = useState(false)
+  // null = still an approvable draft; any other value = approveDraft
+  // resolved and the row is no longer a draft.
+  const [approveOutcome, setApproveOutcome] = useState<ApproveOutcome | null>(null)
   const [isEditingAttachments, setIsEditingAttachments] = useState(false)
   const [isSavingAttachments, startAttachmentTransition] = useTransition()
   const [isEditingContent, setIsEditingContent] = useState(false)
@@ -141,9 +204,31 @@ export function DraftRow({
     formData.set('emailId', emailId)
     startTransition(async () => {
       try {
-        await approveDraft(formData)
-        setIsSent(true)
-        toast.success(t('draftRow.toastEmailSent'), { description: t('draftRow.toastSentToPrefix', { companyName }) })
+        const { status } = await approveDraft(formData)
+        // Every branch here means the row is no longer an approvable draft
+        // (it lost the claim to, or completed via, a concurrent approval) —
+        // hide the actions either way. The footer text and toast both then
+        // differ by the actual outcome — 'waiting' must never read as 'sent'.
+        setApproveOutcome(status)
+        switch (status) {
+          case 'waiting':
+            // The approval succeeded — content is locked in and will be
+            // resent as-is once today's cap resets. Not an error: no retry
+            // needed from the client, nothing to redo.
+            toast.success(t('draftRow.toastApprovedWaiting'))
+            break
+          case 'sent':
+            toast.success(t('draftRow.toastEmailSent'), { description: t('draftRow.toastSentToPrefix', { companyName }) })
+            break
+          case 'failed':
+            toast.error(t('draftRow.toastSendFailed'), { description: t('draftRow.toastPleaseRetry') })
+            break
+          case 'in_progress':
+            toast(t('draftRow.toastApprovalInProgress'))
+            break
+          default:
+            assertNever(status)
+        }
       } catch (error) {
         // The Server Action already logged the cause; the operator needs to
         // know the send did not happen and the draft is still theirs to retry.
@@ -251,7 +336,7 @@ export function DraftRow({
           </>
         )}
 
-        {isSent ? null : (
+        {approveOutcome !== null ? null : (
           <div className="mt-4 flex flex-col gap-2">
             {!isEditingContent ? (
               <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onOpenEditor}>
@@ -325,18 +410,18 @@ export function DraftRow({
 
       <footer className="border-hairline flex flex-wrap items-center gap-3 border-t px-4 py-3">
         <AnimatePresence mode="wait" initial={false}>
-          {isSent ? (
+          {approveOutcome !== null ? (
             <motion.span
-              key="sent"
+              key={approveOutcome}
               role="status"
               className="inline-flex items-center gap-1.5 text-xs font-medium"
-              style={{ color: 'var(--status-won)' }}
+              style={{ color: approveOutcomeColor(approveOutcome) }}
               initial={reduceMotion ? false : { opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
             >
-              <CheckCircle size={14} weight="fill" />
-              {t('draftRow.sent')}
+              {approveOutcomeIcon(approveOutcome)}
+              {approveOutcomeLabel(t, approveOutcome)}
             </motion.span>
           ) : (
             <motion.div

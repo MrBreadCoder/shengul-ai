@@ -214,6 +214,21 @@ export async function markEmailFailed(
   }
 }
 
+// Content already exists on this row (generated, or client-approved) and a
+// real send hit RATE_LIMITED — park it as-is for the drain sweep
+// (lib/pipeline/resend-failed.ts) to retry verbatim. Distinct from
+// markEmailFailed, which is reserved for a genuine, non-auto-retryable
+// delivery error.
+export async function markEmailWaiting(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase.from('emails').update({ status: 'waiting' }).eq('id', id)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to mark email waiting', { id, cause: error.message })
+  }
+}
+
 export async function listThreadEmails(
   supabase: SupabaseClient<Database>,
   leadId: string,
@@ -335,31 +350,71 @@ export async function listEmailsForClient(
   return data ?? []
 }
 
-// A bounded batch of stranded first-touch sends: status:'failed' can happen
-// even on a case that has since moved on to 'contacted' (a different lead on
-// the same case sent successfully in the same run — see
-// resend-failed-outbound.ts and .claude/roadmap.md 2026-08-19), so this
-// deliberately does not filter by case status. Scoped to sequence_step 0
-// only — a failed follow-up (step >= 1) is owned by its sequence's own
-// retry semantics (sequences.next_action_at), a different mechanism this
-// does not touch. Ordered oldest-first so a long-stranded email is not
-// starved behind ones that failed more recently.
-export async function listFailedFirstTouchEmails(
+// Every 'waiting' outbound row, oldest first — first-touch and follow-up
+// steps alike (no sequence_step filter). Drives the drain sweep
+// (lib/pipeline/resend-failed.ts): each row's content is resent verbatim,
+// never regenerated. Oldest-first ordering is what gives already-committed
+// content priority over the same day's brand-new work once the cap resets.
+export async function listWaitingOutboundEmails(
   supabase: SupabaseClient<Database>,
   limit: number,
 ): Promise<EmailRow[]> {
   const { data, error } = await supabase
     .from('emails')
     .select('*')
-    .eq('status', 'failed')
+    .eq('status', 'waiting')
     .eq('direction', 'outbound')
-    .eq('sequence_step', 0)
     .order('created_at', { ascending: true })
     .limit(limit)
   if (error) {
-    throw new AppError('DB_ERROR', 'Failed to list failed first-touch emails', { cause: error.message })
+    throw new AppError('DB_ERROR', 'Failed to list waiting outbound emails', { cause: error.message })
   }
   return data ?? []
+}
+
+// Distinct leads on a case whose first-touch already has real content
+// parked 'waiting' — lets runWriteForCase (write.ts) skip calling the LLM
+// again for a lead the drain sweep already owns, instead of generating a
+// fresh draft that would just get discarded when the claim no-ops.
+export async function listWaitingLeadIds(
+  supabase: SupabaseClient<Database>,
+  caseId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('emails')
+    .select('lead_id')
+    .eq('case_id', caseId)
+    .eq('sequence_step', 0)
+    .eq('status', 'waiting')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list waiting lead ids', { caseId, cause: error.message })
+  }
+  return new Set((data ?? []).flatMap((row) => (row.lead_id ? [row.lead_id] : [])))
+}
+
+// Reclaims a specific 'waiting' row for the drain sweep — resend-failed.ts
+// only, never the generation paths. The `.eq('status', 'waiting')` guard
+// makes this atomic (only one concurrent sweep tick can win a given row) and
+// is also the reason this is a SEPARATE function from
+// reclaimFailedOutboundEmail rather than a widened version of it:
+// claimOutboundEmail's reclaim must keep matching 'failed' only, so a
+// 'waiting' row stays invisible to the generation paths (processLead,
+// runFollowupStep) — that's what stops a mistaken re-dispatch from
+// overwriting already-committed content. See markEmailWaiting's callers.
+export async function claimWaitingOutboundEmail(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<EmailRow | null> {
+  const { data, error } = await supabase
+    .from('emails')
+    .update({ status: 'queued' })
+    .eq('id', id)
+    .eq('status', 'waiting')
+    .select('*')
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to claim waiting outbound email', { id, cause: error.message })
+  }
+  return data && data.length > 0 ? data[0]! : null
 }
 
 // Flips the newest delivered/sent outbound email for a lead to 'bounced' — this

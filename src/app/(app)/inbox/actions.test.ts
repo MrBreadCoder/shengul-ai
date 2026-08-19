@@ -8,6 +8,7 @@ const getEmailByIdMock = vi.fn()
 const claimDraftForSendMock = vi.fn()
 const markEmailSentMock = vi.fn()
 const markEmailFailedMock = vi.fn()
+const markEmailWaitingMock = vi.fn()
 const scheduleFirstFollowupMock = vi.fn()
 const getCampaignForCaseMock = vi.fn()
 const getLeadByIdMock = vi.fn()
@@ -28,8 +29,6 @@ const regenerateDraftContentPipelineMock = vi.fn()
 const claimCaseContactedMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
 const updateCaseWaitingMock = vi.fn()
-const getOutreachEligibilityMock = vi.fn()
-const getClientByIdMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
@@ -39,6 +38,7 @@ vi.mock('@/lib/db/emails', () => ({
   claimDraftForSend: (...a: unknown[]) => claimDraftForSendMock(...a),
   markEmailSent: (...a: unknown[]) => markEmailSentMock(...a),
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
+  markEmailWaiting: (...a: unknown[]) => markEmailWaitingMock(...a),
   hasReplyForInbound: (...a: unknown[]) => hasReplyForInboundMock(...a),
   updateDraftContent: (...a: unknown[]) => updateDraftContentRowMock(...a),
 }))
@@ -75,10 +75,6 @@ vi.mock('@/lib/db/cases', () => ({
   updateCaseWaiting: (...a: unknown[]) => updateCaseWaitingMock(...a),
 }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
-vi.mock('@/lib/mailbox/eligibility', () => ({
-  getOutreachEligibility: (...a: unknown[]) => getOutreachEligibilityMock(...a),
-}))
-vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 
 import {
   approveDraft, answerKnowledgeRequest, updateDraftAttachments, updateDraftContent, regenerateDraftContent,
@@ -109,14 +105,13 @@ function krForm(fields: Record<string, string>) {
 
 beforeEach(() => {
   for (const m of [requireUserMock, createAdminClientMock, createServerClientMock, getEmailByIdMock, claimDraftForSendMock,
-    markEmailSentMock, markEmailFailedMock, scheduleFirstFollowupMock,
+    markEmailSentMock, markEmailFailedMock, markEmailWaitingMock, scheduleFirstFollowupMock,
     getCampaignForCaseMock, getLeadByIdMock, sendViaMailboxMock,
     revalidatePathMock, logEventSafeMock, claimAnswerMock, getKnowledgeRequestByIdMock,
     hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock,
     listAttachmentsForEmailMock, replaceEmailAttachmentsMock, loadResourceAttachmentsMock,
     resolveSelectedResourcesMock, updateDraftContentRowMock, regenerateDraftContentPipelineMock,
-    claimCaseContactedMock, enqueueCrmSyncMock, updateCaseWaitingMock, getOutreachEligibilityMock,
-    getClientByIdMock]) m.mockReset()
+    claimCaseContactedMock, enqueueCrmSyncMock, updateCaseWaitingMock]) m.mockReset()
   requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator', client_id: null } })
   listAttachmentsForEmailMock.mockResolvedValue([])
   replaceEmailAttachmentsMock.mockResolvedValue(undefined)
@@ -179,7 +174,7 @@ describe('approveDraft', () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     claimCaseContactedMock.mockRejectedValue(new Error('db down'))
 
-    await expect(approveDraft(fd(EMAIL_ID))).resolves.toBeUndefined()
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'sent' })
     expect(markEmailSentMock).toHaveBeenCalled()
     expect(logEventSafeMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),
@@ -214,15 +209,47 @@ describe('approveDraft', () => {
   })
 
   it('should not send when the atomic draft claim is lost to a concurrent approval', async () => {
-    getEmailByIdMock.mockResolvedValue(draftEmail())
+    getEmailByIdMock
+      .mockResolvedValueOnce(draftEmail())
+      .mockResolvedValueOnce(draftEmail({ status: 'queued' }))
     claimDraftForSendMock.mockResolvedValue(null)
 
-    await approveDraft(fd(EMAIL_ID))
+    const result = await approveDraft(fd(EMAIL_ID))
 
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
     expect(markEmailSentMock).not.toHaveBeenCalled()
     expect(scheduleFirstFollowupMock).not.toHaveBeenCalled()
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+    // 'queued' means a concurrent approval is still mid-send — the real
+    // outcome isn't known yet, so it must not be reported as 'sent'.
+    expect(result).toEqual({ status: 'in_progress' })
+  })
+
+  // Regression test: losing the claim used to always report { status: 'sent' },
+  // even when the concurrent approval that won the race ended in 'waiting' or
+  // 'failed'. Re-reading the row is what makes the reported outcome true.
+  it.each([
+    ['sent', 'sent'],
+    ['delivered', 'sent'],
+    ['bounced', 'sent'],
+    ['waiting', 'waiting'],
+    ['failed', 'failed'],
+  ] as const)('should report the actual %s status as %s when the lost claim already resolved', async (rowStatus, expected) => {
+    getEmailByIdMock
+      .mockResolvedValueOnce(draftEmail())
+      .mockResolvedValueOnce(draftEmail({ status: rowStatus }))
+    claimDraftForSendMock.mockResolvedValue(null)
+
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: expected })
+  })
+
+  it('should report in_progress when the lost-claim re-read finds no row at all', async () => {
+    getEmailByIdMock
+      .mockResolvedValueOnce(draftEmail())
+      .mockResolvedValueOnce(null)
+    claimDraftForSendMock.mockResolvedValue(null)
+
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'in_progress' })
   })
 
   it('should mark the email failed, revalidate, and rethrow when sending throws', async () => {
@@ -246,47 +273,22 @@ describe('approveDraft', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
-  // Regression test: a RATE_LIMITED send failure (daily cap / mailreach gate
-  // / no healthy mailbox) used to just mark the email failed and rethrow,
-  // leaving the case's wait_reason untouched — nothing ever revisited it,
-  // since write-fanout's auto-retry sweep only picks up a case already
-  // flagged with one of AUTO_RETRY_WAIT_REASONS. The draft was gone with no
-  // path back. See .claude/roadmap.md 2026-08-19.
-  it('should flag the case with the real reason (from a fresh eligibility check) when approval hits the daily cap', async () => {
+  // Regression test: a RATE_LIMITED approval used to mark the email failed and
+  // rethrow, then rely on write-fanout's regenerating auto-retry to pick the
+  // case back up — silently discarding the client's approved wording. Now it
+  // parks the approved content as-is and returns normally: the approval
+  // itself succeeded, only the send is delayed. See .claude/roadmap.md
+  // 2026-08-19 and docs/superpowers/specs/2026-08-19-cap-blocked-send-waiting-design.md.
+  it('should mark the email waiting, flag the case awaiting_resend, and resolve (not throw) when approval hits the cap', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
-    getClientByIdMock.mockResolvedValue({ id: 'c1', mailreach_enabled: false })
-    getOutreachEligibilityMock.mockResolvedValue({ eligible: false, reason: 'daily_cap', retryAfter: new Date() })
 
-    await expect(approveDraft(fd(EMAIL_ID))).rejects.toBeTruthy()
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
 
-    expect(markEmailFailedMock).toHaveBeenCalledWith({}, EMAIL_ID)
-    expect(getOutreachEligibilityMock).toHaveBeenCalledWith({}, {
-      mailboxIds: ['m1'], clientMailreachEnabled: false, now: expect.any(Date),
-    })
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'daily_cap')
-  })
-
-  it('should flag the case with mailreach_gate when the fresh eligibility check says so', async () => {
-    getEmailByIdMock.mockResolvedValue(draftEmail())
-    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'No healthy mailbox available', {}))
-    getClientByIdMock.mockResolvedValue({ id: 'c1', mailreach_enabled: true })
-    getOutreachEligibilityMock.mockResolvedValue({ eligible: false, reason: 'mailreach_gate', retryAfter: new Date() })
-
-    await expect(approveDraft(fd(EMAIL_ID))).rejects.toBeTruthy()
-
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'mailreach_gate')
-  })
-
-  it('should fall back to daily_cap when the recheck itself says eligible (same-tick race)', async () => {
-    getEmailByIdMock.mockResolvedValue(draftEmail())
-    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
-    getClientByIdMock.mockResolvedValue({ id: 'c1', mailreach_enabled: false })
-    getOutreachEligibilityMock.mockResolvedValue({ eligible: true })
-
-    await expect(approveDraft(fd(EMAIL_ID))).rejects.toBeTruthy()
-
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'daily_cap')
+    expect(markEmailWaitingMock).toHaveBeenCalledWith({}, EMAIL_ID)
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'awaiting_resend')
+    expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
   it('should not touch the case wait_reason for a non-RATE_LIMITED send failure', async () => {
@@ -296,25 +298,54 @@ describe('approveDraft', () => {
     await expect(approveDraft(fd(EMAIL_ID))).rejects.toBeTruthy()
 
     expect(updateCaseWaitingMock).not.toHaveBeenCalled()
-    expect(getOutreachEligibilityMock).not.toHaveBeenCalled()
+    expect(markEmailWaitingMock).not.toHaveBeenCalled()
+    expect(markEmailFailedMock).toHaveBeenCalledWith({}, EMAIL_ID)
   })
 
-  it('should still rethrow the original RATE_LIMITED error when marking the case waiting itself throws', async () => {
+  it('should still resolve waiting when marking the case waiting itself throws', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
-    const sendError = new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {})
-    sendViaMailboxMock.mockRejectedValue(sendError)
-    getClientByIdMock.mockResolvedValue({ id: 'c1', mailreach_enabled: false })
-    getOutreachEligibilityMock.mockRejectedValue(new Error('db down'))
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
+    updateCaseWaitingMock.mockRejectedValue(new Error('db down'))
 
-    await expect(approveDraft(fd(EMAIL_ID))).rejects.toBe(sendError)
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
+
+    expect(logEventSafeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'inbox.mark_waiting_failed' }),
+    )
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
+  })
+
+  // Regression test: a swallowed markEmailWaiting failure used to still
+  // report { status: 'waiting' } even though the row was left stuck
+  // 'queued' — invisible to both the drain sweep and the generation paths.
+  // A single transient failure is now retried once before that's reported.
+  it('should retry once and resolve waiting when the first markEmailWaiting write fails', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
+    markEmailWaitingMock.mockRejectedValueOnce(new Error('db down')).mockResolvedValueOnce(undefined)
+
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'awaiting_resend')
+  })
+
+  it('should propagate the error instead of falsely reporting waiting when markEmailWaiting fails twice', async () => {
+    getEmailByIdMock.mockResolvedValue(draftEmail())
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
+    markEmailWaitingMock.mockRejectedValue(new Error('db down'))
+
+    await expect(approveDraft(fd(EMAIL_ID))).rejects.toThrow('db down')
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
+    // updateCaseWaiting is separate, best-effort handling that only runs
+    // once the email's own waiting state is durable.
+    expect(updateCaseWaitingMock).not.toHaveBeenCalled()
   })
 
   it('should not fail the send when scheduling the first follow-up throws', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     scheduleFirstFollowupMock.mockRejectedValue(new Error('qstash down'))
 
-    await expect(approveDraft(fd(EMAIL_ID))).resolves.toBeUndefined()
+    await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'sent' })
     expect(markEmailSentMock).toHaveBeenCalled()
     expect(logEventSafeMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),

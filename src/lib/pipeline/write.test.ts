@@ -6,6 +6,8 @@ const isSuppressedMock = vi.fn()
 const claimOutboundEmailMock = vi.fn()
 const markEmailSentMock = vi.fn()
 const markEmailFailedMock = vi.fn()
+const markEmailWaitingMock = vi.fn()
+const listWaitingLeadIdsMock = vi.fn()
 const createSequenceMock = vi.fn()
 const advanceSequenceMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
@@ -27,6 +29,8 @@ vi.mock('@/lib/db/emails', () => ({
   claimOutboundEmail: (...a: unknown[]) => claimOutboundEmailMock(...a),
   markEmailSent: (...a: unknown[]) => markEmailSentMock(...a),
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
+  markEmailWaiting: (...a: unknown[]) => markEmailWaitingMock(...a),
+  listWaitingLeadIds: (...a: unknown[]) => listWaitingLeadIdsMock(...a),
 }))
 vi.mock('@/lib/db/sequences', () => ({
   createSequence: (...a: unknown[]) => createSequenceMock(...a),
@@ -75,13 +79,15 @@ const input = {
 
 beforeEach(() => {
   for (const m of [listKnowledgeMock, listActiveLeadsMock, isSuppressedMock, claimOutboundEmailMock,
-    markEmailSentMock, markEmailFailedMock, createSequenceMock, advanceSequenceMock, sendViaMailboxMock,
+    markEmailSentMock, markEmailFailedMock, markEmailWaitingMock, listWaitingLeadIdsMock, createSequenceMock,
+    advanceSequenceMock, sendViaMailboxMock,
     generateJsonMock, updateCaseStatusMock, updateCaseWaitingMock, publishDelayMock, logEventMock, enqueueCrmSyncMock,
     getClientByIdMock, getEmailTemplateByIdMock, getDefaultEmailTemplateMock, getOutreachEligibilityMock]) m.mockReset()
   listKnowledgeMock.mockResolvedValue([{ kind: 'company', content: 'builds widgets' }])
   isSuppressedMock.mockResolvedValue(false)
   generateJsonMock.mockResolvedValue({ subject: 'Quick idea for Acme', body: 'Hi Jane...' })
   getOutreachEligibilityMock.mockResolvedValue({ eligible: true })
+  listWaitingLeadIdsMock.mockResolvedValue(new Set())
   // scheduleFirstFollowup's DEFAULT_FOLLOWUP_DELAYS_DAYS fallback covers a
   // null client lookup, so this default keeps every existing test's timing
   // assertions (3-day first follow-up) unchanged.
@@ -171,7 +177,7 @@ describe('runWriteForCase', () => {
     expect(markEmailFailedMock).not.toHaveBeenCalled()
   })
 
-  it('should mark the email failed, skip, and mark the case waiting with an auto-retry reason when every mailbox is rate limited', async () => {
+  it('should mark the email waiting (not failed) and flag the case awaiting_resend when the send is rate limited', async () => {
     const { AppError } = await import('@/lib/errors/app-error')
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
@@ -179,39 +185,59 @@ describe('runWriteForCase', () => {
 
     const result = await runWriteForCase({} as never, input)
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
-    expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e1')
+    expect(markEmailWaitingMock).toHaveBeenCalledWith(expect.anything(), 'e1')
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
     expect(markEmailSentMock).not.toHaveBeenCalled()
-    // Re-probed after the loop (getOutreachEligibilityMock's beforeEach
-    // default of `{ eligible: true }` applies to this recheck too) — labeled
-    // 'daily_cap' rather than left unlabeled, so the fanout still retries it.
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'daily_cap')
+    // Never regenerates: the content-preserving drain sweep owns the retry
+    // from here, not another eligibility recheck + a fresh runWriteForCase pass.
+    expect(getOutreachEligibilityMock).toHaveBeenCalledTimes(1)
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_resend')
     expect(updateCaseStatusMock).not.toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
   })
 
-  it('should send the same claimed email on a later eligible tick after being rate limited', async () => {
-    // markEmailFailed on a RATE_LIMITED send does not strand the (lead, step
-    // 0, outbound) slot: claimOutboundEmail's reclaimFailedOutboundEmail
-    // (lib/db/emails.ts) atomically reclaims a 'failed' row on the next
-    // attempt, so a later, eligible fanout tick sends through the same
-    // claimed row rather than being permanently blocked.
+  // Regression test: a swallowed markEmailWaiting failure used to still
+  // report 'waiting' with the row left stuck 'queued' — a dead end for a
+  // retried write pass (claimOutboundEmail's upsert no-ops against the
+  // occupied slot, and its own failed-only reclaim never matches 'queued')
+  // and invisible to the drain sweep (only polls 'waiting'). One retry now
+  // covers a transient blip before falling back to 'failed', which stays
+  // reclaimable either way.
+  it('should retry once and still park it waiting when the first markEmailWaiting write fails', async () => {
     const { AppError } = await import('@/lib/errors/app-error')
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
-    sendViaMailboxMock.mockRejectedValueOnce(new AppError('RATE_LIMITED', 'no mailbox available'))
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
+    markEmailWaitingMock.mockRejectedValueOnce(new Error('db down')).mockResolvedValueOnce(undefined)
 
-    const firstTick = await runWriteForCase({} as never, input)
-    expect(firstTick).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
+    const result = await runWriteForCase({} as never, input)
+
+    expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
+  })
+
+  it('should fall back to marking the email failed and rethrow (not silently report waiting) when markEmailWaiting fails twice', async () => {
+    const { AppError } = await import('@/lib/errors/app-error')
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
+    markEmailWaitingMock.mockRejectedValue(new Error('db down'))
+
+    await expect(runWriteForCase({} as never, input)).rejects.toThrow('db down')
+
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
     expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e1')
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'daily_cap')
+  })
 
-    sendViaMailboxMock.mockResolvedValueOnce({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
-    const secondTick = await runWriteForCase(
-      {} as never,
-      { ...input, currentStatus: 'waiting' as const, currentWaitReason: 'daily_cap' as const },
-    )
-    expect(secondTick).toEqual({ caseId: 'case1', drafted: 0, sent: 1 })
-    expect(markEmailSentMock).toHaveBeenCalledWith(expect.anything(), 'e1', expect.anything())
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+  it('should skip a lead that already has waiting content without calling the LLM', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    listWaitingLeadIdsMock.mockResolvedValue(new Set(['lead1']))
+
+    const result = await runWriteForCase({} as never, input)
+    expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
+    expect(generateJsonMock).not.toHaveBeenCalled()
+    expect(claimOutboundEmailMock).not.toHaveBeenCalled()
+    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_resend')
   })
 
   it('should mark the case waiting and skip all lead work when the eligibility probe says ineligible', async () => {

@@ -786,6 +786,10 @@
       "toastEmailSent": "E-posta gönderildi",
       "toastSentToPrefix": "{companyName} adresine",
       "toastSendFailed": "Gönderilemedi",
+      "toastApprovedWaiting": "Onaylandı — bugünkü gönderim sınırı sıfırlandığında otomatik olarak gönderilecek",
+      "toastApprovalInProgress": "Başka bir yerde zaten onaylanıyor — birazdan tekrar kontrol edin",
+      "waitingChip": "Yeniden gönderim bekliyor",
+      "inProgressChip": "İşlemde",
       "regenerateValidationError": "Bu taslak zaten gönderildi, bu yüzden artık yeniden tasarlanamaz.",
       "regenerateGenericError": "Bu taslak yeniden tasarlanamadı. Tekrar deneyin."
     },

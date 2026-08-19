@@ -786,6 +786,10 @@
       "toastEmailSent": "Email sent",
       "toastSentToPrefix": "To {companyName}",
       "toastSendFailed": "Could not send",
+      "toastApprovedWaiting": "Approved — will send automatically once today's sending limit resets",
+      "toastApprovalInProgress": "Already being approved elsewhere — check back in a moment",
+      "waitingChip": "Waiting to resend",
+      "inProgressChip": "In progress",
       "regenerateValidationError": "This draft was already sent, so it can no longer be redesigned.",
       "regenerateGenericError": "Could not redesign that draft. Try again."
     },

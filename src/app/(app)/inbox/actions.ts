@@ -11,16 +11,16 @@ import {
   claimDraftForSend,
   markEmailSent,
   markEmailFailed,
+  markEmailWaiting,
   hasReplyForInbound,
   updateDraftContent as updateDraftContentRow,
+  type EmailRow,
 } from '@/lib/db/emails'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { getLeadById } from '@/lib/db/leads'
 import { claimCaseContacted, updateCaseWaiting } from '@/lib/db/cases'
-import { getClientById } from '@/lib/db/clients'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox } from '@/lib/mailbox/sender'
-import { getOutreachEligibility } from '@/lib/mailbox/eligibility'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from '@/lib/pipeline/followup'
 import { AppError, isAppError } from '@/lib/errors/app-error'
 import { logEventSafe } from '@/lib/events/log-event'
@@ -36,7 +36,42 @@ import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS, MAX_INSTRUCTION_CHARS } from '@/lib/
 
 const approveSchema = z.object({ emailId: z.string().uuid() })
 
-export async function approveDraft(formData: FormData): Promise<void> {
+export type ApproveDraftResult =
+  | { status: 'sent' }
+  | { status: 'waiting' }
+  | { status: 'failed' }
+  | { status: 'in_progress' }
+
+function assertNever(x: never): never {
+  throw new AppError('INVARIANT_VIOLATION', `Unhandled email status: ${String(x)}`, {})
+}
+
+// Maps a re-read email row's status to the outcome to report after losing
+// the atomic claimDraftForSend race. 'queued' (a concurrent approval is
+// still mid-send) and 'draft' (should be unreachable — the row cannot
+// revert to 'draft' once claimed — but a missing row folds in here too)
+// both mean the real outcome isn't known yet, so neither is reported as a
+// false 'sent'.
+function resultStatusForLostClaim(status: EmailRow['status'] | undefined): ApproveDraftResult['status'] {
+  switch (status) {
+    case 'sent':
+    case 'delivered':
+    case 'bounced':
+      return 'sent'
+    case 'waiting':
+      return 'waiting'
+    case 'failed':
+      return 'failed'
+    case 'queued':
+    case 'draft':
+    case undefined:
+      return 'in_progress'
+    default:
+      return assertNever(status)
+  }
+}
+
+export async function approveDraft(formData: FormData): Promise<ApproveDraftResult> {
   const { appUser } = await requireUser()
   const { emailId } = approveSchema.parse({ emailId: formData.get('emailId') })
 
@@ -89,8 +124,14 @@ export async function approveDraft(formData: FormData): Promise<void> {
   // null here and returns without sending a second real email.
   const claimed = await claimDraftForSend(supabase, email.id)
   if (!claimed) {
+    // Lost the claim to a concurrent approval (double-click, two tabs, a
+    // Server Action retry). The row is no longer 'draft', but that does not
+    // mean it was sent — the concurrent approval could still be mid-send
+    // ('queued'), or have ended in 'waiting' or 'failed'. Re-read the row
+    // instead of assuming success.
+    const current = await getEmailById(scoped, email.id)
     revalidatePath('/inbox')
-    return
+    return { status: resultStatusForLostClaim(current?.status) }
   }
 
   try {
@@ -109,29 +150,27 @@ export async function approveDraft(formData: FormData): Promise<void> {
       mailboxId: sent.mailboxId,
     })
   } catch (error) {
-    try {
-      await markEmailFailed(supabase, email.id)
-    } catch {
-      // Best-effort status write; the send error below is the one that matters.
-    }
-    // A RATE_LIMITED failure (daily cap / mailreach gate / no healthy
-    // mailbox) is a mailbox-availability condition, not a permanent one —
-    // without this, the case's wait_reason is left exactly as it was and
-    // nothing ever revisits it: write-fanout's 5-minute sweep only picks up
-    // a case already flagged with one of AUTO_RETRY_WAIT_REASONS. Mirrors
-    // runWriteForCase's own RATE_LIMITED recheck (write.ts) — the send
-    // itself already raced the up-front eligibility probe once, so recheck
-    // now for an accurate, auto-retryable reason instead of assuming. See
-    // .claude/roadmap.md 2026-08-19.
     if (isAppError(error) && error.code === 'RATE_LIMITED') {
+      // Content already exists (this is an approved draft) — park it as-is
+      // for the drain sweep, never regenerate. The approval itself
+      // succeeded; only the send is delayed. See .claude/roadmap.md
+      // 2026-08-19 and the 2026-08-19 cap-blocked-send-waiting-design spec.
+      //
+      // markEmailWaiting must actually persist before we report back
+      // { status: 'waiting' } — until it does, the row is stuck 'queued'
+      // (from claimDraftForSend above), invisible to both the drain sweep
+      // (listWaitingOutboundEmails filters on 'waiting') and the
+      // generation paths. One retry covers a transient blip; if it still
+      // fails, the error propagates instead of a false success being
+      // reported. updateCaseWaiting below stays separate, best-effort
+      // handling — it only runs once the email's own state is durable.
       try {
-        const client = await getClientById(supabase, email.client_id)
-        const eligibility = await getOutreachEligibility(supabase, {
-          mailboxIds: campaign.mailbox_ids,
-          clientMailreachEnabled: client?.mailreach_enabled ?? false,
-          now: new Date(),
-        })
-        await updateCaseWaiting(supabase, email.case_id, eligibility.eligible ? 'daily_cap' : eligibility.reason)
+        await markEmailWaiting(supabase, email.id)
+      } catch {
+        await markEmailWaiting(supabase, email.id)
+      }
+      try {
+        await updateCaseWaiting(supabase, email.case_id, 'awaiting_resend')
       } catch (waitError) {
         await logEventSafe({
           clientId: email.client_id,
@@ -141,6 +180,13 @@ export async function approveDraft(formData: FormData): Promise<void> {
           payload: { emailId: email.id, cause: waitError instanceof Error ? waitError.message : String(waitError) },
         })
       }
+      revalidatePath('/inbox')
+      return { status: 'waiting' }
+    }
+    try {
+      await markEmailFailed(supabase, email.id)
+    } catch {
+      // Best-effort status write; the send error below is the one that matters.
     }
     revalidatePath('/inbox')
     throw error
@@ -181,6 +227,7 @@ export async function approveDraft(formData: FormData): Promise<void> {
   }
 
   revalidatePath('/inbox')
+  return { status: 'sent' }
 }
 
 const answerSchema = z.object({

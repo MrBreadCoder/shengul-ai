@@ -35,6 +35,25 @@ export async function getSequenceById(
   return data
 }
 
+// The single active sequence for a lead — every other lookup in this file is
+// id- or case-scoped. Used by the drain sweep (resend-failed.ts) to resume a
+// follow-up step's cadence bookkeeping after resending its content as-is.
+export async function getSequenceByLeadId(
+  supabase: SupabaseClient<Database>,
+  leadId: string,
+): Promise<SequenceRow | null> {
+  const { data, error } = await supabase
+    .from('sequences')
+    .select('*')
+    .eq('lead_id', leadId)
+    .eq('state', 'active')
+    .maybeSingle()
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to load sequence by lead', { leadId, cause: error.message })
+  }
+  return data
+}
+
 // The `.eq('state', 'active')` guard makes this a claim: a stale/duplicate
 // QStash job for a sequence a concurrent run already stopped or completed
 // matches no row and must not reactivate it.

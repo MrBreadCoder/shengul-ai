@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   createSequence,
   getSequenceById,
+  getSequenceByLeadId,
   advanceSequence,
   stopSequence,
   pauseActiveSequenceForLead,
@@ -24,6 +25,13 @@ function mockGet(result: { data: unknown; error: unknown }) {
 }
 function mockUpdate(result: { error: unknown }) {
   return { from: () => ({ update: () => ({ eq: () => Promise.resolve(result) }) }) } as never
+}
+function mockGetByLead(result: { data: unknown; error: unknown }) {
+  return {
+    from: () => ({
+      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(result) }) }) }),
+    }),
+  } as never
 }
 function mockAdvanceUpdate(result: { data: unknown; error: unknown }) {
   return {
@@ -69,6 +77,25 @@ describe('getSequenceById', () => {
   it('should throw DB_ERROR when the query errors', async () => {
     await expect(
       getSequenceById(mockGet({ data: null, error: { message: 'boom' } }), 'seq1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('getSequenceByLeadId', () => {
+  it('should return the active sequence for the lead when one exists', async () => {
+    const seq = { id: 'seq1', lead_id: 'lead1', state: 'active' }
+    const result = await getSequenceByLeadId(mockGetByLead({ data: seq, error: null }), 'lead1')
+    expect(result).toEqual(seq)
+  })
+
+  it('should return null when the lead has no active sequence', async () => {
+    const result = await getSequenceByLeadId(mockGetByLead({ data: null, error: null }), 'lead1')
+    expect(result).toBeNull()
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    await expect(
+      getSequenceByLeadId(mockGetByLead({ data: null, error: { message: 'boom' } }), 'lead1'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

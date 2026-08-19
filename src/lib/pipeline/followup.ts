@@ -14,6 +14,7 @@ import {
   claimOutboundEmail,
   markEmailSent,
   markEmailFailed,
+  markEmailWaiting,
 } from '@/lib/db/emails'
 import { getLeadById } from '@/lib/db/leads'
 import { getClientById } from '@/lib/db/clients'
@@ -29,7 +30,7 @@ import { appendSignatureBlock, resolveSignatureContext } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { DEFAULT_FOLLOWUP_DELAYS_DAYS } from '@/lib/validation/followup-limits'
 
-const DAY_SECONDS = 86_400
+export const DAY_SECONDS = 86_400
 export const FIRST_TOUCH_STEP = 0
 const MAX_OUTPUT_TOKENS = 1_000
 const ACTOR = 'email_writer_agent'
@@ -89,6 +90,30 @@ export interface FollowupSummary {
 // (step 1) stays a low-friction reply ask, since a calendar link is too big an
 // ask this early in the sequence.
 const BOOKING_LINK_ELIGIBLE_STEP = 2
+
+// Persists 'waiting' with one retry. 'queued' (where claimOutboundEmail left
+// the row) is a dead end for a QStash redelivery of this same step — its
+// upsert no-ops against the still-occupied slot, and its own fallback
+// (reclaimFailedOutboundEmail) only reclaims 'failed' — so a swallowed
+// failure here would leave the retry silently skipping forever, and the
+// drain sweep (resend-failed.ts) would never see it either, since it only
+// polls 'waiting'. A persistent failure falls back to 'failed' (still
+// reclaimable by claimOutboundEmail's own fallback) and rethrows rather than
+// silently resolving — the caller must not report this step as routinely
+// parked 'waiting' when the row is actually 'failed', or the case-level
+// wait_reason bookkeeping built on that outcome desyncs from the real row.
+async function parkAsWaiting(supabase: SupabaseClient<Database>, id: string): Promise<void> {
+  try {
+    await markEmailWaiting(supabase, id)
+  } catch {
+    try {
+      await markEmailWaiting(supabase, id)
+    } catch (error) {
+      await markEmailFailed(supabase, id)
+      throw error
+    }
+  }
+}
 
 const SYSTEM_PROMPT = [
   'You write a short, polite follow-up nudge to a cold email that got no reply.',
@@ -292,13 +317,16 @@ export async function runFollowupStep(
       references: inReplyTo,
     })
   } catch (error) {
-    // Only a delivery failure means the email was never sent — mark it failed
-    // so it can be retried. A failure below (markEmailSent) means the message
-    // already went out and must not be treated as a send failure.
-    await markEmailFailed(supabase, claimed.id)
+    // Content already exists on this row (the nudge was already written) —
+    // park it as-is for the drain sweep, never regenerate, and never
+    // reschedule through QStash: unlike the paused-campaign branch above,
+    // there is no "try again in a day" here. The row's 'waiting' status is
+    // what the drain sweep (lib/pipeline/resend-failed.ts) polls for.
     if (error instanceof AppError && error.code === 'RATE_LIMITED') {
+      await parkAsWaiting(supabase, claimed.id)
       return { sequenceId: sequence.id, action: 'skipped' }
     }
+    await markEmailFailed(supabase, claimed.id)
     throw error
   }
 

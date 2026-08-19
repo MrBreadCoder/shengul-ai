@@ -6,7 +6,7 @@ import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getClientById, type ClientRow } from '@/lib/db/clients'
 import { getEmailTemplateById, getDefaultEmailTemplate, type EmailTemplateRow } from '@/lib/db/email-templates'
-import { claimOutboundEmail, markEmailSent, markEmailFailed } from '@/lib/db/emails'
+import { claimOutboundEmail, markEmailSent, markEmailFailed, markEmailWaiting, listWaitingLeadIds } from '@/lib/db/emails'
 import { updateCaseStatus, updateCaseWaiting, type CaseWaitReason } from '@/lib/db/cases'
 import { getOutreachEligibility } from '@/lib/mailbox/eligibility'
 import { enqueueCrmSync } from '@/lib/crm/sync'
@@ -253,13 +253,37 @@ function shouldSendFirstTouch(replyMode: ReplyMode): boolean {
   return replyMode === 'auto_send' || replyMode === 'hybrid'
 }
 
+// Persists 'waiting' with one retry. 'queued' (where claimOutboundEmail left
+// the row) is a dead end for a retried write pass on this same lead — its
+// upsert no-ops against the still-occupied slot, and its own fallback
+// (reclaimFailedOutboundEmail) only reclaims 'failed' — so a swallowed
+// failure here would leave the retry silently skipping forever, and the
+// drain sweep (resend-failed.ts) would never see it either, since it only
+// polls 'waiting'. A persistent failure falls back to 'failed' (still
+// reclaimable by claimOutboundEmail's own fallback) and rethrows rather than
+// silently resolving — the caller must not report this lead as routinely
+// parked 'waiting' when the row is actually 'failed', or the case-level
+// wait_reason bookkeeping built on that outcome desyncs from the real row.
+async function parkAsWaiting(supabase: SupabaseClient<Database>, id: string): Promise<void> {
+  try {
+    await markEmailWaiting(supabase, id)
+  } catch {
+    try {
+      await markEmailWaiting(supabase, id)
+    } catch (error) {
+      await markEmailFailed(supabase, id)
+      throw error
+    }
+  }
+}
+
 async function processLead(
   supabase: SupabaseClient<Database>,
   input: RunWriteInput,
   lead: LeadRow,
   knowledge: KnowledgeRow[],
   client: ClientRow | null,
-): Promise<'sent' | 'drafted' | 'skipped' | 'rate_limited'> {
+): Promise<'sent' | 'drafted' | 'skipped' | 'waiting'> {
   if (!lead.email) return 'skipped'
   if (await isSuppressed(supabase, input.clientId, lead.email)) return 'skipped'
 
@@ -330,16 +354,15 @@ async function processLead(
       purpose: 'outreach',
     })
   } catch (error) {
-    // Only a delivery failure means the email was never sent — mark it failed.
-    // A failure in the bookkeeping below means the message already went out
-    // and must not be treated as a send failure.
+    // A RATE_LIMITED failure means content already exists on this row but
+    // couldn't send this instant — park it as-is for the drain sweep
+    // (lib/pipeline/resend-failed.ts), never regenerate. Any other error
+    // means the send is genuinely broken.
+    if (error instanceof AppError && error.code === 'RATE_LIMITED') {
+      await parkAsWaiting(supabase, claimed.id)
+      return 'waiting'
+    }
     await markEmailFailed(supabase, claimed.id)
-    // Distinct from a plain 'skipped' (permanently disqualified lead): this
-    // is the up-front eligibility probe (below, before the loop) racing with
-    // the real atomic send — still a mailbox-availability condition, not
-    // "nothing left to do". runWriteForCase re-probes once after the loop to
-    // label the case correctly instead of guessing.
-    if (error instanceof AppError && error.code === 'RATE_LIMITED') return 'rate_limited'
     throw error
   }
 
@@ -389,11 +412,19 @@ export async function runWriteForCase(
 
   const knowledge = await listKnowledgeForCase(supabase, input.caseId)
   const leads = await listActiveLeadsForCase(supabase, input.caseId)
+  const waitingLeadIds = await listWaitingLeadIds(supabase, input.caseId)
 
   let sent = 0
   let drafted = 0
-  let rateLimited = 0
+  let waiting = 0
   for (const lead of leads) {
+    // Content already exists and is parked for the drain sweep — skip the
+    // LLM call entirely rather than generating a draft whose claim will
+    // just no-op against the row the sweep owns.
+    if (waitingLeadIds.has(lead.id)) {
+      waiting += 1
+      continue
+    }
     // `k.lead_id ?? null` (not a bare `=== null` check) treats a row that
     // omits the field entirely the same as one that explicitly has it null —
     // both existing test fixtures and any case_knowledge row inserted before
@@ -403,7 +434,7 @@ export async function runWriteForCase(
     const outcome = await processLead(supabase, input, lead, leadKnowledge, client)
     if (outcome === 'sent') sent += 1
     if (outcome === 'drafted') drafted += 1
-    if (outcome === 'rate_limited') rateLimited += 1
+    if (outcome === 'waiting') waiting += 1
   }
 
   if (sent > 0) {
@@ -414,18 +445,12 @@ export async function runWriteForCase(
     // human owns the next move in /inbox. approveDraft is what eventually
     // advances this case to 'contacted'.
     await updateCaseWaiting(supabase, input.caseId, 'awaiting_manual_approval')
-  } else if (rateLimited > 0) {
-    // The up-front probe said eligible, but at least one lead's real send
-    // hit RATE_LIMITED anyway (a same-tick race — see eligibility.ts's
-    // isCapReady comment). Re-probe now so the case is labeled with an
-    // accurate, auto-retryable reason for the next fanout tick, instead of
-    // assuming.
-    const recheck = await getOutreachEligibility(supabase, {
-      mailboxIds: input.mailboxIds,
-      clientMailreachEnabled: client?.mailreach_enabled ?? false,
-      now: new Date(),
-    })
-    await updateCaseWaiting(supabase, input.caseId, recheck.eligible ? 'daily_cap' : recheck.reason)
+  } else if (waiting > 0) {
+    // At least one lead's content is already committed and parked — the
+    // drain sweep (not another write-fanout pass) is what sends it. Not in
+    // AUTO_RETRY_WAIT_REASONS, so write-fanout never re-dispatches this case
+    // over it.
+    await updateCaseWaiting(supabase, input.caseId, 'awaiting_resend')
   } else {
     // Every active lead was permanently disqualified this attempt (missing
     // email, suppressed) — processLead checks suppression before

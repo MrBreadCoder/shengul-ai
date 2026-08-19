@@ -6,6 +6,7 @@ import {
   updateDraftContent,
   markEmailSent,
   markEmailFailed,
+  markEmailWaiting,
   listThreadEmails,
   hasInboundReply,
   hasReplyForInbound,
@@ -14,7 +15,9 @@ import {
   insertInboundEmail,
   claimReplyEmail,
   markLatestOutboundBounced,
-  listFailedFirstTouchEmails,
+  listWaitingOutboundEmails,
+  listWaitingLeadIds,
+  claimWaitingOutboundEmail,
 } from './emails'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -77,12 +80,22 @@ function mockGetById(result: { data: unknown; error: unknown }) {
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(result) }) }) }),
   } as never
 }
-function mockFailedList(result: { data: unknown; error: unknown }) {
+// listWaitingOutboundEmails: .select().eq(status).eq(direction).order().limit() — two eq()s, no sequence_step filter.
+function mockWaitingList(result: { data: unknown; error: unknown }) {
   return {
     from: () => ({
       select: () => ({
-        eq: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit: () => Promise.resolve(result) }) }) }) }),
+        eq: () => ({ eq: () => ({ order: () => ({ limit: () => Promise.resolve(result) }) }) }),
       }),
+    }),
+  } as never
+}
+
+// listWaitingLeadIds: .select('lead_id').eq(case_id).eq(sequence_step).eq(status) — three eq()s, no order/limit.
+function mockLeadIdList(result: { data: unknown; error: unknown }) {
+  return {
+    from: () => ({
+      select: () => ({ eq: () => ({ eq: () => ({ eq: () => Promise.resolve(result) }) }) }),
     }),
   } as never
 }
@@ -257,6 +270,18 @@ describe('markEmailFailed', () => {
   })
 })
 
+describe('markEmailWaiting', () => {
+  it('should resolve when the update succeeds', async () => {
+    await expect(markEmailWaiting(mockUpdate({ error: null }), 'e1')).resolves.toBeUndefined()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(
+      markEmailWaiting(mockUpdate({ error: { message: 'boom' } }), 'e1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
 describe('listThreadEmails', () => {
   it('should return rows for the lead when the query succeeds', async () => {
     const rows = [{ id: 'e1' }]
@@ -271,21 +296,67 @@ describe('listThreadEmails', () => {
   })
 })
 
-describe('listFailedFirstTouchEmails', () => {
+describe('listWaitingOutboundEmails', () => {
   it('should return rows when the query succeeds', async () => {
-    const rows = [{ id: 'e1', status: 'failed', sequence_step: 0 }]
-    const result = await listFailedFirstTouchEmails(mockFailedList({ data: rows, error: null }), 50)
+    const rows = [{ id: 'e1', status: 'waiting', sequence_step: 0 }]
+    const result = await listWaitingOutboundEmails(mockWaitingList({ data: rows, error: null }), 50)
     expect(result).toEqual(rows)
   })
 
-  it('should return an empty array when nothing is failed', async () => {
-    const result = await listFailedFirstTouchEmails(mockFailedList({ data: [], error: null }), 50)
+  it('should return rows for a follow-up step too — no step filter', async () => {
+    const rows = [{ id: 'e2', status: 'waiting', sequence_step: 2 }]
+    const result = await listWaitingOutboundEmails(mockWaitingList({ data: rows, error: null }), 50)
+    expect(result).toEqual(rows)
+  })
+
+  it('should return an empty array when nothing is waiting', async () => {
+    const result = await listWaitingOutboundEmails(mockWaitingList({ data: [], error: null }), 50)
     expect(result).toEqual([])
   })
 
   it('should throw DB_ERROR when the query errors', async () => {
     await expect(
-      listFailedFirstTouchEmails(mockFailedList({ data: null, error: { message: 'boom' } }), 50),
+      listWaitingOutboundEmails(mockWaitingList({ data: null, error: { message: 'boom' } }), 50),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listWaitingLeadIds', () => {
+  it('should return a set of distinct lead ids with a waiting step-0 row', async () => {
+    const result = await listWaitingLeadIds(
+      mockLeadIdList({ data: [{ lead_id: 'lead1' }, { lead_id: 'lead2' }], error: null }),
+      'case1',
+    )
+    expect(result).toEqual(new Set(['lead1', 'lead2']))
+  })
+
+  it('should return an empty set when nothing is waiting', async () => {
+    const result = await listWaitingLeadIds(mockLeadIdList({ data: [], error: null }), 'case1')
+    expect(result).toEqual(new Set())
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    await expect(
+      listWaitingLeadIds(mockLeadIdList({ data: null, error: { message: 'boom' } }), 'case1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('claimWaitingOutboundEmail', () => {
+  it('should return the claimed row when the update matches a waiting email', async () => {
+    const row = { id: 'e1', status: 'queued' }
+    const result = await claimWaitingOutboundEmail(mockClaimDraft({ data: [row], error: null }), 'e1')
+    expect(result).toEqual(row)
+  })
+
+  it('should return null when no row matches (already claimed, or not waiting)', async () => {
+    const result = await claimWaitingOutboundEmail(mockClaimDraft({ data: [], error: null }), 'e1')
+    expect(result).toBeNull()
+  })
+
+  it('should throw DB_ERROR when the update errors', async () => {
+    await expect(
+      claimWaitingOutboundEmail(mockClaimDraft({ data: null, error: { message: 'boom' } }), 'e1'),
     ).rejects.toBeInstanceOf(AppError)
   })
 })

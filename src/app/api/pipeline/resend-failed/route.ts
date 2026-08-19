@@ -7,12 +7,14 @@ import { isAppError } from '@/lib/errors/app-error'
 
 export const runtime = 'nodejs'
 
-// Deliberately small: this sweeps a rare, bounded edge case (a first-touch
-// send stranded 'failed' by a same-run partial failure — see
-// lib/pipeline/resend-failed.ts and .claude/roadmap.md 2026-08-19), not a
-// bulk send path. Each retry is a single sendViaMailbox call (no LLM), so a
-// batch this size comfortably finishes well inside a single invocation —
-// no per-item fanout needed, unlike write-fanout's LLM-bound work.
+// Deliberately small: this drains every 'waiting' outbound row — first-touch
+// and follow-up sends alike, parked by a cap/rate-limit hit rather than
+// regenerated — see lib/pipeline/resend-failed.ts and .claude/roadmap.md
+// 2026-08-19. 'failed' is reserved for a genuine, non-retryable delivery
+// error and is not what this sweep drains. Not a bulk send path: each retry
+// is a single sendViaMailbox call (no LLM), so a batch this size comfortably
+// finishes well inside a single invocation — no per-item fanout needed,
+// unlike write-fanout's LLM-bound work.
 const SWEEP_LIMIT = 50
 
 export async function POST(request: Request) {

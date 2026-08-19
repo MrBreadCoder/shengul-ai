@@ -11,6 +11,7 @@ const listThreadEmailsMock = vi.fn()
 const claimOutboundEmailMock = vi.fn()
 const markEmailSentMock = vi.fn()
 const markEmailFailedMock = vi.fn()
+const markEmailWaitingMock = vi.fn()
 const isSuppressedMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const generateTextMock = vi.fn()
@@ -34,6 +35,7 @@ vi.mock('@/lib/db/emails', () => ({
   claimOutboundEmail: (...a: unknown[]) => claimOutboundEmailMock(...a),
   markEmailSent: (...a: unknown[]) => markEmailSentMock(...a),
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
+  markEmailWaiting: (...a: unknown[]) => markEmailWaitingMock(...a),
 }))
 vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
@@ -64,7 +66,7 @@ const lead = { id: 'lead1', email: 'jane@acme.com', full_name: 'Jane', title: 'C
 beforeEach(() => {
   for (const m of [getSequenceByIdMock, hasInboundReplyMock, stopSequenceMock, advanceSequenceMock,
     getLeadByIdMock, getClientByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock,
-    markEmailFailedMock, isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock,
+    markEmailFailedMock, markEmailWaitingMock, isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock,
     updateCaseStatusMock, publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock,
     createSequenceMock]) m.mockReset()
   getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
@@ -211,14 +213,52 @@ describe('runFollowupStep', () => {
     )
   })
 
-  it('should mark the email failed and return skipped when every mailbox is rate limited', async () => {
+  it('should mark the email waiting (not failed), return skipped, and not reschedule when every mailbox is rate limited', async () => {
     const { AppError } = await import('@/lib/errors/app-error')
     claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
     const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
     expect(result.action).toBe('skipped')
-    expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e2')
+    expect(markEmailWaitingMock).toHaveBeenCalledWith(expect.anything(), 'e2')
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
     expect(markEmailSentMock).not.toHaveBeenCalled()
+    // Unlike the paused-campaign branch, a rate-limited step is never
+    // rescheduled through QStash — the drain sweep (resend-failed.ts) is what
+    // retries it, off the row's 'waiting' status, not a republished message.
+    expect(publishDelayMock).not.toHaveBeenCalled()
+    expect(advanceSequenceMock).not.toHaveBeenCalled()
+  })
+
+  // Regression test: a swallowed markEmailWaiting failure used to still
+  // report 'skipped' with the row left stuck 'queued' — a dead end for a
+  // QStash redelivery (claimOutboundEmail's upsert no-ops against the
+  // occupied slot, and its own failed-only reclaim never matches 'queued')
+  // and invisible to the drain sweep (only polls 'waiting'). One retry now
+  // covers a transient blip before falling back to 'failed', which stays
+  // reclaimable either way.
+  it('should retry once and still park it waiting when the first markEmailWaiting write fails', async () => {
+    const { AppError } = await import('@/lib/errors/app-error')
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
+    markEmailWaitingMock.mockRejectedValueOnce(new Error('db down')).mockResolvedValueOnce(undefined)
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('skipped')
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
+    expect(markEmailFailedMock).not.toHaveBeenCalled()
+  })
+
+  it('should fall back to marking the email failed and rethrow (not silently report skipped) when markEmailWaiting fails twice', async () => {
+    const { AppError } = await import('@/lib/errors/app-error')
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
+    markEmailWaitingMock.mockRejectedValue(new Error('db down'))
+
+    await expect(runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })).rejects.toThrow('db down')
+
+    expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
+    expect(markEmailFailedMock).toHaveBeenCalledWith(expect.anything(), 'e2')
   })
 
   it('should not mark the email failed when the send succeeded but markEmailSent throws', async () => {
