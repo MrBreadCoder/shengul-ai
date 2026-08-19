@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { createClient } from '@supabase/supabase-js'
 import {
   insertMailbox,
   getMailboxById,
@@ -110,7 +111,7 @@ describe('updateMailboxOauth', () => {
       updateMailboxOauth(supabase, 'm1', { accessToken: 'new' }, previous),
     ).resolves.toBeUndefined()
     expect(eqSpy).toHaveBeenCalledWith('id', 'm1')
-    expect(eqSpy).toHaveBeenCalledWith('oauth', previous)
+    expect(eqSpy).toHaveBeenCalledWith('oauth', JSON.stringify(previous))
   })
 
   it('should not filter on oauth when previousOauth is omitted (unconditional write)', async () => {
@@ -118,6 +119,32 @@ describe('updateMailboxOauth', () => {
     await updateMailboxOauth(supabase, 'm1', { accessToken: 'new' })
     expect(eqSpy).toHaveBeenCalledWith('id', 'm1')
     expect(eqSpy).not.toHaveBeenCalledWith('oauth', expect.anything())
+  })
+
+  // Regression test for a real bug: postgrest-js's .eq(column, value) builds
+  // the filter with `eq.${value}`, a plain template-literal interpolation. A
+  // JS object stringifies to the literal text "[object Object]" — not JSON —
+  // so the CAS filter silently turned into an always-invalid jsonb literal
+  // and every refreshed-token persist failed. Exercises the real query
+  // builder (not the hand-rolled mocks above) so it fails if this regresses.
+  it('should send the previousOauth CAS filter as valid JSON text, not [object Object]', async () => {
+    let capturedUrl: string | undefined
+    const fakeFetch: typeof fetch = (url) => {
+      capturedUrl = url.toString()
+      return Promise.resolve(
+        new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } }),
+      )
+    }
+    const supabase = createClient('http://example.com', 'anon-key', { global: { fetch: fakeFetch } })
+    const previous = { accessToken: 'old', refreshToken: 'rt' }
+
+    await updateMailboxOauth(supabase, 'm1', { accessToken: 'new' }, previous)
+
+    expect(capturedUrl).toBeDefined()
+    const oauthFilter = new URL(capturedUrl as string).searchParams.get('oauth')
+    expect(oauthFilter).not.toContain('[object Object]')
+    expect(oauthFilter).toBe(`eq.${JSON.stringify(previous)}`)
+    expect(JSON.parse((oauthFilter as string).slice('eq.'.length))).toEqual(previous)
   })
 })
 

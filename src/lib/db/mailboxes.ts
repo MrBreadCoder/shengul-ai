@@ -39,7 +39,13 @@ export async function updateMailboxOauth(
   previousOauth?: Record<string, Json>,
 ): Promise<void> {
   let query = supabase.from('mailboxes').update({ oauth }).eq('id', id)
-  if (previousOauth !== undefined) query = query.eq('oauth', previousOauth)
+  // postgrest-js's .eq(column, value) builds the filter as `eq.${value}` — a
+  // plain template-literal interpolation, not a JSON serializer. Passing the
+  // object directly stringifies to the literal text "[object Object]", an
+  // invalid jsonb literal that fails every CAS-guarded write. Stringify
+  // ourselves so PostgREST receives real JSON text; jsonb equality in
+  // Postgres is semantic, so key order here doesn't need to match storage.
+  if (previousOauth !== undefined) query = query.eq('oauth', JSON.stringify(previousOauth))
   const { error } = await query
   if (error) throw new AppError('DB_ERROR', 'Failed to update mailbox oauth', { id, cause: error.message })
 }
