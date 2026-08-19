@@ -335,6 +335,33 @@ export async function listEmailsForClient(
   return data ?? []
 }
 
+// A bounded batch of stranded first-touch sends: status:'failed' can happen
+// even on a case that has since moved on to 'contacted' (a different lead on
+// the same case sent successfully in the same run — see
+// resend-failed-outbound.ts and .claude/roadmap.md 2026-08-19), so this
+// deliberately does not filter by case status. Scoped to sequence_step 0
+// only — a failed follow-up (step >= 1) is owned by its sequence's own
+// retry semantics (sequences.next_action_at), a different mechanism this
+// does not touch. Ordered oldest-first so a long-stranded email is not
+// starved behind ones that failed more recently.
+export async function listFailedFirstTouchEmails(
+  supabase: SupabaseClient<Database>,
+  limit: number,
+): Promise<EmailRow[]> {
+  const { data, error } = await supabase
+    .from('emails')
+    .select('*')
+    .eq('status', 'failed')
+    .eq('direction', 'outbound')
+    .eq('sequence_step', 0)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to list failed first-touch emails', { cause: error.message })
+  }
+  return data ?? []
+}
+
 // Flips the newest delivered/sent outbound email for a lead to 'bounced' — this
 // is what makes the address show up in mailbox_send_stats' bounce numerator.
 // The status guard on the update makes it a claim: a concurrent DSN for the same

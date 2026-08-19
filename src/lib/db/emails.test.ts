@@ -14,6 +14,7 @@ import {
   insertInboundEmail,
   claimReplyEmail,
   markLatestOutboundBounced,
+  listFailedFirstTouchEmails,
 } from './emails'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -74,6 +75,15 @@ function mockDraftList(result: { data: unknown; error: unknown }) {
 function mockGetById(result: { data: unknown; error: unknown }) {
   return {
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(result) }) }) }),
+  } as never
+}
+function mockFailedList(result: { data: unknown; error: unknown }) {
+  return {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit: () => Promise.resolve(result) }) }) }) }),
+      }),
+    }),
   } as never
 }
 
@@ -257,6 +267,25 @@ describe('listThreadEmails', () => {
   it('should throw DB_ERROR when the query errors', async () => {
     await expect(
       listThreadEmails(mockList({ data: null, error: { message: 'boom' } }), 'lead1'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('listFailedFirstTouchEmails', () => {
+  it('should return rows when the query succeeds', async () => {
+    const rows = [{ id: 'e1', status: 'failed', sequence_step: 0 }]
+    const result = await listFailedFirstTouchEmails(mockFailedList({ data: rows, error: null }), 50)
+    expect(result).toEqual(rows)
+  })
+
+  it('should return an empty array when nothing is failed', async () => {
+    const result = await listFailedFirstTouchEmails(mockFailedList({ data: [], error: null }), 50)
+    expect(result).toEqual([])
+  })
+
+  it('should throw DB_ERROR when the query errors', async () => {
+    await expect(
+      listFailedFirstTouchEmails(mockFailedList({ data: null, error: { message: 'boom' } }), 50),
     ).rejects.toBeInstanceOf(AppError)
   })
 })
