@@ -16,11 +16,13 @@ import {
 } from '@/lib/db/emails'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { getLeadById } from '@/lib/db/leads'
-import { claimCaseContacted } from '@/lib/db/cases'
+import { claimCaseContacted, updateCaseWaiting } from '@/lib/db/cases'
+import { getClientById } from '@/lib/db/clients'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox } from '@/lib/mailbox/sender'
+import { getOutreachEligibility } from '@/lib/mailbox/eligibility'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from '@/lib/pipeline/followup'
-import { AppError } from '@/lib/errors/app-error'
+import { AppError, isAppError } from '@/lib/errors/app-error'
 import { logEventSafe } from '@/lib/events/log-event'
 import { claimKnowledgeRequestAnswer, getKnowledgeRequestById } from '@/lib/db/knowledge-requests'
 import { insertKnowledge } from '@/lib/db/case-knowledge'
@@ -111,6 +113,34 @@ export async function approveDraft(formData: FormData): Promise<void> {
       await markEmailFailed(supabase, email.id)
     } catch {
       // Best-effort status write; the send error below is the one that matters.
+    }
+    // A RATE_LIMITED failure (daily cap / mailreach gate / no healthy
+    // mailbox) is a mailbox-availability condition, not a permanent one —
+    // without this, the case's wait_reason is left exactly as it was and
+    // nothing ever revisits it: write-fanout's 5-minute sweep only picks up
+    // a case already flagged with one of AUTO_RETRY_WAIT_REASONS. Mirrors
+    // runWriteForCase's own RATE_LIMITED recheck (write.ts) — the send
+    // itself already raced the up-front eligibility probe once, so recheck
+    // now for an accurate, auto-retryable reason instead of assuming. See
+    // .claude/roadmap.md 2026-08-19.
+    if (isAppError(error) && error.code === 'RATE_LIMITED') {
+      try {
+        const client = await getClientById(supabase, email.client_id)
+        const eligibility = await getOutreachEligibility(supabase, {
+          mailboxIds: campaign.mailbox_ids,
+          clientMailreachEnabled: client?.mailreach_enabled ?? false,
+          now: new Date(),
+        })
+        await updateCaseWaiting(supabase, email.case_id, eligibility.eligible ? 'daily_cap' : eligibility.reason)
+      } catch (waitError) {
+        await logEventSafe({
+          clientId: email.client_id,
+          caseId: email.case_id,
+          actor: 'inbox_approve_draft',
+          type: 'inbox.mark_waiting_failed',
+          payload: { emailId: email.id, cause: waitError instanceof Error ? waitError.message : String(waitError) },
+        })
+      }
     }
     revalidatePath('/inbox')
     throw error
