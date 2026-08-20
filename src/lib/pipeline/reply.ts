@@ -5,13 +5,13 @@ import { AppError } from '@/lib/errors/app-error'
 import {
   getEmailById, listThreadEmails, claimReplyEmail, markEmailSent, markEmailFailed, type EmailRow,
 } from '@/lib/db/emails'
-import { getLeadById, type LeadRow } from '@/lib/db/leads'
+import { getLeadById, updateLeadStage, type LeadRow } from '@/lib/db/leads'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { getClientById } from '@/lib/db/clients'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
 import { addSuppression } from '@/lib/db/suppressions'
 import { stopSequenceForLead } from '@/lib/db/sequences'
-import { updateCaseStatus } from '@/lib/db/cases'
+import { recomputeCaseStatus, isCrmSyncStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { triggerCollisionNotice } from '@/lib/pipeline/collision-notify'
 import { createKnowledgeRequest } from '@/lib/db/knowledge-requests'
@@ -295,9 +295,20 @@ export async function runReplyForInbound(
     resourceMenu: formatResourceMenu(resourceMenu),
   })
 
-  // A reply always means we are in a conversation now.
-  await updateCaseStatus(supabase, inbound.case_id, 'in_conversation')
-  await enqueueCrmSync(inbound.case_id, 'in_conversation')
+  // A reply always moves this contact forward — price and not_interested
+  // move it further still; every other intent lands on in_conversation,
+  // matching the unconditional write this replaces. Computed once, up
+  // front, so this contact's stage is only ever written its true final
+  // value for this reply, never written to an intermediate value first.
+  const finalStage: 'hot_handoff' | 'lost' | 'in_conversation' =
+    classification.intent === 'price' ? 'hot_handoff'
+      : classification.intent === 'not_interested' ? 'lost'
+        : 'in_conversation'
+  await updateLeadStage(supabase, inbound.lead_id, { stage: finalStage })
+  const recompute = await recomputeCaseStatus(supabase, inbound.case_id)
+  if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+    await enqueueCrmSync(inbound.case_id, recompute.status)
+  }
 
   switch (classification.intent) {
     case 'price': {
@@ -310,8 +321,6 @@ export async function runReplyForInbound(
       })
       await addSuppression(supabase, { clientId: inbound.client_id, email: lead.email, reason: 'price_handoff' })
       await stopSequenceForLead(supabase, inbound.lead_id, 'stopped')
-      await updateCaseStatus(supabase, inbound.case_id, 'hot_handoff')
-      await enqueueCrmSync(inbound.case_id, 'hot_handoff')
       await triggerCollisionNotice(supabase, inbound.case_id, inbound.lead_id)
       await logEventSafe({
         clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
@@ -322,8 +331,6 @@ export async function runReplyForInbound(
     case 'not_interested': {
       await addSuppression(supabase, { clientId: inbound.client_id, email: lead.email, reason: 'manual' })
       await stopSequenceForLead(supabase, inbound.lead_id, 'stopped')
-      await updateCaseStatus(supabase, inbound.case_id, 'lost')
-      await enqueueCrmSync(inbound.case_id, 'lost')
       await logEventSafe({
         clientId: inbound.client_id, caseId: inbound.case_id, actor: ACTOR,
         type: 'reply.opt_out', payload: { emailId: inbound.id, leadId: inbound.lead_id },

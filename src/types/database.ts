@@ -255,6 +255,8 @@ export interface Database {
           email_verified_at: string | null
           email_verification: Json | null
           status: Database['public']['Enums']['lead_status']
+          stage: Database['public']['Enums']['lead_stage'] | null
+          wait_reason: Database['public']['Enums']['case_wait_reason'] | null
           created_at: string
           updated_at: string
         }
@@ -276,6 +278,8 @@ export interface Database {
           email_verified_at?: string | null
           email_verification?: Json | null
           status?: Database['public']['Enums']['lead_status']
+          stage?: Database['public']['Enums']['lead_stage'] | null
+          wait_reason?: Database['public']['Enums']['case_wait_reason'] | null
           created_at?: string
           updated_at?: string
         }
@@ -1142,6 +1146,13 @@ export interface Database {
         Args: { p_cutoff: string; p_limit: number }
         Returns: Database['public']['Tables']['cases']['Row'][]
       }
+      recompute_case_status: {
+        Args: { p_case_id: string }
+        Returns: {
+          status: Database['public']['Enums']['case_status']
+          did_change: boolean
+        }
+      }
       match_client_knowledge_chunks: {
         Args: { p_client_id: string; p_query_embedding: number[]; p_query_text: string; p_limit: number }
         Returns: {
@@ -1245,6 +1256,7 @@ export interface Database {
       price_handoff_mode: 'book_call_and_notify' | 'notify_only' | 'configurable'
       lead_email_status: 'unverified' | 'verified' | 'invalid' | 'risky' | 'not_found'
       lead_status: 'new' | 'parked' | 'active'
+      lead_stage: 'waiting' | 'contacted' | 'in_conversation' | 'hot_handoff' | 'lost' | 'dead'
       case_status:
         | 'new'
         | 'researching'

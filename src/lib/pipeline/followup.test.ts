@@ -16,7 +16,8 @@ const isSuppressedMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const generateTextMock = vi.fn()
 const getCampaignForCaseMock = vi.fn()
-const updateCaseStatusMock = vi.fn()
+const updateLeadStageMock = vi.fn()
+const recomputeCaseStatusMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
@@ -37,11 +38,18 @@ vi.mock('@/lib/db/emails', () => ({
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
   markEmailWaiting: (...a: unknown[]) => markEmailWaitingMock(...a),
 }))
-vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  getLeadById: (...a: unknown[]) => getLeadByIdMock(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStageMock(...a),
+}))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/suppressions', () => ({ isSuppressed: (...a: unknown[]) => isSuppressedMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
-vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
+vi.mock('@/lib/db/cases', () => ({
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
+}))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
   generateText: (...a: unknown[]) => generateTextMock(...a),
@@ -67,8 +75,9 @@ beforeEach(() => {
   for (const m of [getSequenceByIdMock, hasInboundReplyMock, stopSequenceMock, advanceSequenceMock,
     getLeadByIdMock, getClientByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock,
     markEmailFailedMock, markEmailWaitingMock, isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock,
-    updateCaseStatusMock, publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock,
+    updateLeadStageMock, recomputeCaseStatusMock, publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock,
     createSequenceMock]) m.mockReset()
+  recomputeCaseStatusMock.mockResolvedValue({ status: 'dead', didChange: true })
   getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
@@ -176,8 +185,21 @@ describe('runFollowupStep', () => {
     const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
     expect(result.action).toBe('stopped')
     expect(stopSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', 'stopped')
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'dead')
+    expect(updateLeadStageMock).toHaveBeenCalledWith(expect.anything(), 'lead1', { stage: 'dead' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'dead')
     expect(publishDelayMock).not.toHaveBeenCalled() // nothing after step 3
+  })
+
+  it('should not enqueue a CRM sync when recompute reports the case is not yet fully dead', async () => {
+    getSequenceByIdMock.mockResolvedValue({ ...sequence, current_step: 2 })
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e4' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<d@mail>', threadId: 'thr1' })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: false })
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 3 })
+
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 
   it('should skip when the sequence step no longer matches (stale/duplicate delivery)', async () => {
@@ -393,7 +415,8 @@ describe('runFollowupStep — manual-send skip', () => {
 
     expect(result.action).toBe('skipped')
     expect(stopSequenceMock).toHaveBeenCalledWith(expect.anything(), 'seq1', 'stopped')
-    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).not.toHaveBeenCalled()
+    expect(recomputeCaseStatusMock).not.toHaveBeenCalled()
     expect(publishDelayMock).not.toHaveBeenCalled()
   })
 

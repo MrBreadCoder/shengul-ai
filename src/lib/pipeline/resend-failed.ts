@@ -11,8 +11,8 @@ import {
   listThreadEmails,
   type EmailRow,
 } from '@/lib/db/emails'
-import { getLeadById } from '@/lib/db/leads'
-import { getCaseById, updateCaseStatus, type CaseStatus } from '@/lib/db/cases'
+import { getLeadById, updateLeadStage } from '@/lib/db/leads'
+import { getCaseById, recomputeCaseStatus, isCrmSyncStatus, type CaseStatus } from '@/lib/db/cases'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { scheduleFirstFollowup, FIRST_TOUCH_STEP, DAY_SECONDS } from './followup'
@@ -150,11 +150,17 @@ async function resendOne(supabase: SupabaseClient<Database>, email: EmailRow): P
   })
 
   if (step === FIRST_TOUCH_STEP) {
-    await scheduleFirstFollowup(supabase, { clientId: email.client_id, caseId, leadId })
-    if (kase.status !== 'contacted') {
-      await updateCaseStatus(supabase, caseId, 'contacted')
-      await enqueueCrmSync(caseId, 'contacted')
+    // Contacted-stage and case-status persistence run before follow-up
+    // scheduling: scheduleFirstFollowup is idempotent (safe to retry), but
+    // this email's status is about to become 'sent' — it will never be
+    // picked up by this sweep again — so a scheduling failure here must not
+    // cost the lead/case their state transition too.
+    await updateLeadStage(supabase, leadId, { stage: 'contacted' })
+    const recompute = await recomputeCaseStatus(supabase, caseId)
+    if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+      await enqueueCrmSync(caseId, recompute.status)
     }
+    await scheduleFirstFollowup(supabase, { clientId: email.client_id, caseId, leadId })
     return 'sent'
   }
 
@@ -164,8 +170,11 @@ async function resendOne(supabase: SupabaseClient<Database>, email: EmailRow): P
   const maxStep = sequence.followup_delays_days.length
   if (step >= maxStep) {
     await stopSequence(supabase, sequence.id, 'stopped')
-    await updateCaseStatus(supabase, caseId, 'dead')
-    await enqueueCrmSync(caseId, 'dead')
+    await updateLeadStage(supabase, leadId, { stage: 'dead' })
+    const recompute = await recomputeCaseStatus(supabase, caseId)
+    if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+      await enqueueCrmSync(caseId, recompute.status)
+    }
   } else {
     const nextStep = step + 1
     // Index = current step → delay before nextStep; always in range for

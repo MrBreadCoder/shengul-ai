@@ -12,8 +12,9 @@ const createSequenceMock = vi.fn()
 const advanceSequenceMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const generateJsonMock = vi.fn()
-const updateCaseStatusMock = vi.fn()
+const updateLeadStageMock = vi.fn()
 const updateCaseWaitingMock = vi.fn()
+const recomputeCaseStatusMock = vi.fn()
 const getOutreachEligibilityMock = vi.fn()
 const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
@@ -23,7 +24,10 @@ const getEmailTemplateByIdMock = vi.fn()
 const getDefaultEmailTemplateMock = vi.fn()
 
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
-vi.mock('@/lib/db/leads', () => ({ listActiveLeadsForCase: (...a: unknown[]) => listActiveLeadsMock(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  listActiveLeadsForCase: (...a: unknown[]) => listActiveLeadsMock(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStageMock(...a),
+}))
 vi.mock('@/lib/db/suppressions', () => ({ isSuppressed: (...a: unknown[]) => isSuppressedMock(...a) }))
 vi.mock('@/lib/db/emails', () => ({
   claimOutboundEmail: (...a: unknown[]) => claimOutboundEmailMock(...a),
@@ -37,9 +41,11 @@ vi.mock('@/lib/db/sequences', () => ({
   advanceSequence: (...a: unknown[]) => advanceSequenceMock(...a),
 }))
 vi.mock('@/lib/mailbox/eligibility', () => ({ getOutreachEligibility: (...a: unknown[]) => getOutreachEligibilityMock(...a) }))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
 vi.mock('@/lib/db/cases', () => ({
-  updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a),
   updateCaseWaiting: (...a: unknown[]) => updateCaseWaitingMock(...a),
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
 }))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/email-templates', () => ({
@@ -67,7 +73,8 @@ const lead = { id: 'lead1', client_id: 'c1', case_id: 'case1', full_name: 'Jane 
 const fullLead: LeadRow = {
   ...lead, campaign_id: 'camp1', company_name: 'Acme', company_domain: 'acme.com', linkedin_url: null,
   source: null, source_id: null, raw: null, email_status: 'verified', email_verified_at: null,
-  email_verification: null, status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+  email_verification: null, status: 'active', stage: null, wait_reason: null,
+  created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 }
 const input = {
   clientId: 'c1', campaignId: 'camp1', caseId: 'case1', replyMode: 'auto_send' as const,
@@ -81,13 +88,14 @@ beforeEach(() => {
   for (const m of [listKnowledgeMock, listActiveLeadsMock, isSuppressedMock, claimOutboundEmailMock,
     markEmailSentMock, markEmailFailedMock, markEmailWaitingMock, listWaitingLeadIdsMock, createSequenceMock,
     advanceSequenceMock, sendViaMailboxMock,
-    generateJsonMock, updateCaseStatusMock, updateCaseWaitingMock, publishDelayMock, logEventMock, enqueueCrmSyncMock,
+    generateJsonMock, updateLeadStageMock, updateCaseWaitingMock, recomputeCaseStatusMock, publishDelayMock, logEventMock, enqueueCrmSyncMock,
     getClientByIdMock, getEmailTemplateByIdMock, getDefaultEmailTemplateMock, getOutreachEligibilityMock]) m.mockReset()
   listKnowledgeMock.mockResolvedValue([{ kind: 'company', content: 'builds widgets' }])
   isSuppressedMock.mockResolvedValue(false)
   generateJsonMock.mockResolvedValue({ subject: 'Quick idea for Acme', body: 'Hi Jane...' })
   getOutreachEligibilityMock.mockResolvedValue({ eligible: true })
   listWaitingLeadIdsMock.mockResolvedValue(new Set())
+  recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: true })
   // scheduleFirstFollowup's DEFAULT_FOLLOWUP_DELAYS_DAYS fallback covers a
   // null client lookup, so this default keeps every existing test's timing
   // assertions (3-day first follow-up) unchanged.
@@ -111,8 +119,53 @@ describe('runWriteForCase', () => {
       'seq1',
       expect.objectContaining({ qstashMessageId: 'qmsg1' }),
     )
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+    expect(updateLeadStageMock).toHaveBeenCalledWith(expect.anything(), 'lead1', { stage: 'contacted' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
     expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
+  })
+
+  // Regression: scheduleFirstFollowup failing must not stop updateLeadStage
+  // from persisting, and must not abort the rest of this case's leads loop
+  // — a claimOutboundEmail retry after the email is 'sent' would otherwise
+  // never reach updateLeadStage again (the slot is already taken).
+  it('should still advance the lead to contacted, and process the rest of the batch, when follow-up scheduling throws', async () => {
+    const lead2 = { ...lead, id: 'lead2', email: 'jane2@acme.com' }
+    listActiveLeadsMock.mockResolvedValue([lead, lead2])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockRejectedValue(new Error('db down'))
+
+    const result = await runWriteForCase({} as never, input)
+
+    expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 2 })
+    expect(updateLeadStageMock).toHaveBeenCalledWith(expect.anything(), 'lead1', { stage: 'contacted' })
+    expect(updateLeadStageMock).toHaveBeenCalledWith(expect.anything(), 'lead2', { stage: 'contacted' })
+    expect(logEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'pipeline.write.schedule_followup_failed',
+    }))
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
+  })
+
+  it('should not enqueue a CRM sync when recompute reports no change', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
+    createSequenceMock.mockResolvedValue({ id: 'seq1' })
+    publishDelayMock.mockResolvedValue('qmsg1')
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: false })
+    await runWriteForCase({} as never, input)
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('should mark a drafted lead waiting on manual approval, not send it', async () => {
+    listActiveLeadsMock.mockResolvedValue([lead])
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'waiting', didChange: true })
+    await runWriteForCase({} as never, { ...input, replyMode: 'human_approve' })
+    expect(updateLeadStageMock).toHaveBeenCalledWith(
+      expect.anything(), 'lead1', { stage: 'waiting', waitReason: 'awaiting_manual_approval' },
+    )
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
   })
 
   it('should use medium thinking with a token ceiling that keeps the JSON draft from truncating', async () => {
@@ -156,7 +209,7 @@ describe('runWriteForCase', () => {
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
     expect(claimOutboundEmailMock).not.toHaveBeenCalled()
     expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'no_viable_leads')
-    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(recomputeCaseStatusMock).not.toHaveBeenCalled()
   })
 
   it('should skip a lead whose email slot is already claimed (idempotent retry)', async () => {
@@ -177,11 +230,12 @@ describe('runWriteForCase', () => {
     expect(markEmailFailedMock).not.toHaveBeenCalled()
   })
 
-  it('should mark the email waiting (not failed) and flag the case awaiting_resend when the send is rate limited', async () => {
+  it('should mark the email waiting (not failed) and flag the lead awaiting_resend when the send is rate limited', async () => {
     const { AppError } = await import('@/lib/errors/app-error')
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'no mailbox available'))
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'waiting', didChange: true })
 
     const result = await runWriteForCase({} as never, input)
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
@@ -191,8 +245,8 @@ describe('runWriteForCase', () => {
     // Never regenerates: the content-preserving drain sweep owns the retry
     // from here, not another eligibility recheck + a fresh runWriteForCase pass.
     expect(getOutreachEligibilityMock).toHaveBeenCalledTimes(1)
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_resend')
-    expect(updateCaseStatusMock).not.toHaveBeenCalledWith(expect.anything(), 'case1', 'contacted')
+    expect(updateLeadStageMock).toHaveBeenCalledWith(expect.anything(), 'lead1', { stage: 'waiting', waitReason: 'awaiting_resend' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
   })
 
   // Regression test: a swallowed markEmailWaiting failure used to still
@@ -232,12 +286,13 @@ describe('runWriteForCase', () => {
   it('should skip a lead that already has waiting content without calling the LLM', async () => {
     listActiveLeadsMock.mockResolvedValue([lead])
     listWaitingLeadIdsMock.mockResolvedValue(new Set(['lead1']))
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'waiting', didChange: false })
 
     const result = await runWriteForCase({} as never, input)
     expect(result).toEqual({ caseId: 'case1', drafted: 0, sent: 0 })
     expect(generateJsonMock).not.toHaveBeenCalled()
     expect(claimOutboundEmailMock).not.toHaveBeenCalled()
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_resend')
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
   })
 
   it('should mark the case waiting and skip all lead work when the eligibility probe says ineligible', async () => {
@@ -286,14 +341,17 @@ describe('runWriteForCase', () => {
     expect(listActiveLeadsMock).toHaveBeenCalled() // eligible, so the loop still proceeds
   })
 
-  it('should draft and mark the case waiting with awaiting_manual_approval on human_approve (not contacted)', async () => {
+  it('should draft and mark the lead waiting with awaiting_manual_approval on human_approve (not contacted)', async () => {
     listActiveLeadsMock.mockResolvedValue([lead])
     claimOutboundEmailMock.mockResolvedValue({ id: 'e1' })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'waiting', didChange: true })
     const result = await runWriteForCase({} as never, { ...input, replyMode: 'human_approve' })
     expect(result).toEqual({ caseId: 'case1', drafted: 1, sent: 0 })
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith(expect.anything(), 'case1', 'awaiting_manual_approval')
-    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).toHaveBeenCalledWith(
+      expect.anything(), 'lead1', { stage: 'waiting', waitReason: 'awaiting_manual_approval' },
+    )
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(expect.anything(), 'case1')
     expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 

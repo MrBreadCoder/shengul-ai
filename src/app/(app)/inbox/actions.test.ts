@@ -26,9 +26,9 @@ const loadResourceAttachmentsMock = vi.fn()
 const resolveSelectedResourcesMock = vi.fn()
 const updateDraftContentRowMock = vi.fn()
 const regenerateDraftContentPipelineMock = vi.fn()
-const claimCaseContactedMock = vi.fn()
+const updateLeadStageMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
-const updateCaseWaitingMock = vi.fn()
+const recomputeCaseStatusMock = vi.fn()
 
 vi.mock('@/lib/auth/require-user', () => ({ requireUser: (...a: unknown[]) => requireUserMock(...a) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: (...a: unknown[]) => createAdminClientMock(...a) }))
@@ -47,7 +47,10 @@ vi.mock('@/lib/pipeline/followup', () => ({
   scheduleFirstFollowup: (...a: unknown[]) => scheduleFirstFollowupMock(...a),
 }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
-vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  getLeadById: (...a: unknown[]) => getLeadByIdMock(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStageMock(...a),
+}))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
 vi.mock('next/cache', () => ({ revalidatePath: (...a: unknown[]) => revalidatePathMock(...a) }))
 vi.mock('@/lib/events/log-event', () => ({ logEventSafe: (...a: unknown[]) => logEventSafeMock(...a) }))
@@ -70,9 +73,10 @@ vi.mock('@/lib/resources/select', () => ({
 vi.mock('@/lib/pipeline/redesign', () => ({
   regenerateDraftContent: (...a: unknown[]) => regenerateDraftContentPipelineMock(...a),
 }))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
 vi.mock('@/lib/db/cases', () => ({
-  claimCaseContacted: (...a: unknown[]) => claimCaseContactedMock(...a),
-  updateCaseWaiting: (...a: unknown[]) => updateCaseWaitingMock(...a),
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
 }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSyncMock(...a) }))
 
@@ -111,7 +115,7 @@ beforeEach(() => {
     hasReplyForInboundMock, insertKnowledgeMock, runKnowledgeAnswerMock,
     listAttachmentsForEmailMock, replaceEmailAttachmentsMock, loadResourceAttachmentsMock,
     resolveSelectedResourcesMock, updateDraftContentRowMock, regenerateDraftContentPipelineMock,
-    claimCaseContactedMock, enqueueCrmSyncMock, updateCaseWaitingMock]) m.mockReset()
+    updateLeadStageMock, enqueueCrmSyncMock, recomputeCaseStatusMock]) m.mockReset()
   requireUserMock.mockResolvedValue({ user: { id: 'user1' }, appUser: { id: 'user1', role: 'operator', client_id: null } })
   listAttachmentsForEmailMock.mockResolvedValue([])
   replaceEmailAttachmentsMock.mockResolvedValue(undefined)
@@ -126,7 +130,7 @@ beforeEach(() => {
   claimDraftForSendMock.mockResolvedValue(draftEmail({ status: 'queued' }))
   scheduleFirstFollowupMock.mockResolvedValue(undefined)
   claimAnswerMock.mockResolvedValue({ id: KR_ID, client_id: 'c1', case_id: 'case1' })
-  claimCaseContactedMock.mockResolvedValue(true)
+  recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: true })
 })
 
 describe('approveDraft', () => {
@@ -141,14 +145,15 @@ describe('approveDraft', () => {
     expect(scheduleFirstFollowupMock).toHaveBeenCalledWith({}, {
       clientId: 'c1', caseId: 'case1', leadId: 'lead1',
     })
-    expect(claimCaseContactedMock).toHaveBeenCalledWith({}, 'case1')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'contacted' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
     expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
-  it('should not re-sync the CRM when the atomic claim loses (case already contacted)', async () => {
+  it('should not re-sync the CRM when recompute reports no change (case already contacted)', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
-    claimCaseContactedMock.mockResolvedValue(false)
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: false })
 
     await approveDraft(fd(EMAIL_ID))
 
@@ -156,28 +161,31 @@ describe('approveDraft', () => {
   })
 
   it('should not double-fire the CRM sync when two leads on the same case approve concurrently', async () => {
-    // Regression test: a read-then-write ('read status, write if not
-    // contacted') would let both approvals pass the read before either
-    // writes. The atomic claim must let exactly one caller win.
+    // Regression test: recompute_case_status's own row lock (not a
+    // read-then-write in this file) is what serializes two concurrent
+    // approvals for different leads on the same case — only the recompute
+    // that actually flips the case's status reports didChange: true.
     getEmailByIdMock.mockResolvedValue(draftEmail({ id: EMAIL_ID, lead_id: 'lead1' }))
-    claimCaseContactedMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    recomputeCaseStatusMock
+      .mockResolvedValueOnce({ status: 'contacted', didChange: true })
+      .mockResolvedValueOnce({ status: 'contacted', didChange: false })
 
     await approveDraft(fd(EMAIL_ID))
     await approveDraft(fd(EMAIL_ID))
 
-    expect(claimCaseContactedMock).toHaveBeenCalledTimes(2)
+    expect(recomputeCaseStatusMock).toHaveBeenCalledTimes(2)
     expect(enqueueCrmSyncMock).toHaveBeenCalledTimes(1)
     expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
   })
 
   it('should not fail the send when advancing the case to contacted throws', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
-    claimCaseContactedMock.mockRejectedValue(new Error('db down'))
+    recomputeCaseStatusMock.mockRejectedValue(new Error('db down'))
 
     await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'sent' })
     expect(markEmailSentMock).toHaveBeenCalled()
     expect(logEventSafeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),
+      expect.objectContaining({ type: 'inbox.lead_advance_failed' }),
     )
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
@@ -279,25 +287,28 @@ describe('approveDraft', () => {
   // parks the approved content as-is and returns normally: the approval
   // itself succeeded, only the send is delayed. See .claude/roadmap.md
   // 2026-08-19 and docs/superpowers/specs/2026-08-19-cap-blocked-send-waiting-design.md.
-  it('should mark the email waiting, flag the case awaiting_resend, and resolve (not throw) when approval hits the cap', async () => {
+  it('should mark the email waiting, flag the lead awaiting_resend, and resolve (not throw) when approval hits the cap', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'waiting', didChange: true })
 
     await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
 
     expect(markEmailWaitingMock).toHaveBeenCalledWith({}, EMAIL_ID)
     expect(markEmailFailedMock).not.toHaveBeenCalled()
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'awaiting_resend')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'waiting', waitReason: 'awaiting_resend' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
-  it('should not touch the case wait_reason for a non-RATE_LIMITED send failure', async () => {
+  it('should not touch the lead/case bookkeeping for a non-RATE_LIMITED send failure', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     sendViaMailboxMock.mockRejectedValue(new Error('smtp down'))
 
     await expect(approveDraft(fd(EMAIL_ID))).rejects.toBeTruthy()
 
-    expect(updateCaseWaitingMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).not.toHaveBeenCalled()
+    expect(recomputeCaseStatusMock).not.toHaveBeenCalled()
     expect(markEmailWaitingMock).not.toHaveBeenCalled()
     expect(markEmailFailedMock).toHaveBeenCalledWith({}, EMAIL_ID)
   })
@@ -305,7 +316,7 @@ describe('approveDraft', () => {
   it('should still resolve waiting when marking the case waiting itself throws', async () => {
     getEmailByIdMock.mockResolvedValue(draftEmail())
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
-    updateCaseWaitingMock.mockRejectedValue(new Error('db down'))
+    recomputeCaseStatusMock.mockRejectedValue(new Error('db down'))
 
     await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
 
@@ -326,7 +337,7 @@ describe('approveDraft', () => {
 
     await expect(approveDraft(fd(EMAIL_ID))).resolves.toEqual({ status: 'waiting' })
     expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
-    expect(updateCaseWaitingMock).toHaveBeenCalledWith({}, 'case1', 'awaiting_resend')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'waiting', waitReason: 'awaiting_resend' })
   })
 
   it('should propagate the error instead of falsely reporting waiting when markEmailWaiting fails twice', async () => {
@@ -336,9 +347,10 @@ describe('approveDraft', () => {
 
     await expect(approveDraft(fd(EMAIL_ID))).rejects.toThrow('db down')
     expect(markEmailWaitingMock).toHaveBeenCalledTimes(2)
-    // updateCaseWaiting is separate, best-effort handling that only runs
-    // once the email's own waiting state is durable.
-    expect(updateCaseWaitingMock).not.toHaveBeenCalled()
+    // updateLeadStage/recomputeCaseStatus are separate, best-effort handling
+    // that only runs once the email's own waiting state is durable.
+    expect(updateLeadStageMock).not.toHaveBeenCalled()
+    expect(recomputeCaseStatusMock).not.toHaveBeenCalled()
   })
 
   it('should not fail the send when scheduling the first follow-up throws', async () => {
@@ -350,7 +362,10 @@ describe('approveDraft', () => {
     expect(logEventSafeMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'inbox.schedule_followup_failed' }),
     )
-    expect(claimCaseContactedMock).not.toHaveBeenCalled()
+    // Regression: a scheduling failure must not block the lead/case
+    // advancement that already ran the email's actual send.
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'contacted' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
     expect(revalidatePathMock).toHaveBeenCalledWith('/inbox')
   })
 
@@ -363,7 +378,7 @@ describe('approveDraft', () => {
     expect(sendViaMailboxMock).toHaveBeenCalled()
     expect(markEmailSentMock).toHaveBeenCalled()
     expect(scheduleFirstFollowupMock).not.toHaveBeenCalled()
-    expect(claimCaseContactedMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).not.toHaveBeenCalled()
     expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 

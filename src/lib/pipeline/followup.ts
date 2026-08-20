@@ -16,11 +16,11 @@ import {
   markEmailFailed,
   markEmailWaiting,
 } from '@/lib/db/emails'
-import { getLeadById } from '@/lib/db/leads'
+import { getLeadById, updateLeadStage } from '@/lib/db/leads'
 import { getClientById } from '@/lib/db/clients'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getCampaignForCase } from '@/lib/db/campaigns'
-import { updateCaseStatus } from '@/lib/db/cases'
+import { recomputeCaseStatus, isCrmSyncStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
@@ -342,8 +342,11 @@ export async function runFollowupStep(
   if (input.step >= maxStep) {
     await advanceSequence(supabase, sequence.id, { currentStep: input.step, nextActionAt: null, qstashMessageId: null })
     await stopSequence(supabase, sequence.id, 'stopped')
-    await updateCaseStatus(supabase, sequence.case_id, 'dead')
-    await enqueueCrmSync(sequence.case_id, 'dead')
+    await updateLeadStage(supabase, sequence.lead_id, { stage: 'dead' })
+    const recompute = await recomputeCaseStatus(supabase, sequence.case_id)
+    if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+      await enqueueCrmSync(sequence.case_id, recompute.status)
+    }
     await logEventSafe({
       clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR,
       type: 'pipeline.followup.exhausted', payload: { sequenceId: sequence.id, step: input.step },

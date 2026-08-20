@@ -2,12 +2,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
 import { listKnowledgeForCase, type KnowledgeRow } from '@/lib/db/case-knowledge'
-import { listActiveLeadsForCase, type LeadRow } from '@/lib/db/leads'
+import { listActiveLeadsForCase, updateLeadStage, type LeadRow } from '@/lib/db/leads'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getClientById, type ClientRow } from '@/lib/db/clients'
 import { getEmailTemplateById, getDefaultEmailTemplate, type EmailTemplateRow } from '@/lib/db/email-templates'
 import { claimOutboundEmail, markEmailSent, markEmailFailed, markEmailWaiting, listWaitingLeadIds } from '@/lib/db/emails'
-import { updateCaseStatus, updateCaseWaiting, type CaseWaitReason } from '@/lib/db/cases'
+import { updateCaseWaiting, recomputeCaseStatus, isCrmSyncStatus, type CaseWaitReason } from '@/lib/db/cases'
 import { getOutreachEligibility } from '@/lib/mailbox/eligibility'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
@@ -341,7 +341,10 @@ async function processLead(
   })
   if (!claimed) return 'skipped'
 
-  if (!shouldSendFirstTouch(input.replyMode)) return 'drafted'
+  if (!shouldSendFirstTouch(input.replyMode)) {
+    await updateLeadStage(supabase, lead.id, { stage: 'waiting', waitReason: 'awaiting_manual_approval' })
+    return 'drafted'
+  }
 
   let sent: SendViaMailboxResult
   try {
@@ -360,6 +363,7 @@ async function processLead(
     // means the send is genuinely broken.
     if (error instanceof AppError && error.code === 'RATE_LIMITED') {
       await parkAsWaiting(supabase, claimed.id)
+      await updateLeadStage(supabase, lead.id, { stage: 'waiting', waitReason: 'awaiting_resend' })
       return 'waiting'
     }
     await markEmailFailed(supabase, claimed.id)
@@ -371,11 +375,31 @@ async function processLead(
     threadId: sent.threadId,
     mailboxId: sent.mailboxId,
   })
-  await scheduleFirstFollowup(supabase, {
-    clientId: input.clientId,
-    caseId: input.caseId,
-    leadId: lead.id,
-  })
+  // Stage update runs before follow-up scheduling, and scheduling is
+  // isolated as best-effort: a claimOutboundEmail retry after this email is
+  // 'sent' finds the (lead, step 0, outbound) slot already taken and
+  // returns null (see the guard above), so a retried processLead call would
+  // never reach updateLeadStage again — the contacted stage must be
+  // persisted unconditionally, right after the send that earns it.
+  // scheduleFirstFollowup is idempotent (createSequence no-ops if a
+  // sequence already exists), so a failure here is logged rather than
+  // thrown — it must not abort the rest of this case's leads loop.
+  await updateLeadStage(supabase, lead.id, { stage: 'contacted' })
+  try {
+    await scheduleFirstFollowup(supabase, {
+      clientId: input.clientId,
+      caseId: input.caseId,
+      leadId: lead.id,
+    })
+  } catch (error) {
+    await logEventSafe({
+      clientId: input.clientId,
+      caseId: input.caseId,
+      actor: ACTOR,
+      type: 'pipeline.write.schedule_followup_failed',
+      payload: { leadId: lead.id, cause: error instanceof Error ? error.message : String(error) },
+    })
+  }
   return 'sent'
 }
 
@@ -437,29 +461,26 @@ export async function runWriteForCase(
     if (outcome === 'waiting') waiting += 1
   }
 
-  if (sent > 0) {
-    await updateCaseStatus(supabase, input.caseId, 'contacted')
-    await enqueueCrmSync(input.caseId, 'contacted')
-  } else if (drafted > 0) {
-    // human_approve, or hybrid's first-touch step — nothing sent yet, a
-    // human owns the next move in /inbox. approveDraft is what eventually
-    // advances this case to 'contacted'.
-    await updateCaseWaiting(supabase, input.caseId, 'awaiting_manual_approval')
-  } else if (waiting > 0) {
-    // At least one lead's content is already committed and parked — the
-    // drain sweep (not another write-fanout pass) is what sends it. Not in
-    // AUTO_RETRY_WAIT_REASONS, so write-fanout never re-dispatches this case
-    // over it.
-    await updateCaseWaiting(supabase, input.caseId, 'awaiting_resend')
+  if (sent > 0 || drafted > 0 || waiting > 0) {
+    // Every real per-lead outcome above already wrote its own lead's
+    // stage — this is the one recompute for the whole run, not one per
+    // lead, so a concurrent event on a different lead of this case can't
+    // read a partially-updated case mid-loop and prematurely overwrite the
+    // claimCaseForWriting dispatch lock this run is still holding.
+    const recompute = await recomputeCaseStatus(supabase, input.caseId)
+    if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+      await enqueueCrmSync(input.caseId, recompute.status)
+    }
   } else {
     // Every active lead was permanently disqualified this attempt (missing
     // email, suppressed) — processLead checks suppression before
-    // generation, so this path never paid for an LLM call either. Not
-    // 'contacted' (never sent), and not left at 'writing' (would misread as
-    // stuck and get endlessly re-queued by stuck-sweep for a condition that
-    // won't change on its own). 'no_viable_leads' is deliberately excluded
-    // from the auto-retry set — nothing about waiting 5 more minutes
-    // changes a suppression list.
+    // generation, so this path never paid for an LLM call either. This is
+    // a case-level condition ("no viable leads exist"), not any one lead's
+    // stage — stays a direct write. Not 'contacted' (never sent), and not
+    // left at 'writing' (would misread as stuck and get endlessly
+    // re-queued by stuck-sweep for a condition that won't change on its
+    // own). 'no_viable_leads' is deliberately excluded from the auto-retry
+    // set — nothing about waiting 5 more minutes changes a suppression list.
     //
     // (A narrower pre-existing imprecision: a lead skipped because a
     // concurrent write already claimed its step-0 slot also lands here,

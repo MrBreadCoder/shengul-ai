@@ -11,7 +11,8 @@ const markEmailSentMock = vi.fn()
 const markEmailFailedMock = vi.fn()
 const addSuppressionMock = vi.fn()
 const stopSequenceForLeadMock = vi.fn()
-const updateCaseStatusMock = vi.fn()
+const updateLeadStageMock = vi.fn()
+const recomputeCaseStatusMock = vi.fn()
 const createKnowledgeRequestMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const generateJsonMock = vi.fn()
@@ -31,13 +32,20 @@ vi.mock('@/lib/db/emails', () => ({
   markEmailSent: (...a: unknown[]) => markEmailSentMock(...a),
   markEmailFailed: (...a: unknown[]) => markEmailFailedMock(...a),
 }))
-vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  getLeadById: (...a: unknown[]) => getLeadByIdMock(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStageMock(...a),
+}))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeMock(...a) }))
 vi.mock('@/lib/db/suppressions', () => ({ addSuppression: (...a: unknown[]) => addSuppressionMock(...a) }))
 vi.mock('@/lib/db/sequences', () => ({ stopSequenceForLead: (...a: unknown[]) => stopSequenceForLeadMock(...a) }))
-vi.mock('@/lib/db/cases', () => ({ updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a) }))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
+vi.mock('@/lib/db/cases', () => ({
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
+}))
 vi.mock('@/lib/db/knowledge-requests', () => ({ createKnowledgeRequest: (...a: unknown[]) => createKnowledgeRequestMock(...a) }))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
 vi.mock('@/lib/llm/client', () => ({
@@ -82,9 +90,10 @@ function resource(overrides: Record<string, unknown> = {}): Record<string, unkno
 beforeEach(() => {
   for (const m of [getEmailByIdMock, getLeadByIdMock, getCampaignForCaseMock, listThreadEmailsMock, listKnowledgeMock,
     claimReplyEmailMock, markEmailSentMock, markEmailFailedMock, addSuppressionMock, stopSequenceForLeadMock,
-    updateCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
+    updateLeadStageMock, recomputeCaseStatusMock, createKnowledgeRequestMock, sendViaMailboxMock, generateJsonMock, logEventMock,
     triggerCollisionNoticeMock, listActiveResourcesForClientMock, insertEmailAttachmentsMock,
     loadResourceAttachmentsMock, retrieveClientKnowledgeMock, enqueueCrmSyncMock, getClientByIdMock]) m.mockReset()
+  recomputeCaseStatusMock.mockResolvedValue({ status: 'in_conversation', didChange: true })
   getEmailByIdMock.mockResolvedValue(inbound)
   getLeadByIdMock.mockResolvedValue(lead)
   getCampaignForCaseMock.mockResolvedValue(campaign)
@@ -114,8 +123,22 @@ describe('runReplyForInbound', () => {
     generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.', attachResourceIds: [] })
     const result = await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(sendViaMailboxMock).toHaveBeenCalled()
-    expect(updateCaseStatusMock).toHaveBeenCalledWith({}, 'case1', 'in_conversation')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'in_conversation' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
     expect(result.action).toBe('answered')
+  })
+
+  it('should mark the lead in_conversation for a question intent, not hot_handoff or lost', async () => {
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here you go', attachResourceIds: [] })
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'in_conversation' })
+  })
+
+  it('should not enqueue a CRM sync when recompute reports no change', async () => {
+    generateJsonMock.mockResolvedValue({ intent: 'question', confidence: 0.9, canAnswer: true, missingQuestion: null, replyBody: 'Here is the answer.', attachResourceIds: [] })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'in_conversation', didChange: false })
+    await runReplyForInbound({} as never, { emailId: 'in1' })
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 
   it('should classify the reply with medium thinking', async () => {
@@ -146,21 +169,27 @@ describe('runReplyForInbound', () => {
 
   it('should hand off on price intent: reply, suppress, stop, hot_handoff', async () => {
     generateJsonMock.mockResolvedValue({ intent: 'price', confidence: 0.8, canAnswer: false, missingQuestion: null, replyBody: null })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'hot_handoff', didChange: true })
     const result = await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(sendViaMailboxMock).toHaveBeenCalled() // booking-link reply
     expect(addSuppressionMock).toHaveBeenCalledWith({}, expect.objectContaining({ reason: 'price_handoff' }))
     expect(stopSequenceForLeadMock).toHaveBeenCalledWith({}, 'lead1', 'stopped')
-    expect(updateCaseStatusMock).toHaveBeenCalledWith({}, 'case1', 'hot_handoff')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'hot_handoff' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'hot_handoff')
     expect(triggerCollisionNoticeMock).toHaveBeenCalledWith({}, 'case1', 'lead1')
     expect(result.action).toBe('handoff')
   })
 
   it('should suppress and stop on not_interested without replying', async () => {
     generateJsonMock.mockResolvedValue({ intent: 'not_interested', confidence: 0.9, canAnswer: false, missingQuestion: null, replyBody: null })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'lost', didChange: true })
     const result = await runReplyForInbound({} as never, { emailId: 'in1' })
     expect(addSuppressionMock).toHaveBeenCalledWith({}, expect.objectContaining({ reason: 'manual' }))
     expect(stopSequenceForLeadMock).toHaveBeenCalledWith({}, 'lead1', 'stopped')
-    expect(updateCaseStatusMock).toHaveBeenCalledWith({}, 'case1', 'lost')
+    expect(updateLeadStageMock).toHaveBeenCalledWith({}, 'lead1', { stage: 'lost' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith({}, 'case1')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'lost')
     expect(sendViaMailboxMock).not.toHaveBeenCalled()
     expect(result.action).toBe('suppressed')
   })

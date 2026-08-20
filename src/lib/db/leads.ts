@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { AppError } from '@/lib/errors/app-error'
-import type { CaseStatus } from '@/lib/db/cases'
+import type { CaseStatus, CaseWaitReason } from '@/lib/db/cases'
 
 export type LeadRow = Database['public']['Tables']['leads']['Row']
 export type LeadInsert = Database['public']['Tables']['leads']['Insert']
@@ -188,6 +188,34 @@ export async function parkLead(supabase: SupabaseClient<Database>, leadId: strin
   const { error } = await supabase.from('leads').update({ status: 'parked' }).eq('id', leadId)
   if (error) {
     throw new AppError('DB_ERROR', 'Failed to park lead', { leadId, cause: error.message })
+  }
+}
+
+export type LeadStage = Database['public']['Enums']['lead_stage']
+
+// Discriminated on purpose: passing a wait reason for a non-'waiting'
+// stage, or omitting one for 'waiting', is a compile error here rather
+// than a constraint violation caught at write time (leads_wait_reason_
+// matches_stage, migration 0053).
+export type LeadStageUpdate =
+  | { stage: 'waiting'; waitReason: CaseWaitReason }
+  | { stage: Exclude<LeadStage, 'waiting'> }
+
+// The per-contact write every pipeline stage now makes instead of writing
+// cases.status directly -- see recompute_case_status (migration 0054) and
+// docs/superpowers/specs/2026-08-20-per-contact-case-status-design.md.
+export async function updateLeadStage(
+  supabase: SupabaseClient<Database>,
+  leadId: string,
+  update: LeadStageUpdate,
+): Promise<void> {
+  const waitReason = update.stage === 'waiting' ? update.waitReason : null
+  const { error } = await supabase
+    .from('leads')
+    .update({ stage: update.stage, wait_reason: waitReason, updated_at: new Date().toISOString() })
+    .eq('id', leadId)
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to update lead stage', { leadId, stage: update.stage, cause: error.message })
   }
 }
 

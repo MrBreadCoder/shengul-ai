@@ -10,7 +10,8 @@ const hasInboundReplyMock = vi.fn()
 const listThreadEmailsMock = vi.fn()
 const getLeadByIdMock = vi.fn()
 const getCaseByIdMock = vi.fn()
-const updateCaseStatusMock = vi.fn()
+const updateLeadStageMock = vi.fn()
+const recomputeCaseStatusMock = vi.fn()
 const getCampaignForCaseMock = vi.fn()
 const sendViaMailboxMock = vi.fn()
 const scheduleFirstFollowupMock = vi.fn()
@@ -30,10 +31,15 @@ vi.mock('@/lib/db/emails', () => ({
   hasInboundReply: (...a: unknown[]) => hasInboundReplyMock(...a),
   listThreadEmails: (...a: unknown[]) => listThreadEmailsMock(...a),
 }))
-vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadByIdMock(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  getLeadById: (...a: unknown[]) => getLeadByIdMock(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStageMock(...a),
+}))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
 vi.mock('@/lib/db/cases', () => ({
   getCaseById: (...a: unknown[]) => getCaseByIdMock(...a),
-  updateCaseStatus: (...a: unknown[]) => updateCaseStatusMock(...a),
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
 }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
 vi.mock('@/lib/mailbox/sender', () => ({ sendViaMailbox: (...a: unknown[]) => sendViaMailboxMock(...a) }))
@@ -67,7 +73,7 @@ beforeEach(() => {
   for (const m of [
     listWaitingOutboundEmailsMock, claimWaitingOutboundEmailMock, markEmailSentMock, markEmailFailedMock,
     markEmailWaitingMock, hasInboundReplyMock, listThreadEmailsMock, getLeadByIdMock, getCaseByIdMock,
-    updateCaseStatusMock, getCampaignForCaseMock, sendViaMailboxMock, scheduleFirstFollowupMock,
+    updateLeadStageMock, recomputeCaseStatusMock, getCampaignForCaseMock, sendViaMailboxMock, scheduleFirstFollowupMock,
     enqueueCrmSyncMock, logEventSafeMock, getSequenceByLeadIdMock, advanceSequenceMock, stopSequenceMock,
     publishDelayMock,
   ]) {
@@ -79,11 +85,13 @@ beforeEach(() => {
   claimWaitingOutboundEmailMock.mockResolvedValue(waitingEmail({ status: 'queued' }))
   sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: 'pm1', threadId: 'thr1' })
   hasInboundReplyMock.mockResolvedValue(false)
+  recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: true })
 })
 
 describe('sweepFailedFirstTouch — first touch', () => {
   it('should resend a stranded lead on an already-contacted case without re-flipping status', async () => {
     listWaitingOutboundEmailsMock.mockResolvedValue([waitingEmail()])
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: false })
 
     const results = await sweepFailedFirstTouch(SUPABASE, 50)
 
@@ -95,8 +103,8 @@ describe('sweepFailedFirstTouch — first touch', () => {
       providerMessageId: 'pm1', threadId: 'thr1', mailboxId: 'm1',
     })
     expect(scheduleFirstFollowupMock).toHaveBeenCalledWith(SUPABASE, { clientId: 'c1', caseId: 'case1', leadId: 'lead1' })
-    // Case is already 'contacted' — must not re-transition or re-fire CRM sync.
-    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).toHaveBeenCalledWith(SUPABASE, 'lead1', { stage: 'contacted' })
+    // Case is already 'contacted' — recompute reports no change, so no re-fired CRM sync.
     expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
     expect(results).toEqual([{ emailId: 'e1', outcome: 'sent' }])
   })
@@ -104,14 +112,16 @@ describe('sweepFailedFirstTouch — first touch', () => {
   it('should advance a still-pre-contact case to contacted and fire the CRM sync on send', async () => {
     listWaitingOutboundEmailsMock.mockResolvedValue([waitingEmail()])
     getCaseByIdMock.mockResolvedValue({ id: 'case1', status: 'waiting' })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: true })
 
     await sweepFailedFirstTouch(SUPABASE, 50)
 
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(SUPABASE, 'case1', 'contacted')
+    expect(updateLeadStageMock).toHaveBeenCalledWith(SUPABASE, 'lead1', { stage: 'contacted' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(SUPABASE, 'case1')
     expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
   })
 
-  it('should mark the email waiting again (not failed) and report rate_limited, without touching case status, on a cap/gate failure', async () => {
+  it('should mark the email waiting again (not failed) and report rate_limited, without touching lead/case bookkeeping, on a cap/gate failure', async () => {
     listWaitingOutboundEmailsMock.mockResolvedValue([waitingEmail()])
     sendViaMailboxMock.mockRejectedValue(new AppError('RATE_LIMITED', 'All mailboxes at daily cap', {}))
 
@@ -119,7 +129,8 @@ describe('sweepFailedFirstTouch — first touch', () => {
 
     expect(markEmailWaitingMock).toHaveBeenCalledWith(SUPABASE, 'e1')
     expect(markEmailFailedMock).not.toHaveBeenCalled()
-    expect(updateCaseStatusMock).not.toHaveBeenCalled()
+    expect(updateLeadStageMock).not.toHaveBeenCalled()
+    expect(recomputeCaseStatusMock).not.toHaveBeenCalled()
     expect(results).toEqual([{ emailId: 'e1', outcome: 'rate_limited' }])
   })
 
@@ -300,14 +311,25 @@ describe('sweepFailedFirstTouch — follow-up steps', () => {
     claimWaitingOutboundEmailMock.mockResolvedValue({ id: 'e3', subject: 'Re: Hi there', body: 'Body text', thread_id: 'thr1' })
     getSequenceByLeadIdMock.mockResolvedValue({ id: 'seq1', lead_id: 'lead1', followup_delays_days: [3, 7, 14] })
     listThreadEmailsMock.mockResolvedValue([{ id: 'e1', direction: 'outbound', provider_message_id: 'pm-orig', thread_id: 'thr1' }])
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'dead', didChange: true })
 
     const results = await sweepFailedFirstTouch(SUPABASE, 50)
 
     expect(results).toEqual([{ emailId: 'e3', outcome: 'sent' }])
     expect(stopSequenceMock).toHaveBeenCalledWith(SUPABASE, 'seq1', 'stopped')
-    expect(updateCaseStatusMock).toHaveBeenCalledWith(SUPABASE, 'case1', 'dead')
+    expect(updateLeadStageMock).toHaveBeenCalledWith(SUPABASE, 'lead1', { stage: 'dead' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(SUPABASE, 'case1')
     expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'dead')
     expect(advanceSequenceMock).not.toHaveBeenCalled()
+  })
+
+  it('should not enqueue a CRM sync when recompute reports the case was already contacted', async () => {
+    listWaitingOutboundEmailsMock.mockResolvedValue([waitingEmail()])
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: false })
+
+    await sweepFailedFirstTouch(SUPABASE, 50)
+
+    expect(enqueueCrmSyncMock).not.toHaveBeenCalled()
   })
 
   it('should skip, stop the sequence, and mark the email failed when a reply arrived while the step sat waiting', async () => {
@@ -380,5 +402,22 @@ describe('sweepFailedFirstTouch — follow-up steps', () => {
     expect(logEventSafeMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'pipeline.resend_failed.error', payload: expect.objectContaining({ emailId: 'e1' }),
     }))
+  })
+
+  // Regression: a scheduleFirstFollowup failure used to short-circuit
+  // updateLeadStage/recomputeCaseStatus entirely — this row will never be
+  // 'waiting' again (it's now 'sent'), so those writes must land before
+  // scheduling is even attempted, not depend on it succeeding.
+  it('should still advance the lead/case even when follow-up scheduling throws after a real send', async () => {
+    listWaitingOutboundEmailsMock.mockResolvedValue([waitingEmail()])
+    getCaseByIdMock.mockResolvedValue({ id: 'case1', status: 'waiting' })
+    recomputeCaseStatusMock.mockResolvedValue({ status: 'contacted', didChange: true })
+    scheduleFirstFollowupMock.mockRejectedValue(new Error('qstash down'))
+
+    await sweepFailedFirstTouch(SUPABASE, 50)
+
+    expect(updateLeadStageMock).toHaveBeenCalledWith(SUPABASE, 'lead1', { stage: 'contacted' })
+    expect(recomputeCaseStatusMock).toHaveBeenCalledWith(SUPABASE, 'case1')
+    expect(enqueueCrmSyncMock).toHaveBeenCalledWith('case1', 'contacted')
   })
 })

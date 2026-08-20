@@ -25,6 +25,8 @@ function makeLead(id: string, fullName: string): LeadRow {
     email_verified_at: null,
     email_verification: null,
     status: 'active',
+    stage: null,
+    wait_reason: null,
     created_at: '2026-08-01T00:00:00.000Z',
     updated_at: '2026-08-01T00:00:00.000Z',
   }

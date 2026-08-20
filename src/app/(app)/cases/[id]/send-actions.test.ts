@@ -17,7 +17,8 @@ const markEmailFailed = vi.fn()
 const sendViaMailbox = vi.fn()
 const scheduleFirstFollowup = vi.fn()
 const requestFollowupSkip = vi.fn()
-const claimCaseContactedFrom = vi.fn()
+const updateLeadStage = vi.fn()
+const recomputeCaseStatus = vi.fn()
 const enqueueCrmSync = vi.fn()
 const revalidatePath = vi.fn()
 
@@ -25,12 +26,17 @@ vi.mock('@/lib/auth/require-user', () => ({ requireUser: () => requireUser() }))
 vi.mock('@/lib/supabase/server', () => ({ createServerClient: () => Promise.resolve({}) }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('next/cache', () => ({ revalidatePath: (...a: unknown[]) => revalidatePath(...a) }))
+const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
 vi.mock('@/lib/db/cases', () => ({
   getCaseById: (...a: unknown[]) => getCaseById(...a),
-  claimCaseContactedFrom: (...a: unknown[]) => claimCaseContactedFrom(...a),
+  recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatus(...a),
+  isCrmSyncStatus: (status: string) => mockCrmSyncStatuses.includes(status),
 }))
 vi.mock('@/lib/crm/sync', () => ({ enqueueCrmSync: (...a: unknown[]) => enqueueCrmSync(...a) }))
-vi.mock('@/lib/db/leads', () => ({ getLeadById: (...a: unknown[]) => getLeadById(...a) }))
+vi.mock('@/lib/db/leads', () => ({
+  getLeadById: (...a: unknown[]) => getLeadById(...a),
+  updateLeadStage: (...a: unknown[]) => updateLeadStage(...a),
+}))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCase(...a) }))
 vi.mock('@/lib/db/emails', () => ({
   listThreadEmails: (...a: unknown[]) => listThreadEmails(...a),
@@ -86,7 +92,7 @@ beforeEach(() => {
   claimOutboundEmail.mockResolvedValue({ id: 'e1' })
   insertManualEmail.mockResolvedValue({ id: 'e2' })
   sendViaMailbox.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<pm@mail>', threadId: 'thr1' })
-  claimCaseContactedFrom.mockResolvedValue(true)
+  recomputeCaseStatus.mockResolvedValue({ status: 'contacted', didChange: true })
 })
 
 describe('sendManualEmail — authorization', () => {
@@ -159,37 +165,24 @@ describe('sendManualEmail — first touch', () => {
     expect(scheduleFirstFollowup).toHaveBeenCalledWith(expect.anything(), {
       clientId: 'c1', caseId: CASE_ID, leadId: LEAD_ID,
     })
-    expect(claimCaseContactedFrom).toHaveBeenCalledWith(
-      expect.anything(), CASE_ID, ['new', 'researching', 'ready', 'writing', 'waiting'],
-    )
+    expect(updateLeadStage).toHaveBeenCalledWith(expect.anything(), LEAD_ID, { stage: 'contacted' })
+    expect(recomputeCaseStatus).toHaveBeenCalledWith(expect.anything(), CASE_ID)
     expect(requestFollowupSkip).not.toHaveBeenCalled()
   })
 
-  it('should claim atomically against the DB regardless of the case row read earlier in the request, not a stale in-memory status check', async () => {
-    // Regression test for the race this fix closes: the case can advance
-    // past first contact (another lead's reply/approval) between the read at
-    // the top of the request and this point — status pulled from the
-    // request's own `kase` snapshot is no longer what gates the claim.
-    getCaseById.mockResolvedValue({ id: CASE_ID, client_id: 'c1', status: 'writing' })
-    await sendManualEmail(form())
-    expect(claimCaseContactedFrom).toHaveBeenCalledWith(
-      expect.anything(), CASE_ID, ['new', 'researching', 'ready', 'writing', 'waiting'],
-    )
-  })
-
-  it('should fire the CRM sync when the atomic claim wins', async () => {
-    claimCaseContactedFrom.mockResolvedValue(true)
+  it('should fire the CRM sync when recompute reports a real transition', async () => {
+    recomputeCaseStatus.mockResolvedValue({ status: 'contacted', didChange: true })
     await sendManualEmail(form())
     // Mirrors approveDraft: the case's first real contact must fire the same
     // CRM sync a draft approval would have, manual send included.
     expect(enqueueCrmSync).toHaveBeenCalledWith(CASE_ID, 'contacted')
   })
 
-  it('should not fire the CRM sync when the atomic claim loses (case already past first contact)', async () => {
+  it('should not fire the CRM sync when recompute reports no change (case already past first contact)', async () => {
     // e.g. another lead on the same case already advanced it to
-    // in_conversation/won/etc. between the earlier read and this claim —
+    // in_conversation/won/etc. between the earlier read and this write —
     // must not double-fire (or wrongly fire) the sync.
-    claimCaseContactedFrom.mockResolvedValue(false)
+    recomputeCaseStatus.mockResolvedValue({ status: 'in_conversation', didChange: false })
     await sendManualEmail(form())
     expect(enqueueCrmSync).not.toHaveBeenCalled()
   })
@@ -202,14 +195,14 @@ describe('sendManualEmail — first touch', () => {
 
     await expect(sendManualEmail(form())).resolves.toEqual({ ok: true })
 
-    expect(claimCaseContactedFrom).toHaveBeenCalled()
+    expect(recomputeCaseStatus).toHaveBeenCalled()
     expect(enqueueCrmSync).toHaveBeenCalledWith(CASE_ID, 'contacted')
   })
 
-  it('should not fail the send when the atomic claim itself throws', async () => {
+  it('should not fail the send when advancing the lead/case stage itself throws', async () => {
     // Best-effort past the point mail is already sent — a bookkeeping
     // failure must not surface to the client as a failed send.
-    claimCaseContactedFrom.mockRejectedValue(new Error('db down'))
+    recomputeCaseStatus.mockRejectedValue(new Error('db down'))
     await expect(sendManualEmail(form())).resolves.toEqual({ ok: true })
     expect(enqueueCrmSync).not.toHaveBeenCalled()
   })
@@ -229,7 +222,8 @@ describe('sendManualEmail — interjection', () => {
     )
     expect(requestFollowupSkip).toHaveBeenCalledWith(expect.anything(), LEAD_ID)
     expect(scheduleFirstFollowup).not.toHaveBeenCalled()
-    expect(claimCaseContactedFrom).not.toHaveBeenCalled()
+    expect(updateLeadStage).not.toHaveBeenCalled()
+    expect(recomputeCaseStatus).not.toHaveBeenCalled()
     expect(markEmailSent).toHaveBeenCalledWith(expect.anything(), 'e2', expect.anything())
   })
 

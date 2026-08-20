@@ -7,6 +7,7 @@ import { CASE_STATUS } from '@/lib/ui/status'
 import { formatAbsolute, formatRelative, truncate } from '@/lib/format'
 import type { Database } from '@/types/database'
 import { cn } from '@/lib/utils'
+import { buildStageBadges, type LeadStage } from '@/lib/ui/lead-stage-badges'
 
 type CaseStatus = Database['public']['Enums']['case_status']
 
@@ -14,6 +15,7 @@ interface CaseRowLead {
   id: string
   full_name: string
   title: string | null
+  stage: LeadStage | null
 }
 
 interface CaseRowProps {
@@ -48,6 +50,9 @@ export async function CaseRow({
 }: CaseRowProps): Promise<React.ReactElement> {
   const t = await getTranslations('crm')
   const lead = leads[0]
+  const stageBadges = buildStageBadges(
+    leads.map((l) => l.stage).filter((stage): stage is LeadStage => stage !== null),
+  )
 
   return (
     <Link
@@ -73,6 +78,14 @@ export async function CaseRow({
       </p>
 
       <StatusPill meta={CASE_STATUS[status]} className="ml-auto shrink-0 xl:ml-0" />
+
+      {stageBadges.length > 1 ? (
+        <span className="hidden shrink-0 items-center gap-1 lg:flex">
+          {stageBadges.map((stage) => (
+            <StatusPill key={stage} meta={CASE_STATUS[stage]} className="shrink-0" />
+          ))}
+        </span>
+      ) : null}
 
       <span className="text-faint hidden shrink-0 items-center gap-1.5 text-[11px] lg:flex">
         <Users size={12} weight="light" />

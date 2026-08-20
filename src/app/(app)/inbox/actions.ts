@@ -17,8 +17,8 @@ import {
   type EmailRow,
 } from '@/lib/db/emails'
 import { getCampaignForCase } from '@/lib/db/campaigns'
-import { getLeadById } from '@/lib/db/leads'
-import { claimCaseContacted, updateCaseWaiting } from '@/lib/db/cases'
+import { getLeadById, updateLeadStage } from '@/lib/db/leads'
+import { recomputeCaseStatus, isCrmSyncStatus } from '@/lib/db/cases'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox } from '@/lib/mailbox/sender'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from '@/lib/pipeline/followup'
@@ -170,7 +170,11 @@ export async function approveDraft(formData: FormData): Promise<ApproveDraftResu
         await markEmailWaiting(supabase, email.id)
       }
       try {
-        await updateCaseWaiting(supabase, email.case_id, 'awaiting_resend')
+        await updateLeadStage(supabase, email.lead_id, { stage: 'waiting', waitReason: 'awaiting_resend' })
+        const recompute = await recomputeCaseStatus(supabase, email.case_id)
+        if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+          await enqueueCrmSync(email.case_id, recompute.status)
+        }
       } catch (waitError) {
         await logEventSafe({
           clientId: email.client_id,
@@ -200,27 +204,45 @@ export async function approveDraft(formData: FormData): Promise<ApproveDraftResu
   // where the case (and its CRM sync) previously claimed 'contacted' the
   // moment a draft was written, before any human approved it.
   if (email.sequence_step === FIRST_TOUCH_STEP) {
+    // Follow-up scheduling and lead/case advancement are independently
+    // recoverable: scheduleFirstFollowup is idempotent (createSequence
+    // no-ops if a sequence already exists), so a failure here must not stop
+    // updateLeadStage/recomputeCaseStatus from running below — the email is
+    // already sent, and those are the write that actually reflects it.
     try {
       await scheduleFirstFollowup(supabase, {
         clientId: email.client_id,
         caseId: email.case_id,
         leadId: email.lead_id,
       })
-      // Atomic conditional update, not read-then-write: two concurrent
-      // approvals for different leads on the same case (each reaching this
-      // point via its own claimDraftForSend) must not both pass a stale
-      // status read and double-fire the CRM sync. Only the approval whose
-      // update actually flips the case to 'contacted' gets true here.
-      const advancedToContacted = await claimCaseContacted(supabase, email.case_id)
-      if (advancedToContacted) {
-        await enqueueCrmSync(email.case_id, 'contacted')
-      }
     } catch (error) {
       await logEventSafe({
         clientId: email.client_id,
         caseId: email.case_id,
         actor: 'inbox_approve_draft',
         type: 'inbox.schedule_followup_failed',
+        payload: { emailId: email.id, cause: error instanceof Error ? error.message : String(error) },
+      })
+    }
+
+    try {
+      await updateLeadStage(supabase, email.lead_id, { stage: 'contacted' })
+      // recomputeCaseStatus is itself the atomic, race-safe step: two
+      // concurrent approvals for different leads on the same case each
+      // write their own lead's stage, then each call recompute, which
+      // row-locks the case — only whichever recompute actually flips the
+      // case's status reports didChange: true, so the CRM sync still fires
+      // exactly once per real transition, not once per approval.
+      const recompute = await recomputeCaseStatus(supabase, email.case_id)
+      if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+        await enqueueCrmSync(email.case_id, recompute.status)
+      }
+    } catch (error) {
+      await logEventSafe({
+        clientId: email.client_id,
+        caseId: email.case_id,
+        actor: 'inbox_approve_draft',
+        type: 'inbox.lead_advance_failed',
         payload: { emailId: email.id, cause: error instanceof Error ? error.message : String(error) },
       })
     }

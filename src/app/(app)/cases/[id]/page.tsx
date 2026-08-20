@@ -242,6 +242,7 @@ export default async function CasePage({
                     ) : null}
                     <div className="mt-2 flex items-center gap-2">
                       <StatusPill meta={leadEmailStatusMetaFor(lead.email_status, appUser.role)} />
+                      {lead.stage ? <StatusPill meta={CASE_STATUS[lead.stage]} /> : null}
                       {lead.linkedin_url ? (
                         <a
                           href={lead.linkedin_url}

@@ -8,8 +8,8 @@ import { requireUser } from '@/lib/auth/require-user'
 import type { AppUser } from '@/lib/db/app-users'
 import { createServerClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCaseById, claimCaseContactedFrom, type CaseRow, type CaseStatus } from '@/lib/db/cases'
-import { getLeadById } from '@/lib/db/leads'
+import { getCaseById, recomputeCaseStatus, isCrmSyncStatus, type CaseRow } from '@/lib/db/cases'
+import { getLeadById, updateLeadStage } from '@/lib/db/leads'
 import { getCampaignForCase, type CampaignRow } from '@/lib/db/campaigns'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import {
@@ -32,22 +32,6 @@ import { MAX_ATTACHMENTS_PER_EMAIL } from '@/lib/mailbox/attachments'
 import { AppError, isAppError, type AppErrorCode } from '@/lib/errors/app-error'
 import { logEventSafe } from '@/lib/events/log-event'
 import { MAX_SUBJECT_CHARS, MAX_BODY_CHARS } from '@/lib/validation/email-limits'
-
-// Statuses a manual first touch advances to 'contacted'. A case already past
-// this point keeps whatever the pipeline gave it — a manual email is not a
-// reason to walk an in-conversation/won/lost/etc. case backwards. 'writing'
-// included: it means the automated write pipeline has this case claimed and
-// may be mid-send — a human's manual first touch is just as much "this case
-// has now been contacted" as the automated one would have produced.
-// 'waiting' (added alongside the outreach waiting system) covers a case
-// blocked on the mailbox gate/cap/health, or on a human's own draft approval
-// — a manual send from here is exactly the rescue path for the first three.
-// Passed straight to claimCaseContactedFrom's atomic `.in('status', ...)`
-// claim — not read as an in-memory pre-check — so a case that advanced past
-// this list between the earlier `getCaseById` read and this point (another
-// lead's reply/approval on the same case) is re-verified against its live
-// DB status, not a stale snapshot.
-const PRE_CONTACT_STATUSES: readonly CaseStatus[] = ['new', 'researching', 'ready', 'writing', 'waiting']
 
 const sendSchema = z.object({
   caseId: z.string().uuid(),
@@ -349,22 +333,17 @@ async function finalizeManualSend(
     // 'new'/'writing'/'waiting' just because scheduleFirstFollowup (a
     // separate, best-effort QStash publish) happened to throw.
     //
-    // Atomic conditional update, not read-then-write: `input.kase.status` is
-    // a snapshot from earlier in the request (loadAuthorizedSendTargets), and
-    // this case can advance past first contact in the meantime — a reply or
-    // an approval on another lead sharing the same case. Reading that stale
-    // status here would let this call "win" a claim the case has already
-    // moved past. Only the call whose update actually flips the case to
-    // 'contacted' gets true and should fire the CRM sync — same pattern as
-    // approveDraft (inbox/actions.ts) and claimCaseContacted.
     try {
-      const advancedToContacted = await claimCaseContactedFrom(supabase, input.caseId, PRE_CONTACT_STATUSES)
-      if (advancedToContacted) {
-        // Mirrors approveDraft (inbox/actions.ts): a manual send is just as
-        // much "this case has now been contacted" as an approved draft, and
-        // must fire the same CRM sync — including the waiting case this
-        // manual send exists to rescue.
-        await enqueueCrmSync(input.caseId, 'contacted')
+      await updateLeadStage(supabase, input.leadId, { stage: 'contacted' })
+      // Mirrors approveDraft (inbox/actions.ts): a manual send is just as
+      // much "this case has now been contacted" as an approved draft, and
+      // must fire the same CRM sync — including the waiting case this
+      // manual send exists to rescue. recomputeCaseStatus's row lock is
+      // what makes this race-safe against another lead's concurrent event
+      // on the same case, same as approveDraft.
+      const recompute = await recomputeCaseStatus(supabase, input.caseId)
+      if (recompute.didChange && isCrmSyncStatus(recompute.status)) {
+        await enqueueCrmSync(input.caseId, recompute.status)
       }
     } catch (error) {
       await logManualBookkeepingFailure(input, error)

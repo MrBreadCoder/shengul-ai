@@ -112,63 +112,13 @@ export async function updateCaseWaiting(
   }
 }
 
-// Atomic first-contact claim: only the caller whose update actually flips
-// status != 'contacted' -> 'contacted' gets true and should fire the CRM
-// sync (approveDraft, first touch). A read-then-write ('read status, then
-// write if not contacted') lets two concurrent approvals for different
-// leads on the same case both pass the read before either writes, double-
-// firing the sync — this closes that race the same way claimCollisionNotice
-// closes its own.
-export async function claimCaseContacted(
-  supabase: SupabaseClient<Database>,
-  caseId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('cases')
-    .update({ status: 'contacted', wait_reason: null, updated_at: new Date().toISOString() })
-    .eq('id', caseId)
-    .neq('status', 'contacted')
-    .select('id')
-  if (error) {
-    throw new AppError('DB_ERROR', 'Failed to claim case contacted transition', { caseId, cause: error.message })
-  }
-  return (data?.length ?? 0) > 0
-}
-
-// Same atomic shape as claimCaseContacted, but restricted to an explicit
-// allowlist of source statuses instead of "anything not already contacted".
-// A manual first-touch send (send-actions.ts) must not walk a case already
-// past first contact — in_conversation/hot_handoff/won/lost/dead — back down
-// to 'contacted' just because one lead on a multi-lead case had never had
-// its own first-touch outbound; claimCaseContacted's broad `!= contacted`
-// would incorrectly claim (and regress) those. A read-then-write against a
-// stale `kase.status` snapshot has the same race claimCaseContacted's own
-// comment describes — this closes it for callers with a narrower claim rule.
-export async function claimCaseContactedFrom(
-  supabase: SupabaseClient<Database>,
-  caseId: string,
-  fromStatuses: readonly CaseStatus[],
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('cases')
-    .update({ status: 'contacted', wait_reason: null, updated_at: new Date().toISOString() })
-    .eq('id', caseId)
-    .in('status', fromStatuses)
-    .select('id')
-  if (error) {
-    throw new AppError('DB_ERROR', 'Failed to claim case contacted transition', { caseId, cause: error.message })
-  }
-  return (data?.length ?? 0) > 0
-}
-
 // Atomic write claim: only the caller whose update actually flips a
 // ready/retryable-waiting case to 'writing' gets the row back and should
 // proceed to runWriteForCase. A read-then-write ('read status, then write
 // unconditionally') lets two concurrent deliveries for the same case — a
 // retried QStash message racing the original, or overlapping fanout ticks —
 // both pass the read before either claims, so both would call
-// runWriteForCase and could double-send. Same pattern as claimCaseContacted,
-// against the criteria write-fanout itself dispatches on.
+// runWriteForCase and could double-send.
 export async function claimCaseForWriting(
   supabase: SupabaseClient<Database>,
   caseId: string,
@@ -226,6 +176,53 @@ export async function listCasesByStatus(
     throw new AppError('DB_ERROR', 'Failed to list cases by status', { status, cause: error.message })
   }
   return data ?? []
+}
+
+// Every status an existing call site fired enqueueCrmSync for, before this
+// redesign. Preserved exactly -- CRM sync traffic must not change shape as
+// a side effect of centralizing the rollup rule. Named as its own literal
+// union (not just `readonly CaseStatus[]`) so isCrmSyncStatus below can
+// narrow a CaseStatus down to it -- every member here is also a valid
+// CrmSyncReason (src/lib/crm/sync.ts), so the narrowed value type-checks
+// straight into enqueueCrmSync's reason parameter without a cast.
+export type CrmSyncCaseStatus = 'contacted' | 'in_conversation' | 'hot_handoff' | 'won' | 'lost' | 'dead'
+
+export const CRM_SYNC_STATUSES: readonly CrmSyncCaseStatus[] = [
+  'contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead',
+]
+
+// Type-guard form of the CRM_SYNC_STATUSES membership check -- `.includes()`
+// alone reports a boolean but doesn't narrow recompute.status's type, and
+// CaseStatus has values (new/researching/ready/writing/waiting) that aren't
+// valid CrmSyncReasons, so callers need this to pass a recomputed status to
+// enqueueCrmSync without an unsafe cast.
+export function isCrmSyncStatus(status: CaseStatus): status is CrmSyncCaseStatus {
+  return (CRM_SYNC_STATUSES as readonly CaseStatus[]).includes(status)
+}
+
+export interface CaseRecomputeResult {
+  status: CaseStatus
+  didChange: boolean
+}
+
+// The one place every pipeline stage now goes to update a case's status,
+// instead of writing it directly -- see recompute_case_status (migration
+// 0054) and docs/superpowers/specs/2026-08-20-per-contact-case-status-design.md.
+// Callers must check didChange (paired with CRM_SYNC_STATUSES) before
+// firing enqueueCrmSync -- recompute runs on every per-contact event, most
+// of which don't actually move the case's summary status.
+export async function recomputeCaseStatus(
+  supabase: SupabaseClient<Database>,
+  caseId: string,
+): Promise<CaseRecomputeResult> {
+  const { data, error } = await supabase.rpc('recompute_case_status', { p_case_id: caseId })
+  if (error) {
+    throw new AppError('DB_ERROR', 'Failed to recompute case status', { caseId, cause: error.message })
+  }
+  if (!data) {
+    throw new AppError('DB_ERROR', 'recompute_case_status returned no row', { caseId })
+  }
+  return { status: data.status, didChange: data.did_change }
 }
 
 // Cases stranded mid-research/write (see migration 0006). Delegates the

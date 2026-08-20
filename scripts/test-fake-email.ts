@@ -155,6 +155,8 @@ function buildFakeLead(): LeadRow {
     email_verified_at: new Date().toISOString(),
     email_verification: null,
     status: 'active',
+    stage: null,
+    wait_reason: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }

@@ -8,9 +8,10 @@ import {
   listStuckCases,
   countCasesForCampaign,
   claimCollisionNotice,
-  claimCaseContacted,
-  claimCaseContactedFrom,
   claimCaseForWriting,
+  recomputeCaseStatus,
+  CRM_SYNC_STATUSES,
+  isCrmSyncStatus,
 } from './cases'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -271,94 +272,6 @@ describe('claimCollisionNotice', () => {
   })
 })
 
-function mockContactedClaim(result: { data: unknown; error: unknown }) {
-  const neqCalls: unknown[] = []
-  const supabase = {
-    from: () => ({
-      update: () => ({
-        eq: () => ({
-          neq: (...a: unknown[]) => {
-            neqCalls.push(a)
-            return { select: () => Promise.resolve(result) }
-          },
-        }),
-      }),
-    }),
-  } as never
-  return { supabase, neqCalls }
-}
-
-describe('claimCaseContacted', () => {
-  it('should return true when this call wins the atomic claim (status was not contacted)', async () => {
-    const { supabase } = mockContactedClaim({ data: [{ id: 'case1' }], error: null })
-    const result = await claimCaseContacted(supabase, 'case1')
-    expect(result).toBe(true)
-  })
-
-  it('should return false when the case is already contacted (no matching row)', async () => {
-    const { supabase } = mockContactedClaim({ data: [], error: null })
-    const result = await claimCaseContacted(supabase, 'case1')
-    expect(result).toBe(false)
-  })
-
-  it('should exclude contacted cases via a status != contacted filter, not a prior read', async () => {
-    const { supabase, neqCalls } = mockContactedClaim({ data: [{ id: 'case1' }], error: null })
-    await claimCaseContacted(supabase, 'case1')
-    expect(neqCalls[0]).toEqual(['status', 'contacted'])
-  })
-
-  it('should throw DB_ERROR when the update errors', async () => {
-    const { supabase } = mockContactedClaim({ data: null, error: { message: 'boom' } })
-    await expect(claimCaseContacted(supabase, 'case1')).rejects.toBeInstanceOf(AppError)
-  })
-})
-
-function mockContactedFromClaim(result: { data: unknown; error: unknown }) {
-  const inCalls: unknown[] = []
-  const supabase = {
-    from: () => ({
-      update: () => ({
-        eq: () => ({
-          in: (...a: unknown[]) => {
-            inCalls.push(a)
-            return { select: () => Promise.resolve(result) }
-          },
-        }),
-      }),
-    }),
-  } as never
-  return { supabase, inCalls }
-}
-
-describe('claimCaseContactedFrom', () => {
-  it('should return true when this call wins the atomic claim (status was one of the given source statuses)', async () => {
-    const { supabase } = mockContactedFromClaim({ data: [{ id: 'case1' }], error: null })
-    const result = await claimCaseContactedFrom(supabase, 'case1', ['new', 'ready'])
-    expect(result).toBe(true)
-  })
-
-  it('should return false when the case is not in one of the given source statuses (no matching row)', async () => {
-    const { supabase } = mockContactedFromClaim({ data: [], error: null })
-    const result = await claimCaseContactedFrom(supabase, 'case1', ['new', 'ready'])
-    expect(result).toBe(false)
-  })
-
-  it('should restrict the claim to exactly the given source statuses, not every non-contacted status', async () => {
-    // Load-bearing: a case already past first contact (in_conversation/
-    // hot_handoff/won/lost/dead) must never be walked back to 'contacted' —
-    // unlike claimCaseContacted's broad `!= contacted`, this claims only from
-    // an explicit allowlist.
-    const { supabase, inCalls } = mockContactedFromClaim({ data: [{ id: 'case1' }], error: null })
-    await claimCaseContactedFrom(supabase, 'case1', ['new', 'researching', 'ready', 'writing', 'waiting'])
-    expect(inCalls[0]).toEqual(['status', ['new', 'researching', 'ready', 'writing', 'waiting']])
-  })
-
-  it('should throw DB_ERROR when the update errors', async () => {
-    const { supabase } = mockContactedFromClaim({ data: null, error: { message: 'boom' } })
-    await expect(claimCaseContactedFrom(supabase, 'case1', ['new'])).rejects.toBeInstanceOf(AppError)
-  })
-})
-
 function mockWritingClaim(result: { data: unknown; error: unknown }) {
   const orCalls: unknown[][] = []
   const supabase = {
@@ -400,5 +313,67 @@ describe('claimCaseForWriting', () => {
   it('should throw DB_ERROR when the update errors', async () => {
     const { supabase } = mockWritingClaim({ data: null, error: { message: 'boom' } })
     await expect(claimCaseForWriting(supabase, 'case1')).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+function mockRpcRecompute(result: { data: unknown; error: unknown }) {
+  return { rpc: (...a: unknown[]) => { void a; return Promise.resolve(result) } } as never
+}
+
+describe('recomputeCaseStatus', () => {
+  it('should return the status and didChange from the RPC', async () => {
+    const result = await recomputeCaseStatus(
+      mockRpcRecompute({ data: { status: 'contacted', did_change: true }, error: null }),
+      'case-1',
+    )
+    expect(result).toEqual({ status: 'contacted', didChange: true })
+  })
+
+  it('should return didChange: false when the RPC reports no change', async () => {
+    const result = await recomputeCaseStatus(
+      mockRpcRecompute({ data: { status: 'won', did_change: false }, error: null }),
+      'case-2',
+    )
+    expect(result).toEqual({ status: 'won', didChange: false })
+  })
+
+  it('should throw DB_ERROR when the RPC errors', async () => {
+    await expect(
+      recomputeCaseStatus(mockRpcRecompute({ data: null, error: { message: 'boom' } }), 'case-3'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+
+  it('should throw DB_ERROR when the RPC returns no row', async () => {
+    await expect(
+      recomputeCaseStatus(mockRpcRecompute({ data: null, error: null }), 'case-4'),
+    ).rejects.toBeInstanceOf(AppError)
+  })
+})
+
+describe('CRM_SYNC_STATUSES', () => {
+  it('should include every status the CRM sync historically fired for', () => {
+    expect(CRM_SYNC_STATUSES).toEqual(
+      expect.arrayContaining(['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']),
+    )
+  })
+
+  it('should exclude waiting, since no existing call site synced on it', () => {
+    expect(CRM_SYNC_STATUSES).not.toContain('waiting')
+  })
+})
+
+describe('isCrmSyncStatus', () => {
+  it('should return true for every status in CRM_SYNC_STATUSES', () => {
+    for (const status of CRM_SYNC_STATUSES) {
+      expect(isCrmSyncStatus(status)).toBe(true)
+    }
+  })
+
+  it('should return false for a pre-outreach or waiting status', () => {
+    expect(isCrmSyncStatus('new')).toBe(false)
+    expect(isCrmSyncStatus('researching')).toBe(false)
+    expect(isCrmSyncStatus('ready')).toBe(false)
+    expect(isCrmSyncStatus('writing')).toBe(false)
+    expect(isCrmSyncStatus('waiting')).toBe(false)
   })
 })

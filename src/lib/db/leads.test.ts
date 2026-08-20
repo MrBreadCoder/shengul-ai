@@ -11,6 +11,7 @@ import {
   countLeadsForCampaign,
   listOtherActiveLeadsForCollisionNotice,
   listRecentLeadsForClient,
+  updateLeadStage,
 } from './leads'
 import { AppError } from '@/lib/errors/app-error'
 
@@ -508,5 +509,46 @@ describe('listRecentLeadsForClient', () => {
     await listRecentLeadsForClient(localSupabase, { limit: 5 })
 
     expect(eqCalls).toContainEqual(['status', 'active'])
+  })
+})
+
+function mockSupabaseForUpdate(result: { error: unknown }) {
+  const calls: { table: string; payload: unknown; leadId: string }[] = []
+  return {
+    client: {
+      from: (table: string) => ({
+        update: (payload: unknown) => ({
+          eq: (_column: string, leadId: string) => {
+            calls.push({ table, payload, leadId })
+            return Promise.resolve(result)
+          },
+        }),
+      }),
+    } as never,
+    calls,
+  }
+}
+
+describe('updateLeadStage', () => {
+  it('should write the stage with a null wait_reason for a non-waiting stage', async () => {
+    const { client, calls } = mockSupabaseForUpdate({ error: null })
+    await updateLeadStage(client, 'lead-1', { stage: 'contacted' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.table).toBe('leads')
+    expect(calls[0]?.leadId).toBe('lead-1')
+    expect(calls[0]?.payload).toMatchObject({ stage: 'contacted', wait_reason: null })
+  })
+
+  it('should write the stage and reason for a waiting stage', async () => {
+    const { client, calls } = mockSupabaseForUpdate({ error: null })
+    await updateLeadStage(client, 'lead-2', { stage: 'waiting', waitReason: 'awaiting_resend' })
+    expect(calls[0]?.payload).toMatchObject({ stage: 'waiting', wait_reason: 'awaiting_resend' })
+  })
+
+  it('should throw AppError when the update fails', async () => {
+    const { client } = mockSupabaseForUpdate({ error: { message: 'boom' } })
+    await expect(
+      updateLeadStage(client, 'lead-3', { stage: 'lost' }),
+    ).rejects.toBeInstanceOf(AppError)
   })
 })
