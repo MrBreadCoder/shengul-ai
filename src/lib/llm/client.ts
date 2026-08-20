@@ -139,6 +139,30 @@ async function logLlmFailure(
   })
 }
 
+// The AI SDK's own internal retry (generateObject/generateText, default
+// maxRetries: 2) swallows the original APICallError once ITS retries are
+// exhausted: `retryWithExponentialBackoff`'s default `createRetryError`
+// (@ai-sdk/provider-utils) throws a bare `new Error(message)` — the
+// original error's text gets folded into "Failed after N attempts. Last
+// error: ...", but the instance itself, and with it statusCode/isRetryable,
+// is gone. So APICallError.isInstance(cause) below can never match for a
+// call that needed more than one attempt, and a genuinely transient
+// overload (Gemini says so right there in the message) silently loses its
+// overload signal — confirmed both in the AI SDK's own source and in
+// production (2026-08-20: 11 cases in one cycle fell through to the
+// generic failure path instead of handleModelOverload's long retry,
+// purely because they'd needed a retry or two before finally giving up).
+// Fallback: match the phrasing Gemini/Vertex actually returns for a real
+// capacity failure, used only when the structured signal isn't available —
+// a call that DOES give us an APICallError still goes through the precise
+// statusCode/isRetryable check untouched.
+const OVERLOAD_MESSAGE_PATTERN = /high demand|model is overloaded|resource_exhausted|rate limit exceeded/i
+
+function looksLikeOverloadMessage(cause: unknown): boolean {
+  const text = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : ''
+  return OVERLOAD_MESSAGE_PATTERN.test(text)
+}
+
 // Wraps a caught LLM-call failure as an AppError, preserving the underlying
 // APICallError's statusCode/isRetryable (when the SDK gave us one) onto the
 // AppError's context instead of flattening it to a message string — that's
@@ -150,11 +174,14 @@ async function logLlmFailure(
 function toLlmAppError(cause: unknown, message: string, actor: string): AppError {
   if (cause instanceof AppError) return cause
   const apiError = APICallError.isInstance(cause) ? cause : undefined
+  // Only fall back to the message-text match when we have no APICallError
+  // to read a real isRetryable from — never overrides a definite `false`.
+  const isRetryable = apiError ? apiError.isRetryable : looksLikeOverloadMessage(cause) || undefined
   return new AppError('EXTERNAL_ERROR', message, {
     actor,
     cause: cause instanceof Error ? cause.message : String(cause),
     statusCode: apiError?.statusCode,
-    isRetryable: apiError?.isRetryable,
+    isRetryable,
   })
 }
 

@@ -11,7 +11,20 @@ export const runtime = 'nodejs'
 // A research/write loop over a case's leads should finish well within this
 // window; anything older is treated as stranded. Comfortably exceeds the worst
 // case loop time so we never fight a still-running (merely slow) loop.
-const STUCK_THRESHOLD_MINUTES = 30
+//
+// Deliberately NOT a multiple of the cron's own dispatch interval (15 min,
+// see scripts/schedule-stuck-sweep-cron.ts's default `*/15 * * * *`). A
+// requeue's actual DB write lands a few seconds to tens-of-seconds after the
+// tick that triggered it (QStash delivery + route latency, worse for larger
+// batches) — with a 30-minute threshold, the tick meant to catch it again is
+// exactly 2 cron intervals later and fires at that same few-seconds-past-
+// the-mark offset, so the requeue's claim delay routinely outran the next
+// check's own jitter and the case was missed by single-digit seconds, over
+// and over, every cycle (see 2026-08-20 incident, .claude/roadmap.md). Any
+// threshold off the 15-minute grid — this one included — gives the first
+// tick that can possibly cross it several minutes of real margin instead of
+// a few seconds, so batch-claim delay can never eat it again.
+const STUCK_THRESHOLD_MINUTES = 22
 const SWEEP_LIMIT = 100
 
 // Re-queuing is safe under the existing claims: 'researching' → 'new' re-runs

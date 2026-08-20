@@ -400,6 +400,31 @@ describe('overload detection', () => {
     expect((error as AppError).context.isRetryable).toBeUndefined()
   })
 
+  it('should set isRetryable true from message text when the AI SDK exhausted its own retries and lost the APICallError', async () => {
+    // Mirrors retryWithExponentialBackoff's default createRetryError: a bare
+    // Error, not an APICallError instance, with the original error folded
+    // into the message text — see toLlmAppError's comment.
+    generateObjectMock.mockRejectedValue(
+      new Error(
+        'Failed after 3 attempts. Last error: AI_APICallError: This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.',
+      ),
+    )
+    const schema = z.object({ title: z.string() })
+    const error = await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100 })
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(AppError)
+    expect((error as AppError).context.isRetryable).toBe(true)
+    expect(isModelOverloadedError(error)).toBe(true)
+  })
+
+  it('should not treat an unrelated exhausted-retry message as an overload', async () => {
+    generateObjectMock.mockRejectedValue(new Error('Failed after 3 attempts. Last error: invalid request schema'))
+    const schema = z.object({ title: z.string() })
+    const error = await generateJson(ctx, { instructions: 's', prompt: 'p', schema, maxOutputTokens: 100 })
+      .catch((e: unknown) => e)
+    expect(isModelOverloadedError(error)).toBe(false)
+  })
+
   it('should not double-wrap an already-AppError cause (e.g. EXTERNAL_TIMEOUT), so its own context is untouched', async () => {
     generateObjectMock.mockImplementation(
       (args: { abortSignal: AbortSignal }) =>
