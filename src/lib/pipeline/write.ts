@@ -14,6 +14,7 @@ import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
 import { generateJson, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { FIRST_TOUCH_STEP, scheduleFirstFollowup } from './followup'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
+import { sortDossierByPriority } from './dossier'
 import { appendSignatureBlock, resolveSignatureContext } from './signature'
 import { logEventSafe } from '@/lib/events/log-event'
 import { draftSchema, SUBJECT_TARGET_CHARS } from './draft-schema'
@@ -74,20 +75,6 @@ export interface WriteSummary {
   caseId: string
   drafted: number
   sent: number
-}
-
-// Lower number = surfaced first in the dossier text handed to the model. A
-// (pain_point) or (news) fact makes a far sharper personalization hook than
-// a bare (company) firmographic line (industry/size/founding year/location)
-// — putting the sharpest facts first means the model reaches for them before
-// it ever gets to the generic ones, regardless of how well it follows the
-// prioritization instruction in FORMAL_INTRO_SYSTEM_PROMPT's hook beat.
-const DOSSIER_KIND_PRIORITY: Record<Database['public']['Enums']['knowledge_kind'], number> = {
-  pain_point: 0,
-  news: 1,
-  answer: 2,
-  person: 3,
-  company: 4,
 }
 
 // Shared across every template's system prompt so subject-line formatting
@@ -231,7 +218,7 @@ export function buildPrompt(
   knowledge: KnowledgeRow[],
   client: ClientRow | null,
 ): string {
-  const sortedKnowledge = [...knowledge].sort((a, b) => DOSSIER_KIND_PRIORITY[a.kind] - DOSSIER_KIND_PRIORITY[b.kind])
+  const sortedKnowledge = sortDossierByPriority(knowledge)
   const dossier = sortedKnowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n') || '(no dossier facts)'
   return [
     `Recipient: ${lead.full_name}${lead.title ? `, ${lead.title}` : ''} at ${input.companyName}`,

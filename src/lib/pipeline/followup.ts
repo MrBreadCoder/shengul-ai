@@ -21,12 +21,14 @@ import { getClientById } from '@/lib/db/clients'
 import { isSuppressed } from '@/lib/db/suppressions'
 import { getCampaignForCase } from '@/lib/db/campaigns'
 import { recomputeCaseStatus, isCrmSyncStatus } from '@/lib/db/cases'
+import { listKnowledgeForCase } from '@/lib/db/case-knowledge'
 import { enqueueCrmSync } from '@/lib/crm/sync'
 import { sendViaMailbox, type SendViaMailboxResult } from '@/lib/mailbox/sender'
-import { generateText, type LlmCallContext, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
+import { generateText, type LlmCallContext, type GenerateTextArgs, EMAIL_WRITER_MODEL_ID } from '@/lib/llm/client'
 import { publishJsonWithDelay } from '@/lib/qstash/client'
 import { HUMAN_VOICE_INSTRUCTION } from './email-voice'
 import { appendSignatureBlock, resolveSignatureContext } from './signature'
+import { sortDossierByPriority } from './dossier'
 import { logEventSafe } from '@/lib/events/log-event'
 import { DEFAULT_FOLLOWUP_DELAYS_DAYS } from '@/lib/validation/followup-limits'
 
@@ -119,16 +121,24 @@ const SYSTEM_PROMPT = [
   'You write a short, polite follow-up nudge to a cold email that got no reply.',
   'Always write in English, even if the company knowledge below is in another',
   'language — translate any facts you use, never copy foreign-language text.',
-  'Reference the earlier message lightly, add one new angle or question, stay under 60 words.',
+  'Reference the earlier message lightly, then add one new angle or question. Prefer a dossier',
+  'fact below that the original message did not already use over recycling the same company',
+  'capability again. Stay under 60 words.',
   'No pushiness, no bulk markers, no unsubscribe footer.',
+  'Output only the body text, nothing else. Never write a closing line, valediction, name, or',
+  'title of any kind ("Best regards", "Sincerely", "Best," plus a name, etc.) — a signature',
+  'block is appended separately, after you write the body.',
   HUMAN_VOICE_INSTRUCTION,
-  'Call to action: default to a low-friction reply question. Only offer the booking link if',
-  'one is given below, and even then only as an easy option, never a hard ask.',
+  'Call to action: end every message with exactly one low-friction reply question, phrased so',
+  'it can be answered yes or no in one line. Never end on a flat statement with no question.',
+  'Only offer the booking link if one is given below, and even then only as an easy option,',
+  'never a hard ask.',
 ].join(' ')
 
 function buildNudgePrompt(
   priorSubject: string,
   priorBody: string,
+  dossier: string | null,
   valueProp: string | null,
   bookingLink: string | null,
   step: number,
@@ -140,6 +150,7 @@ function buildNudgePrompt(
     `This is follow-up number ${step} (of ${maxStep}).`,
     `Original subject: ${priorSubject}`,
     `Original message:\n${priorBody}`,
+    dossier ? `Additional dossier facts (pick one not already used above for your new angle):\n${dossier}` : '',
     `Our value proposition: ${valueProp ?? 'n/a'}`,
     companyInfo ? `About our company:\n${companyInfo}` : '',
     showBookingLink ? `Booking link (optional CTA): ${bookingLink}` : '',
@@ -147,6 +158,38 @@ function buildNudgePrompt(
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+// Catches a model writing its own closing despite SYSTEM_PROMPT saying not
+// to — it would otherwise collide with the deterministic signature block
+// appendSignatureBlock adds right after this text.
+const CLOSING_LINE_PATTERN = /\b(best regards|kind regards|warm regards|best wishes|sincerely|regards,|thanks,|thank you,)\b/i
+
+// generateText (unlike write.ts's generateJson + draftSchema) returns raw
+// model text with no schema to validate against. This is the only check
+// standing between a truncated/incomplete generation (observed in
+// production: a body cut off mid-sentence, straight into the appended
+// signature) and a live send.
+function isCompleteNudge(body: string): boolean {
+  const trimmed = body.trim()
+  if (trimmed.length === 0) return false
+  if (CLOSING_LINE_PATTERN.test(trimmed)) return false
+  return /[.!?]["')]?$/.test(trimmed)
+}
+
+// One retry before giving up — a single bad generation is common enough
+// (model glitch) that failing the whole step over it would be wasteful, but
+// two in a row means something structural and must not be sent regardless.
+async function generateValidNudge(context: LlmCallContext, args: GenerateTextArgs): Promise<string> {
+  const first = await generateText(context, args)
+  if (isCompleteNudge(first)) return first
+  const retry = await generateText(context, args)
+  if (isCompleteNudge(retry)) return retry
+  throw new AppError('INVARIANT_VIOLATION', 'Follow-up generation produced an incomplete or malformed body twice', {
+    ...context,
+    firstAttempt: first,
+    secondAttempt: retry,
+  })
 }
 
 export async function runFollowupStep(
@@ -262,13 +305,26 @@ export async function runFollowupStep(
 
   // Fetched once, up front — feeds both the prompt's "About our company" line
   // (client.company_info) and the deterministic signature block below.
-  const client = await getClientById(supabase, sequence.client_id)
+  // caseKnowledge gives each nudge a fresh, lead-specific fact to build its
+  // "new angle" from instead of only recycling the campaign-wide value prop
+  // and client-wide company info — without it, every lead on the same
+  // campaign/client nudges from the same two generic inputs and converges on
+  // near-identical wording.
+  const [client, caseKnowledge] = await Promise.all([
+    getClientById(supabase, sequence.client_id),
+    listKnowledgeForCase(supabase, sequence.case_id),
+  ])
+  const sortedKnowledge = sortDossierByPriority(caseKnowledge)
+  const dossier = sortedKnowledge.length > 0
+    ? sortedKnowledge.map((k) => `- (${k.kind}) ${k.content}`).join('\n')
+    : null
   const context: LlmCallContext = { clientId: sequence.client_id, caseId: sequence.case_id, actor: ACTOR }
-  const nudgeBody = await generateText(context, {
+  const nudgeBody = await generateValidNudge(context, {
     instructions: SYSTEM_PROMPT,
     prompt: buildNudgePrompt(
       priorSubject,
       firstOutbound?.body ?? '',
+      dossier,
       campaign.value_prop,
       campaign.booking_link,
       input.step,

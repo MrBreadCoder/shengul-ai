@@ -22,6 +22,7 @@ const publishDelayMock = vi.fn()
 const logEventMock = vi.fn()
 const enqueueCrmSyncMock = vi.fn()
 const createSequenceMock = vi.fn()
+const listKnowledgeForCaseMock = vi.fn()
 
 vi.mock('@/lib/db/sequences', () => ({
   getSequenceById: (...a: unknown[]) => getSequenceByIdMock(...a),
@@ -45,6 +46,7 @@ vi.mock('@/lib/db/leads', () => ({
 vi.mock('@/lib/db/clients', () => ({ getClientById: (...a: unknown[]) => getClientByIdMock(...a) }))
 vi.mock('@/lib/db/suppressions', () => ({ isSuppressed: (...a: unknown[]) => isSuppressedMock(...a) }))
 vi.mock('@/lib/db/campaigns', () => ({ getCampaignForCase: (...a: unknown[]) => getCampaignForCaseMock(...a) }))
+vi.mock('@/lib/db/case-knowledge', () => ({ listKnowledgeForCase: (...a: unknown[]) => listKnowledgeForCaseMock(...a) }))
 const mockCrmSyncStatuses = ['contacted', 'in_conversation', 'hot_handoff', 'won', 'lost', 'dead']
 vi.mock('@/lib/db/cases', () => ({
   recomputeCaseStatus: (...a: unknown[]) => recomputeCaseStatusMock(...a),
@@ -76,8 +78,9 @@ beforeEach(() => {
     getLeadByIdMock, getClientByIdMock, listThreadEmailsMock, claimOutboundEmailMock, markEmailSentMock,
     markEmailFailedMock, markEmailWaitingMock, isSuppressedMock, sendViaMailboxMock, generateTextMock, getCampaignForCaseMock,
     updateLeadStageMock, recomputeCaseStatusMock, publishDelayMock, logEventMock, consumeFollowupSkipMock, enqueueCrmSyncMock,
-    createSequenceMock]) m.mockReset()
+    createSequenceMock, listKnowledgeForCaseMock]) m.mockReset()
   recomputeCaseStatusMock.mockResolvedValue({ status: 'dead', didChange: true })
+  listKnowledgeForCaseMock.mockResolvedValue([])
   getSequenceByIdMock.mockResolvedValue({ ...sequence, skip_next_step: false })
   consumeFollowupSkipMock.mockResolvedValue(false)
   hasInboundReplyMock.mockResolvedValue(false)
@@ -372,6 +375,91 @@ describe('runFollowupStep', () => {
       expect.anything(),
       expect.objectContaining({ prompt: expect.stringContaining('About our company:\nAcme builds inventory software for retailers.') }),
     )
+  })
+
+  it('should include case dossier facts, sharpest kind first, so the nudge has fresh material for a new angle', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    listKnowledgeForCaseMock.mockResolvedValue([
+      { kind: 'company', content: 'Acme was founded in 2010.' },
+      { kind: 'pain_point', content: 'Acme just lost its warehouse management vendor.' },
+    ])
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(listKnowledgeForCaseMock).toHaveBeenCalledWith(expect.anything(), 'case1')
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Additional dossier facts (pick one not already used above for your new angle):\n' +
+          '- (pain_point) Acme just lost its warehouse management vendor.\n' +
+          '- (company) Acme was founded in 2010.',
+        ),
+      }),
+    )
+  })
+
+  it('should omit the dossier section when the case has no knowledge rows', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+
+    await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: expect.not.stringContaining('Additional dossier facts') }),
+    )
+  })
+
+  it('should retry once when the model writes its own sign-off, then send the clean retry', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    generateTextMock
+      .mockResolvedValueOnce('Just following up, Jane.\n\nBest regards,\nCihat')
+      .mockResolvedValueOnce('Still following up, Jane.')
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('sent')
+    expect(generateTextMock).toHaveBeenCalledTimes(2)
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ body: 'Still following up, Jane.' }),
+    )
+  })
+
+  it('should retry once when the model output is truncated mid-sentence, then send the complete retry', async () => {
+    claimOutboundEmailMock.mockResolvedValue({ id: 'e2' })
+    sendViaMailboxMock.mockResolvedValue({ mailboxId: 'm1', providerMessageId: '<b@mail>', threadId: 'thr1' })
+    publishDelayMock.mockResolvedValue('qmsg2')
+    generateTextMock
+      .mockResolvedValueOnce('Would it be helpful to')
+      .mockResolvedValueOnce('Would it be helpful to see our lead times?')
+
+    const result = await runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })
+
+    expect(result.action).toBe('sent')
+    expect(generateTextMock).toHaveBeenCalledTimes(2)
+    expect(claimOutboundEmailMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ body: 'Would it be helpful to see our lead times?' }),
+    )
+  })
+
+  it('should throw and never send when generation is invalid twice in a row', async () => {
+    generateTextMock
+      .mockResolvedValueOnce('Would it be helpful to')
+      .mockResolvedValueOnce('')
+
+    await expect(runFollowupStep({} as never, { sequenceId: 'seq1', step: 1 })).rejects.toThrow(
+      'Follow-up generation produced an incomplete or malformed body twice',
+    )
+    expect(claimOutboundEmailMock).not.toHaveBeenCalled()
+    expect(sendViaMailboxMock).not.toHaveBeenCalled()
   })
 })
 
